@@ -166,6 +166,17 @@ def test_status_without_flags_defaults_to_overview(tmp_path: Path):
     assert "overview.html" in result.output
 
 
+def test_overview_dashboard_does_not_embed_absolute_repo_path(tmp_path: Path):
+    repo = _repo_with_dashboard_data(tmp_path)
+
+    result = CliRunner().invoke(cli, ["status", "--overview"], obj={"cwd": repo})
+
+    assert result.exit_code == 0
+    overview_html = (repo / "overview.html").read_text(encoding="utf-8")
+    assert repo.as_posix() not in overview_html
+    assert f">{repo.name}<" in overview_html
+
+
 def test_status_missing_project_or_epic_is_user_facing(tmp_path: Path):
     repo = _repo_with_dashboard_data(tmp_path)
     runner = CliRunner()

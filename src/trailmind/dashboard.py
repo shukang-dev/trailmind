@@ -27,7 +27,7 @@ def render_overview(repo_root: Path) -> Path:
         output_path,
         {
             "title": "Trailmind Overview",
-            "repo_root": repo_root,
+            "repo_name": repo_root.name,
             "projects": projects,
             "project_count": len(projects),
             "epic_count": sum(project["epic_count"] for project in projects),

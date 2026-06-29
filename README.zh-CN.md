@@ -17,9 +17,9 @@ Trailmind 面向人类与 AI 代理协作。创建 Project 和 Epic 时会生成
 从源码安装 Trailmind：
 
 ```sh
-python -m venv .venv
+python3.11 -m venv .venv
 . .venv/bin/activate
-pip install -e ".[dev]"
+python -m pip install -e ".[dev]"
 ```
 
 创建一个演示仓库，并添加公开样例用户：
@@ -111,7 +111,7 @@ trailmind scan
 - 通过 `depends_on`、`soft_depends_on` 和关联 Issue 表达任务依赖。
 - 为 overview、project 和 epic 作用域生成 HTML 仪表盘。
 - 通过 `trailmind serve` 启动本地仪表盘服务。
-- Git 安全辅助能力，只暂存和提交指定路径。
+- 库级 Git 安全辅助函数，只暂存和提交指定路径。
 - 发布扫描会检查非 example.com 邮箱、敏感环境文件、疑似令牌文本和被阻止的发布标记。
 - 生成 `AGENTS.md` 协议文件，支持人类与 AI 代理交接。
 

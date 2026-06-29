@@ -26,9 +26,9 @@ expected context, and safe operating boundaries for agents working in the repo.
 Install Trailmind from a checkout:
 
 ```sh
-python -m venv .venv
+python3.11 -m venv .venv
 . .venv/bin/activate
-pip install -e ".[dev]"
+python -m pip install -e ".[dev]"
 ```
 
 Create a demo repository and add a public fixture user:
@@ -120,7 +120,7 @@ trailmind scan
 - Task dependencies through `depends_on`, `soft_depends_on`, and linked issues.
 - Generated dashboard HTML for overview, project, and epic scopes.
 - Local dashboard server with `trailmind serve`.
-- Git safety helpers that stage and commit only requested paths.
+- Library-level Git safety helpers that stage and commit only requested paths.
 - Release scan for non-example emails, sensitive environment files, token-like
   text, and blocked release markers.
 - Generated `AGENTS.md` protocol files for human and AI agent handoff.
