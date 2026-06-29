@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import hashlib
+from collections.abc import Mapping
 from dataclasses import dataclass
 from pathlib import Path
 
@@ -17,6 +18,44 @@ class Developer:
     name: str
 
 
+_REQUIRED_DEVELOPER_KEYS = {"email", "shortname", "uid", "name"}
+
+
+def _invalid_roster(message: str) -> TrailmindError:
+    return TrailmindError(f"invalid roster.yaml: {message}")
+
+
+def _normalize_uid(raw: object) -> str:
+    if type(raw) is int:
+        uid = str(raw)
+    elif isinstance(raw, str):
+        uid = raw.strip()
+    else:
+        raise ValueError("uid must be exactly six digits")
+    if not uid.isdigit() or len(uid) != 6:
+        raise ValueError("uid must be exactly six digits")
+    return uid
+
+
+def _developer_from_item(item: object, index: int) -> Developer:
+    if not isinstance(item, Mapping):
+        raise _invalid_roster(f"developer #{index} must be a mapping")
+    missing_keys = _REQUIRED_DEVELOPER_KEYS.difference(item)
+    if missing_keys:
+        missing = ", ".join(sorted(missing_keys))
+        raise _invalid_roster(f"developer #{index} missing required field(s): {missing}")
+    try:
+        uid = _normalize_uid(item["uid"])
+    except ValueError as exc:
+        raise _invalid_roster(str(exc)) from exc
+    return Developer(
+        email=str(item["email"]).strip().lower(),
+        shortname=str(item["shortname"]),
+        uid=uid,
+        name=str(item["name"]),
+    )
+
+
 def developer_uid(email: str) -> str:
     digest = hashlib.sha256(email.strip().lower().encode("utf-8")).hexdigest()
     return f"{int(digest[:10], 16) % 1_000_000:06d}"
@@ -31,18 +70,29 @@ class Roster:
     def load(cls, path: Path) -> "Roster":
         if not path.exists():
             return cls(path)
-        data = yaml.safe_load(path.read_text(encoding="utf-8")) or {}
+        try:
+            loaded = yaml.safe_load(path.read_text(encoding="utf-8"))
+        except yaml.YAMLError as exc:
+            raise _invalid_roster(str(exc)) from exc
+        data = {} if loaded is None else loaded
+        if not isinstance(data, Mapping):
+            raise _invalid_roster("top-level document must be a mapping")
         raw_developers = data.get("developers", [])
-        developers = [
-            Developer(
-                email=str(item["email"]),
-                shortname=str(item["shortname"]),
-                uid=f"{int(item['uid']):06d}" if isinstance(item["uid"], int) else str(item["uid"]),
-                name=str(item["name"]),
-            )
-            for item in raw_developers
-        ]
-        return cls(path, developers)
+        if not isinstance(raw_developers, list):
+            raise _invalid_roster("developers must be a list")
+        roster = cls(path)
+        for index, item in enumerate(raw_developers, start=1):
+            developer = _developer_from_item(item, index)
+            try:
+                roster.add(
+                    email=developer.email,
+                    shortname=developer.shortname,
+                    name=developer.name,
+                    uid=developer.uid,
+                )
+            except ValueError as exc:
+                raise _invalid_roster(str(exc)) from exc
+        return roster
 
     def add(self, *, email: str, shortname: str, name: str, uid: str | None = None) -> Developer:
         normalized = email.strip().lower()
