@@ -70,3 +70,20 @@ def test_round_trip_quotes_nested_strings_yaml_would_reinterpret(tmp_path: Path)
     frontmatter, body = read_entity(path)
     assert frontmatter == {"tags": ["yes"], "metadata": {"flag": "no"}}
     assert body == "body\n"
+
+
+def test_round_trip_preserves_safe_nested_comments_while_quoting_unsafe_sibling(tmp_path: Path):
+    path = tmp_path / "task.md"
+    path.write_text(
+        "---\nmetadata:\n  safe: unchanged # keep me\n  flag: yes\n---\nbody\n",
+        encoding="utf-8",
+    )
+
+    write_entity(path, frontmatter={"metadata": {"safe": "unchanged", "flag": "yes"}}, body="body\n")
+
+    text = path.read_text(encoding="utf-8")
+    assert "safe: unchanged # keep me" in text
+    assert "flag: 'yes'" in text
+    frontmatter, body = read_entity(path)
+    assert frontmatter == {"metadata": {"safe": "unchanged", "flag": "yes"}}
+    assert body == "body\n"
