@@ -44,15 +44,9 @@ _TOKEN_PATTERNS = (
     ),
     re.compile(r"\bBearer\s+[A-Za-z0-9._~+/=-]{20,}\b", re.IGNORECASE),
 )
-_BLOCKED_TERM_PARTS = (
-    ("team", "work"),
-    ("byte", "dance"),
-    ("cheng", "ming"),
-)
 _BLOCKED_TERM_RE = re.compile(
-    r"\b(?:"
-    + "|".join(re.escape("".join(parts)) for parts in _BLOCKED_TERM_PARTS)
-    + r")\b",
+    r"\b(?:internal[-_]only|proprietary[-_]system|private[-_]fixture)\b"
+    r"|/(?:internal|private)/",
     re.IGNORECASE,
 )
 

@@ -64,8 +64,8 @@ def test_stage_paths_rejects_outside_repo_and_does_not_stage_unrelated_file(tmp_
 
 def test_commit_paths_commits_only_requested_paths(tmp_path: Path):
     _init_repo(tmp_path)
-    _git(tmp_path, "config", "user.email", "alice@example.com")
-    _git(tmp_path, "config", "user.name", "Alice")
+    _git(tmp_path, "config", "user.email", "user@example.com")
+    _git(tmp_path, "config", "user.name", "Example User")
     requested = tmp_path / "requested.txt"
     unrelated = tmp_path / "unrelated.txt"
     requested.write_text("before\n", encoding="utf-8")
@@ -81,3 +81,22 @@ def test_commit_paths_commits_only_requested_paths(tmp_path: Path):
     changed = _git(tmp_path, "show", "--name-only", "--format=", "HEAD").stdout.splitlines()
     assert changed == ["requested.txt"]
     assert _staged_paths(tmp_path) == ["unrelated.txt"]
+
+
+def test_commit_paths_reports_git_commit_failure_without_raw_exception(tmp_path: Path):
+    _init_repo(tmp_path)
+    _git(tmp_path, "config", "user.email", "user@example.com")
+    _git(tmp_path, "config", "user.name", "Example User")
+    requested = tmp_path / "requested.txt"
+    requested.write_text("unchanged\n", encoding="utf-8")
+    _git(tmp_path, "add", "--", "requested.txt")
+    _git(tmp_path, "commit", "-m", "initial")
+
+    with pytest.raises(TrailmindError) as exc_info:
+        commit_paths(tmp_path, [requested], "no changes")
+
+    message = str(exc_info.value)
+    assert "git commit failed" in message
+    assert "CalledProcessError" not in message
+    assert "CompletedProcess" not in message
+    assert "Traceback" not in message
