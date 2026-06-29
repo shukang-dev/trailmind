@@ -22,9 +22,6 @@ def status_command() -> None:
 def main() -> None:
     try:
         cli.main(standalone_mode=False)
-    except TrailmindError as exc:
-        click.echo(f"error: {exc}", err=True)
-        sys.exit(1)
     except click.ClickException as exc:
         exc.show()
         sys.exit(exc.exit_code)
