@@ -185,6 +185,49 @@ def test_task_close_sanitizes_multiline_note_before_logging(tmp_path: Path):
     assert "\n## Injected\n" not in body
 
 
+def test_task_close_sanitizes_multiline_closer_before_logging(tmp_path: Path):
+    repo = _repo_with_epic(tmp_path)
+    add_result = _add_task(repo)
+    assert add_result.exit_code == 0
+
+    result = CliRunner().invoke(
+        cli,
+        ["task", "close", "T-123456-001", "--closer", "alice\n## Injected", "--note", "Done."],
+        obj={"cwd": repo},
+    )
+
+    assert result.exit_code == 0
+    assert result.exception is None
+    task_path = repo / "projects" / "demo_app" / "mvp" / "tasks" / "T-123456-001-build-login-flow.md"
+    _frontmatter, body = read_entity(task_path)
+    activity_lines = [
+        line
+        for line in body.splitlines()[body.splitlines().index("## Activity Log") + 1 :]
+        if line.strip()
+    ]
+    closed_lines = [line for line in activity_lines if "Closed by alice ## Injected" in line]
+    assert closed_lines == [f"- {date.today().isoformat()}: Closed by alice ## Injected. Done."]
+    assert all(line.startswith("- ") for line in activity_lines)
+    assert "\n## Injected" not in body
+
+
+def test_task_close_rejects_blank_closer(tmp_path: Path):
+    repo = _repo_with_epic(tmp_path)
+    add_result = _add_task(repo)
+    assert add_result.exit_code == 0
+
+    result = CliRunner().invoke(
+        cli,
+        ["task", "close", "T-123456-001", "--closer", " \n\t", "--note", "Done."],
+        obj={"cwd": repo},
+    )
+
+    assert result.exit_code == 1
+    assert "error:" in result.output
+    assert "activity actor is required" in result.output
+    assert "Traceback" not in result.output
+
+
 def test_task_update_invalid_status_is_user_facing(tmp_path: Path):
     repo = _repo_with_epic(tmp_path)
     add_result = _add_task(repo)

@@ -71,10 +71,18 @@ def _initial_body(title: str, filer: str) -> str:
     )
 
 
+def _activity_text(value: str) -> str:
+    return " ".join(value.split())
+
+
 def _activity_entry(action: str, actor: str, note: str | None = None) -> str:
-    entry = f"- {date.today().isoformat()}: {action} by {actor}."
-    if note:
-        sanitized_note = " ".join(note.split())
+    sanitized_actor = _activity_text(actor)
+    if not sanitized_actor:
+        raise TrailmindError("activity actor is required")
+
+    entry = f"- {date.today().isoformat()}: {action} by {sanitized_actor}."
+    if note is not None:
+        sanitized_note = _activity_text(note)
         if sanitized_note:
             entry = f"{entry} {sanitized_note}"
     return entry
