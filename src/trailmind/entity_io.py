@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from collections.abc import Mapping, Sequence
 import io
 import re
 from pathlib import Path
@@ -7,7 +8,7 @@ from typing import Any
 
 import yaml
 from ruamel.yaml import YAML
-from ruamel.yaml.comments import CommentedMap
+from ruamel.yaml.comments import CommentedMap, CommentedSeq
 from ruamel.yaml.scalarstring import SingleQuotedScalarString
 
 
@@ -29,6 +30,31 @@ def _coerce(value: Any) -> Any:
     if isinstance(value, str) and _needs_quote(value):
         return SingleQuotedScalarString(value)
     return value
+
+
+def _coerce_tree(value: Any) -> Any:
+    if isinstance(value, str):
+        return _coerce(value)
+    if isinstance(value, Mapping):
+        mapped = CommentedMap()
+        for key, item in value.items():
+            mapped[key] = _coerce_tree(item)
+        return mapped
+    if isinstance(value, Sequence) and not isinstance(value, (str, bytes, bytearray)):
+        seq = CommentedSeq()
+        seq.extend(_coerce_tree(item) for item in value)
+        return seq
+    return value
+
+
+def _contains_unsafe_yaml_string(value: Any) -> bool:
+    if isinstance(value, str):
+        return _needs_quote(value)
+    if isinstance(value, Mapping):
+        return any(_contains_unsafe_yaml_string(item) for item in value.values())
+    if isinstance(value, Sequence) and not isinstance(value, (str, bytes, bytearray)):
+        return any(_contains_unsafe_yaml_string(item) for item in value)
+    return False
 
 
 def read_entity(path: Path) -> tuple[dict[str, Any], str]:
@@ -67,10 +93,10 @@ def write_entity(path: Path, *, frontmatter: dict[str, Any], body: str) -> None:
         if not isinstance(data, CommentedMap):
             data = CommentedMap()
         for key, value in frontmatter.items():
-            needs_requoting = isinstance(value, str) and _needs_quote(value)
+            needs_requoting = _contains_unsafe_yaml_string(value)
             if key in data and data[key] == value and not needs_requoting:
                 continue
-            data[key] = _coerce(value)
+            data[key] = _coerce_tree(value)
         for key in list(data.keys()):
             if key not in frontmatter:
                 del data[key]

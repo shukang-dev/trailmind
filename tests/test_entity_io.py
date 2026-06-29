@@ -56,3 +56,17 @@ def test_round_trip_quotes_unchanged_strings_yaml_would_reinterpret(tmp_path: Pa
     frontmatter, body = read_entity(path)
     assert frontmatter["flag"] == "yes"
     assert body == "body\n"
+
+
+def test_round_trip_quotes_nested_strings_yaml_would_reinterpret(tmp_path: Path):
+    path = tmp_path / "task.md"
+    path.write_text("---\ntags: [yes]\nmetadata:\n  flag: no\n---\nbody\n", encoding="utf-8")
+
+    write_entity(path, frontmatter={"tags": ["yes"], "metadata": {"flag": "no"}}, body="body\n")
+
+    text = path.read_text(encoding="utf-8")
+    assert "'yes'" in text
+    assert "'no'" in text
+    frontmatter, body = read_entity(path)
+    assert frontmatter == {"tags": ["yes"], "metadata": {"flag": "no"}}
+    assert body == "body\n"
