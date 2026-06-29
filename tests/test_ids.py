@@ -2,12 +2,16 @@ from pathlib import Path
 
 import pytest
 
-from trailmind.ids import EntityId, next_entity_id, parse_entity_id, slugify
+from trailmind.ids import EntityId, format_entity_id, next_entity_id, parse_entity_id, slugify
 from trailmind.paths import find_repo_root
 
 
 def test_parse_task_id():
     assert parse_entity_id("T-123456-007") == EntityId(entity="T", uid="123456", number=7)
+
+
+def test_parse_issue_id():
+    assert parse_entity_id("I-123456-002") == EntityId(entity="I", uid="123456", number=2)
 
 
 def test_parse_milestone_id():
@@ -17,6 +21,20 @@ def test_parse_milestone_id():
 def test_parse_rejects_invalid_id():
     with pytest.raises(ValueError, match="invalid entity id"):
         parse_entity_id("TASK-1")
+
+
+def test_format_entity_id_validates_inputs():
+    assert format_entity_id("T", 1, "123456") == "T-123456-001"
+    assert format_entity_id("I", 2, "123456") == "I-123456-002"
+    assert format_entity_id("M", 3) == "M-003"
+    with pytest.raises(ValueError, match="entity must be"):
+        format_entity_id("X", 1, "123456")
+    with pytest.raises(ValueError, match="uid must be six digits"):
+        format_entity_id("T", 1, "abc")
+    with pytest.raises(ValueError, match="number must be positive"):
+        format_entity_id("T", 0, "123456")
+    with pytest.raises(ValueError, match="uid is not allowed for Milestone IDs"):
+        format_entity_id("M", 1, "123456")
 
 
 def test_next_entity_id_uses_existing_files(tmp_path: Path):
@@ -29,6 +47,13 @@ def test_next_entity_id_uses_existing_files(tmp_path: Path):
     assert next_entity_id(tasks, entity="T", uid="123456") == "T-123456-004"
 
 
+def test_next_entity_id_ignores_non_markdown_files(tmp_path: Path):
+    tasks = tmp_path / "tasks"
+    tasks.mkdir()
+    (tasks / "T-123456-099-backup.txt").write_text("", encoding="utf-8")
+    assert next_entity_id(tasks, entity="T", uid="123456") == "T-123456-001"
+
+
 def test_next_milestone_id(tmp_path: Path):
     milestones = tmp_path / "milestones"
     milestones.mkdir()
@@ -39,6 +64,10 @@ def test_next_milestone_id(tmp_path: Path):
 
 def test_slugify_title():
     assert slugify("Build CLI: Task Add!") == "build-cli-task-add"
+
+
+def test_slugify_strips_hyphen_after_truncation():
+    assert not slugify("a" * 59 + " b").endswith("-")
 
 
 def test_find_repo_root(tmp_path: Path):

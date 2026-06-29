@@ -7,6 +7,7 @@ from pathlib import Path
 
 ID_RE = re.compile(r"^(?P<entity>[TI])-(?P<uid>\d{6})-(?P<number>\d{3,})$")
 MILESTONE_RE = re.compile(r"^M-(?P<number>\d{3,})$")
+UID_RE = re.compile(r"^\d{6}$")
 
 
 @dataclass(frozen=True)
@@ -31,10 +32,16 @@ def parse_entity_id(raw: str) -> EntityId:
 
 
 def format_entity_id(entity: str, number: int, uid: str | None = None) -> str:
+    if entity not in {"T", "I", "M"}:
+        raise ValueError("entity must be one of T, I, M")
+    if number <= 0:
+        raise ValueError("number must be positive")
     if entity == "M":
+        if uid is not None:
+            raise ValueError("uid is not allowed for Milestone IDs")
         return f"M-{number:03d}"
-    if uid is None:
-        raise ValueError("uid is required for Task and Issue IDs")
+    if uid is None or not UID_RE.fullmatch(uid):
+        raise ValueError("uid must be six digits")
     return f"{entity}-{uid}-{number:03d}"
 
 
@@ -42,7 +49,9 @@ def next_entity_id(folder: Path, *, entity: str, uid: str | None = None) -> str:
     max_number = 0
     if folder.exists():
         for path in folder.iterdir():
-            stem = path.name.split("-", 3)
+            if path.suffix != ".md":
+                continue
+            stem = path.stem.split("-", 3)
             raw = "-".join(stem[:3]) if entity in {"T", "I"} else "-".join(stem[:2])
             try:
                 parsed = parse_entity_id(raw)
@@ -58,4 +67,4 @@ def next_entity_id(folder: Path, *, entity: str, uid: str | None = None) -> str:
 
 def slugify(title: str) -> str:
     slug = re.sub(r"[^a-z0-9]+", "-", title.lower()).strip("-")
-    return slug[:60] or "untitled"
+    return slug[:60].strip("-") or "untitled"
