@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import re
 from collections import Counter
 from pathlib import Path, PurePosixPath, PureWindowsPath
 from typing import Any
@@ -9,6 +10,13 @@ from jinja2 import Environment, FileSystemLoader
 from trailmind.entity_io import EntityFormatError, read_entity
 from trailmind.errors import TrailmindError
 from trailmind.paths import validate_path_component
+
+
+_ENTITY_FILENAME_RE = {
+    "task": re.compile(r"^T-\d{6}-\d{3,}(?:-[a-z0-9]+(?:-[a-z0-9]+)*)?$"),
+    "issue": re.compile(r"^I-\d{6}-\d{3,}(?:-[a-z0-9]+(?:-[a-z0-9]+)*)?$"),
+    "milestone": re.compile(r"^M-\d{3,}(?:-[a-z0-9]+(?:-[a-z0-9]+)*)?$"),
+}
 
 
 def render_overview(repo_root: Path) -> Path:
@@ -220,9 +228,9 @@ def _epic_summary(repo_root: Path, epic_path: Path, *, include_children: bool) -
     else:
         epic.update(
             {
-                "task_count": _markdown_count(epic_path / "tasks"),
-                "issue_count": _markdown_count(epic_path / "issues"),
-                "milestone_count": _markdown_count(epic_path / "milestones"),
+                "task_count": _markdown_count(epic_path / "tasks", label="task"),
+                "issue_count": _markdown_count(epic_path / "issues", label="issue"),
+                "milestone_count": _markdown_count(epic_path / "milestones", label="milestone"),
             }
         )
     return epic
@@ -234,7 +242,7 @@ def _entity_summaries(repo_root: Path, directory: Path, *, label: str) -> list[d
     if not directory.is_dir():
         raise TrailmindError(f"{label}s path {directory} is not a directory")
     entities = []
-    for path in sorted(directory.glob("*.md")):
+    for path in _entity_markdown_files(directory, label=label):
         frontmatter, body = _read_entity_user_facing(path, label=label)
         entities.append(
             {
@@ -254,10 +262,19 @@ def _entity_summaries(repo_root: Path, directory: Path, *, label: str) -> list[d
     return entities
 
 
-def _markdown_count(directory: Path) -> int:
+def _entity_markdown_files(directory: Path, *, label: str) -> list[Path]:
+    filename_re = _ENTITY_FILENAME_RE[label]
+    return sorted(
+        path
+        for path in directory.glob("*.md")
+        if path.is_file() and filename_re.fullmatch(path.stem)
+    )
+
+
+def _markdown_count(directory: Path, *, label: str) -> int:
     if not directory.exists() or not directory.is_dir():
         return 0
-    return sum(1 for _path in directory.glob("*.md"))
+    return len(_entity_markdown_files(directory, label=label))
 
 
 def _status_counts(items: list[dict[str, Any]], key: str) -> list[dict[str, Any]]:

@@ -183,7 +183,43 @@ def test_status_missing_project_or_epic_is_user_facing(tmp_path: Path):
     assert "Traceback" not in epic_result.output
 
 
-def test_status_malformed_task_or_issue_frontmatter_is_user_facing(tmp_path: Path):
+def test_status_ignores_unrelated_markdown_in_entity_dirs(tmp_path: Path):
+    repo = _repo_with_dashboard_data(tmp_path)
+    epic_dir = repo / "projects" / "demo_app" / "mvp"
+    ignored_filenames = {
+        "tasks": ["README.md", "T-123456-999-Bad.md", "T-123456-999I-123456-001.md"],
+        "issues": ["README.md", "I-123456-999-Bad.md", "I-123456-999T-123456-001.md"],
+        "milestones": ["README.md", "M-999-Bad.md", "M-999M-100.md"],
+    }
+    for directory, filenames in ignored_filenames.items():
+        for filename in filenames:
+            (epic_dir / directory / filename).write_text("plain markdown\n", encoding="utf-8")
+
+    runner = CliRunner()
+    project_result = runner.invoke(cli, ["status", "--project", "demo_app"], obj={"cwd": repo})
+    assert project_result.exit_code == 0
+    project_html = (repo / "projects" / "demo_app" / "dashboard.html").read_text(encoding="utf-8")
+    assert "1 tasks, 1 issues, 1 milestones" in project_html
+    assert "README" not in project_html
+    assert "Bad" not in project_html
+    assert "999I" not in project_html
+    assert "999T" not in project_html
+    assert "999M" not in project_html
+
+    epic_result = runner.invoke(cli, ["status", "--epic", "projects/demo_app/mvp"], obj={"cwd": repo})
+    assert epic_result.exit_code == 0
+    epic_html = (epic_dir / "dashboard.html").read_text(encoding="utf-8")
+    assert "<strong>1</strong><span>Tasks</span>" in epic_html
+    assert "<strong>1</strong><span>Issues</span>" in epic_html
+    assert "<strong>1</strong><span>Milestones</span>" in epic_html
+    assert "README" not in epic_html
+    assert "Bad" not in epic_html
+    assert "999I" not in epic_html
+    assert "999T" not in epic_html
+    assert "999M" not in epic_html
+
+
+def test_status_malformed_task_issue_or_milestone_frontmatter_is_user_facing(tmp_path: Path):
     repo = _repo_with_dashboard_data(tmp_path)
     task_path = repo / "projects" / "demo_app" / "mvp" / "tasks" / "T-123456-999-bad.md"
     task_path.write_text("---\n: bad\n---\n# Bad\n", encoding="utf-8")
@@ -203,6 +239,16 @@ def test_status_malformed_task_or_issue_frontmatter_is_user_facing(tmp_path: Pat
     assert "error:" in issue_result.output
     assert "missing YAML frontmatter" in issue_result.output
     assert "Traceback" not in issue_result.output
+
+    issue_path.unlink()
+    milestone_path = repo / "projects" / "demo_app" / "mvp" / "milestones" / "M-999-bad.md"
+    milestone_path.write_text("plain markdown\n", encoding="utf-8")
+
+    milestone_result = CliRunner().invoke(cli, ["status", "--epic", "projects/demo_app/mvp"], obj={"cwd": repo})
+    assert milestone_result.exit_code == 1
+    assert "error:" in milestone_result.output
+    assert "missing YAML frontmatter" in milestone_result.output
+    assert "Traceback" not in milestone_result.output
 
 
 def test_serve_command_invokes_static_server(monkeypatch, tmp_path: Path):
