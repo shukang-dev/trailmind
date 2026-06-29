@@ -23,6 +23,12 @@ def test_parse_rejects_invalid_id():
         parse_entity_id("TASK-1")
 
 
+@pytest.mark.parametrize("raw_id", ["T-123456-000", "I-123456-000", "M-000"])
+def test_parse_rejects_zero_sequence_ids(raw_id: str):
+    with pytest.raises(ValueError, match="invalid entity id"):
+        parse_entity_id(raw_id)
+
+
 def test_format_entity_id_validates_inputs():
     assert format_entity_id("T", 1, "123456") == "T-123456-001"
     assert format_entity_id("I", 2, "123456") == "I-123456-002"

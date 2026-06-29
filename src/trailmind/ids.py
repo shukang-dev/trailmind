@@ -17,17 +17,28 @@ class EntityId:
     number: int
 
 
+def _positive_number(raw: str, value: str) -> int:
+    number = int(value)
+    if number <= 0:
+        raise ValueError(f"invalid entity id: {raw}")
+    return number
+
+
 def parse_entity_id(raw: str) -> EntityId:
     match = ID_RE.match(raw)
     if match:
         return EntityId(
             entity=match.group("entity"),
             uid=match.group("uid"),
-            number=int(match.group("number")),
+            number=_positive_number(raw, match.group("number")),
         )
     milestone = MILESTONE_RE.match(raw)
     if milestone:
-        return EntityId(entity="M", uid=None, number=int(milestone.group("number")))
+        return EntityId(
+            entity="M",
+            uid=None,
+            number=_positive_number(raw, milestone.group("number")),
+        )
     raise ValueError(f"invalid entity id: {raw}")
 
 
