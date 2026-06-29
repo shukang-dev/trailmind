@@ -67,7 +67,8 @@ def write_entity(path: Path, *, frontmatter: dict[str, Any], body: str) -> None:
         if not isinstance(data, CommentedMap):
             data = CommentedMap()
         for key, value in frontmatter.items():
-            if key in data and data[key] == value:
+            needs_requoting = isinstance(value, str) and _needs_quote(value)
+            if key in data and data[key] == value and not needs_requoting:
                 continue
             data[key] = _coerce(value)
         for key in list(data.keys()):

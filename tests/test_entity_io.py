@@ -43,3 +43,16 @@ def test_update_preserves_body(tmp_path: Path):
     frontmatter, body = read_entity(path)
     assert frontmatter["status"] == "done"
     assert body == "## Description\n\nBug.\n"
+
+
+def test_round_trip_quotes_unchanged_strings_yaml_would_reinterpret(tmp_path: Path):
+    path = tmp_path / "task.md"
+    path.write_text("---\nflag: yes\n---\nbody\n", encoding="utf-8")
+
+    write_entity(path, frontmatter={"flag": "yes"}, body="body\n")
+
+    text = path.read_text(encoding="utf-8")
+    assert "flag: 'yes'" in text
+    frontmatter, body = read_entity(path)
+    assert frontmatter["flag"] == "yes"
+    assert body == "body\n"
