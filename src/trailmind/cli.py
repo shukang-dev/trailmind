@@ -6,8 +6,10 @@ from pathlib import Path
 import click
 
 from trailmind import __version__
+from trailmind.epic import init_epic
 from trailmind.errors import TrailmindError
 from trailmind.paths import find_repo_root
+from trailmind.project import init_project
 from trailmind.roster import Roster
 
 
@@ -26,6 +28,15 @@ def _cwd_from_context(ctx: click.Context) -> Path:
     if ctx.obj and "cwd" in ctx.obj:
         return Path(ctx.obj["cwd"])
     return Path.cwd()
+
+
+def _csv(value: str) -> list[str]:
+    return [item.strip() for item in value.split(",") if item.strip()]
+
+
+def _echo_touched(repo_root: Path, paths: list[Path]) -> None:
+    for path in paths:
+        click.echo(path.relative_to(repo_root).as_posix())
 
 
 @cli.group("roster")
@@ -57,6 +68,65 @@ def roster_list(ctx: click.Context) -> None:
     roster = Roster.load(root / "roster.yaml")
     for developer in roster.developers:
         click.echo(f"{developer.shortname}\t{developer.email}\t{developer.uid}\t{developer.name}")
+
+
+@cli.group("project")
+def project_group() -> None:
+    """Manage projects."""
+
+
+@project_group.command("init")
+@click.option("--slug", required=True)
+@click.option("--title", required=True)
+@click.option("--goal", required=True)
+@click.option("--owners", default="")
+@click.option("--tags", default="")
+@click.pass_context
+def project_init(ctx: click.Context, slug: str, title: str, goal: str, owners: str, tags: str) -> None:
+    root = find_repo_root(_cwd_from_context(ctx))
+    touched = init_project(root, slug=slug, title=title, goal=goal, owners=_csv(owners), tags=_csv(tags))
+    _echo_touched(root, touched)
+
+
+@cli.group("epic")
+def epic_group() -> None:
+    """Manage epics."""
+
+
+@epic_group.command("init")
+@click.option("--project", required=True)
+@click.option("--slug", required=True)
+@click.option("--title", required=True)
+@click.option("--goal", required=True)
+@click.option("--start", default="")
+@click.option("--target", default="")
+@click.option("--roster", default="")
+@click.option("--repos", default="")
+@click.pass_context
+def epic_init(
+    ctx: click.Context,
+    project: str,
+    slug: str,
+    title: str,
+    goal: str,
+    start: str,
+    target: str,
+    roster: str,
+    repos: str,
+) -> None:
+    root = find_repo_root(_cwd_from_context(ctx))
+    touched = init_epic(
+        root,
+        project=project,
+        slug=slug,
+        title=title,
+        goal=goal,
+        start=start,
+        target=target,
+        roster=_csv(roster),
+        repos=_csv(repos),
+    )
+    _echo_touched(root, touched)
 
 
 def main() -> None:

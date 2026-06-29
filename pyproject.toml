@@ -23,6 +23,9 @@ dev = ["pytest>=8.0"]
 [project.scripts]
 trailmind = "trailmind.cli:main"
 
+[tool.setuptools.package-data]
+trailmind = ["templates/*.j2"]
+
 [tool.pytest.ini_options]
 testpaths = ["tests"]
 pythonpath = ["src"]
