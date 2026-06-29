@@ -121,6 +121,31 @@ def test_task_update_status(tmp_path: Path):
     assert frontmatter["status"] == "in_progress"
 
 
+@pytest.mark.parametrize(
+    "args",
+    [
+        ["task", "update", "T-123456-001", "--status", "done"],
+        ["task", "close", "T-123456-001", "--closer", "alice", "--note", "Done."],
+    ],
+)
+def test_task_status_commands_handle_unreadable_task_files_as_user_errors(tmp_path: Path, args: list[str]):
+    repo = _repo_with_epic(tmp_path)
+    task_path = repo / "projects" / "demo_app" / "mvp" / "tasks" / "T-123456-001-bad.md"
+    task_path.write_bytes(b"\xff\xfe\x00not utf-8")
+
+    result = CliRunner().invoke(
+        cli,
+        args,
+        obj={"cwd": repo},
+    )
+
+    assert result.exit_code == 1
+    assert isinstance(result.exception, SystemExit)
+    assert "error:" in result.output
+    assert "could not read task file" in result.output
+    assert "Traceback" not in result.output
+
+
 def test_task_close_marks_done_and_logs(tmp_path: Path):
     repo = _repo_with_epic(tmp_path)
     add_result = _add_task(repo)
@@ -138,6 +163,26 @@ def test_task_close_marks_done_and_logs(tmp_path: Path):
     assert frontmatter["status"] == "done"
     assert "Shipped login flow." in body
     assert body.index("## Activity Log") < body.index("Shipped login flow.")
+
+
+def test_task_close_sanitizes_multiline_note_before_logging(tmp_path: Path):
+    repo = _repo_with_epic(tmp_path)
+    add_result = _add_task(repo)
+    assert add_result.exit_code == 0
+
+    result = CliRunner().invoke(
+        cli,
+        ["task", "close", "T-123456-001", "--closer", "alice", "--note", "done\n## Injected\ntext"],
+        obj={"cwd": repo},
+    )
+
+    assert result.exit_code == 0
+    assert result.exception is None
+    task_path = repo / "projects" / "demo_app" / "mvp" / "tasks" / "T-123456-001-build-login-flow.md"
+    _frontmatter, body = read_entity(task_path)
+    activity_line = next(line for line in body.splitlines() if "Closed by alice" in line)
+    assert activity_line.endswith("done ## Injected text")
+    assert "\n## Injected\n" not in body
 
 
 def test_task_update_invalid_status_is_user_facing(tmp_path: Path):
@@ -180,6 +225,22 @@ def test_task_add_unknown_filer_is_user_facing(tmp_path: Path):
     assert result.exit_code == 1
     assert "error:" in result.output
     assert "missing@example.com is not registered in roster.yaml" in result.output
+    assert "Traceback" not in result.output
+
+
+def test_task_add_when_tasks_path_is_file_is_user_facing(tmp_path: Path):
+    repo = _repo_with_epic(tmp_path)
+    tasks_path = repo / "projects" / "demo_app" / "mvp" / "tasks"
+    tasks_path.rmdir()
+    tasks_path.write_text("not a directory\n", encoding="utf-8")
+
+    result = _add_task(repo)
+
+    assert result.exit_code == 1
+    assert isinstance(result.exception, SystemExit)
+    assert "error:" in result.output
+    assert "tasks path" in result.output
+    assert "not a directory" in result.output
     assert "Traceback" not in result.output
 
 

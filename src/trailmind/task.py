@@ -52,6 +52,10 @@ def _read_entity_user_facing(path: Path) -> tuple[dict[str, object], str]:
         return read_entity(path)
     except EntityFormatError as exc:
         raise TrailmindError(str(exc)) from exc
+    except UnicodeDecodeError as exc:
+        raise TrailmindError(f"could not read task file {path}: file must be valid UTF-8") from exc
+    except OSError as exc:
+        raise TrailmindError(f"could not read task file {path}: {exc}") from exc
 
 
 def _initial_body(title: str, filer: str) -> str:
@@ -70,8 +74,16 @@ def _initial_body(title: str, filer: str) -> str:
 def _activity_entry(action: str, actor: str, note: str | None = None) -> str:
     entry = f"- {date.today().isoformat()}: {action} by {actor}."
     if note:
-        entry = f"{entry} {note}"
+        sanitized_note = " ".join(note.split())
+        if sanitized_note:
+            entry = f"{entry} {sanitized_note}"
     return entry
+
+
+def _ensure_tasks_directory(tasks_path: Path) -> None:
+    if tasks_path.exists() and not tasks_path.is_dir():
+        raise TrailmindError(f"tasks path {tasks_path} is not a directory")
+    tasks_path.mkdir(parents=True, exist_ok=True)
 
 
 def _append_activity_entry(body: str, entry: str) -> str:
@@ -128,6 +140,7 @@ def add_task(
     owner_shortname = roster.require_shortname(owner)
 
     tasks_path = epic_path / "tasks"
+    _ensure_tasks_directory(tasks_path)
     task_id = next_entity_id(tasks_path, entity="T", uid=filer_uid)
     task_path = tasks_path / f"{task_id}-{slugify(title)}.md"
     write_entity(
