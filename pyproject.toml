@@ -1,0 +1,28 @@
+[build-system]
+requires = ["setuptools>=68", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "trailmind"
+version = "0.1.0"
+description = "Markdown-backed project tracking and AI agent handoff."
+readme = "README.md"
+requires-python = ">=3.11"
+license = { text = "MIT" }
+authors = [{ name = "Trailmind Contributors" }]
+dependencies = [
+  "click>=8.1",
+  "jinja2>=3.1",
+  "pyyaml>=6.0",
+  "ruamel.yaml>=0.18",
+]
+
+[project.optional-dependencies]
+dev = ["pytest>=8.0"]
+
+[project.scripts]
+trailmind = "trailmind.cli:main"
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+pythonpath = ["src"]
