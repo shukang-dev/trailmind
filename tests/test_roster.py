@@ -38,9 +38,30 @@ def test_roster_add_rejects_empty_supplied_uid(tmp_path: Path):
         roster.add(email="alice@example.com", shortname="alice", name="Alice", uid="")
 
 
+@pytest.mark.parametrize(
+    ("kwargs", "message"),
+    [
+        ({"email": "", "shortname": "alice", "name": "Alice"}, "email is required"),
+        ({"email": "alice@example.com", "shortname": "", "name": "Alice"}, "shortname is required"),
+        ({"email": "alice@example.com", "shortname": "alice", "name": ""}, "name is required"),
+    ],
+)
+def test_roster_add_rejects_blank_required_fields(tmp_path: Path, kwargs: dict[str, str], message: str):
+    roster = Roster.load(tmp_path / "roster.yaml")
+    with pytest.raises(ValueError, match=message):
+        roster.add(uid="123456", **kwargs)
+
+
 def test_roster_load_rejects_invalid_yaml(tmp_path: Path):
     path = tmp_path / "roster.yaml"
     path.write_text("developers: [\n", encoding="utf-8")
+    with pytest.raises(TrailmindError, match="invalid roster.yaml"):
+        Roster.load(path)
+
+
+def test_roster_load_rejects_non_utf8_file(tmp_path: Path):
+    path = tmp_path / "roster.yaml"
+    path.write_bytes(b"\xff\xfe\x00")
     with pytest.raises(TrailmindError, match="invalid roster.yaml"):
         Roster.load(path)
 
@@ -63,6 +84,16 @@ def test_roster_load_rejects_bad_developer_shape(tmp_path: Path):
     path = tmp_path / "roster.yaml"
     path.write_text("developers:\n- email: alice@example.com\n  shortname: alice\n  name: Alice\n", encoding="utf-8")
     with pytest.raises(TrailmindError, match="invalid roster.yaml"):
+        Roster.load(path)
+
+
+def test_roster_load_rejects_null_required_field(tmp_path: Path):
+    path = tmp_path / "roster.yaml"
+    path.write_text(
+        "developers:\n- email: null\n  shortname: alice\n  uid: '123456'\n  name: Alice\n",
+        encoding="utf-8",
+    )
+    with pytest.raises(TrailmindError, match="email is required"):
         Roster.load(path)
 
 
@@ -177,6 +208,15 @@ def test_roster_cli_rejects_empty_supplied_uid(tmp_path: Path):
     )
     assert result.exit_code == 1
     assert "error: uid must be exactly six digits" in result.output
+    assert "Traceback" not in result.output
+
+
+def test_roster_cli_non_utf8_file_is_user_facing(tmp_path: Path):
+    (tmp_path / ".git").mkdir()
+    (tmp_path / "roster.yaml").write_bytes(b"\xff\xfe\x00")
+    result = CliRunner().invoke(cli, ["roster", "list"], obj={"cwd": tmp_path})
+    assert result.exit_code == 1
+    assert "error: invalid roster.yaml" in result.output
     assert "Traceback" not in result.output
 
 

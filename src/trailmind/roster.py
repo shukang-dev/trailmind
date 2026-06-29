@@ -25,6 +25,15 @@ def _invalid_roster(message: str) -> TrailmindError:
     return TrailmindError(f"invalid roster.yaml: {message}")
 
 
+def _required_text(raw: object, field: str) -> str:
+    if not isinstance(raw, str):
+        raise ValueError(f"{field} is required")
+    value = raw.strip()
+    if not value:
+        raise ValueError(f"{field} is required")
+    return value
+
+
 def _normalize_uid(raw: object) -> str:
     if type(raw) is int:
         uid = str(raw)
@@ -45,15 +54,13 @@ def _developer_from_item(item: object, index: int) -> Developer:
         missing = ", ".join(sorted(missing_keys))
         raise _invalid_roster(f"developer #{index} missing required field(s): {missing}")
     try:
+        email = _required_text(item["email"], "email").lower()
+        shortname = _required_text(item["shortname"], "shortname")
         uid = _normalize_uid(item["uid"])
+        name = _required_text(item["name"], "name")
     except ValueError as exc:
         raise _invalid_roster(str(exc)) from exc
-    return Developer(
-        email=str(item["email"]).strip().lower(),
-        shortname=str(item["shortname"]),
-        uid=uid,
-        name=str(item["name"]),
-    )
+    return Developer(email=email, shortname=shortname, uid=uid, name=name)
 
 
 def developer_uid(email: str) -> str:
@@ -71,7 +78,11 @@ class Roster:
         if not path.exists():
             return cls(path)
         try:
-            loaded = yaml.safe_load(path.read_text(encoding="utf-8"))
+            text = path.read_text(encoding="utf-8")
+        except (OSError, UnicodeDecodeError) as exc:
+            raise _invalid_roster(str(exc)) from exc
+        try:
+            loaded = yaml.safe_load(text)
         except yaml.YAMLError as exc:
             raise _invalid_roster(str(exc)) from exc
         data = {} if loaded is None else loaded
@@ -95,14 +106,14 @@ class Roster:
         return roster
 
     def add(self, *, email: str, shortname: str, name: str, uid: str | None = None) -> Developer:
-        normalized = email.strip().lower()
+        normalized = _required_text(email, "email").lower()
+        shortname = _required_text(shortname, "shortname")
+        name = _required_text(name, "name")
         if any(dev.email == normalized for dev in self.developers):
             raise ValueError(f"{normalized} is already registered")
         if any(dev.shortname == shortname for dev in self.developers):
             raise ValueError(f"shortname {shortname} is already registered")
-        final_uid = developer_uid(normalized) if uid is None else uid.strip()
-        if not final_uid.isdigit() or len(final_uid) != 6:
-            raise ValueError("uid must be exactly six digits")
+        final_uid = developer_uid(normalized) if uid is None else _normalize_uid(uid)
         if any(dev.uid == final_uid for dev in self.developers):
             raise ValueError(f"uid {final_uid} is already registered")
         developer = Developer(email=normalized, shortname=shortname, uid=final_uid, name=name)
