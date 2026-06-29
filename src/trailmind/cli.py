@@ -8,6 +8,9 @@ import click
 from trailmind import __version__
 from trailmind.epic import init_epic
 from trailmind.errors import TrailmindError
+from trailmind.issue import add_issue, carry_issue, close_issue, link_issue
+from trailmind.log import log_activity
+from trailmind.milestone import add_milestone
 from trailmind.paths import find_repo_root
 from trailmind.project import init_project
 from trailmind.roster import Roster
@@ -192,6 +195,90 @@ def task_update(ctx: click.Context, task_ref: str, status: str) -> None:
 def task_close(ctx: click.Context, task_ref: str, closer: str, note: str) -> None:
     root = find_repo_root(_cwd_from_context(ctx))
     touched = close_task(root, task_ref=task_ref, closer=closer, note=note)
+    _echo_touched(root, [touched])
+
+
+@cli.group("issue")
+def issue_group() -> None:
+    """Manage issues."""
+
+
+@issue_group.command("add")
+@click.option("--epic", required=True)
+@click.option("--filer", required=True)
+@click.option("--title", required=True)
+@click.option("--description", required=True)
+@click.option("--severity", required=True)
+@click.pass_context
+def issue_add(
+    ctx: click.Context,
+    epic: str,
+    filer: str,
+    title: str,
+    description: str,
+    severity: str,
+) -> None:
+    root = find_repo_root(_cwd_from_context(ctx))
+    touched = add_issue(root, epic=epic, filer=filer, title=title, description=description, severity=severity)
+    _echo_touched(root, [touched])
+
+
+@issue_group.command("link")
+@click.option("--issue", "issue_ref", required=True)
+@click.option("--task", "task_ref", required=True)
+@click.pass_context
+def issue_link(ctx: click.Context, issue_ref: str, task_ref: str) -> None:
+    root = find_repo_root(_cwd_from_context(ctx))
+    touched = link_issue(root, raw_issue=issue_ref, raw_task=task_ref)
+    _echo_touched(root, touched)
+
+
+@issue_group.command("close")
+@click.argument("issue_ref")
+@click.option("--closer", required=True)
+@click.option("--status", required=True)
+@click.option("--note", required=True)
+@click.pass_context
+def issue_close(ctx: click.Context, issue_ref: str, closer: str, status: str, note: str) -> None:
+    root = find_repo_root(_cwd_from_context(ctx))
+    touched = close_issue(root, raw_id=issue_ref, closer=closer, status=status, note=note)
+    _echo_touched(root, [touched])
+
+
+@issue_group.command("carry")
+@click.option("--issue", "issue_ref", required=True)
+@click.option("--to-epic", required=True)
+@click.pass_context
+def issue_carry(ctx: click.Context, issue_ref: str, to_epic: str) -> None:
+    root = find_repo_root(_cwd_from_context(ctx))
+    touched = carry_issue(root, raw_issue=issue_ref, to_epic=to_epic)
+    _echo_touched(root, touched)
+
+
+@cli.group("milestone")
+def milestone_group() -> None:
+    """Manage milestones."""
+
+
+@milestone_group.command("add")
+@click.option("--epic", required=True)
+@click.option("--title", required=True)
+@click.option("--date", "milestone_date", required=True)
+@click.pass_context
+def milestone_add(ctx: click.Context, epic: str, title: str, milestone_date: str) -> None:
+    root = find_repo_root(_cwd_from_context(ctx))
+    touched = add_milestone(root, epic=epic, title=title, milestone_date=milestone_date)
+    _echo_touched(root, [touched])
+
+
+@cli.command("log")
+@click.argument("entity_ref")
+@click.option("--author", required=True)
+@click.option("--note", required=True)
+@click.pass_context
+def log_command(ctx: click.Context, entity_ref: str, author: str, note: str) -> None:
+    root = find_repo_root(_cwd_from_context(ctx))
+    touched = log_activity(root, entity_ref=entity_ref, author=author, note=note)
     _echo_touched(root, [touched])
 
 
