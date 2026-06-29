@@ -11,6 +11,7 @@ from trailmind.errors import TrailmindError
 from trailmind.paths import find_repo_root
 from trailmind.project import init_project
 from trailmind.roster import Roster
+from trailmind.task import add_task, close_task, split_csv, update_task_status
 
 
 @click.group()
@@ -127,6 +128,71 @@ def epic_init(
         repos=_csv(repos),
     )
     _echo_touched(root, touched)
+
+
+@cli.group("task")
+def task_group() -> None:
+    """Manage tasks."""
+
+
+@task_group.command("add")
+@click.option("--epic", required=True)
+@click.option("--filer", required=True)
+@click.option("--owner", required=True)
+@click.option("--title", required=True)
+@click.option("--code-paths", default="")
+@click.option("--design-doc", default="")
+@click.option("--depends-on", default="")
+@click.option("--soft-depends-on", default="")
+@click.option("--known-issues", default="")
+@click.pass_context
+def task_add(
+    ctx: click.Context,
+    epic: str,
+    filer: str,
+    owner: str,
+    title: str,
+    code_paths: str,
+    design_doc: str,
+    depends_on: str,
+    soft_depends_on: str,
+    known_issues: str,
+) -> None:
+    root = find_repo_root(_cwd_from_context(ctx))
+    touched = add_task(
+        root,
+        epic=epic,
+        filer=filer,
+        owner=owner,
+        title=title,
+        code_paths=split_csv(code_paths),
+        design_doc=design_doc,
+        depends_on=split_csv(depends_on),
+        soft_depends_on=split_csv(soft_depends_on),
+        known_issues=split_csv(known_issues),
+    )
+    _echo_touched(root, [touched])
+
+
+@task_group.command("update")
+@click.argument("task_ref")
+@click.option("--status", required=True)
+@click.pass_context
+def task_update(ctx: click.Context, task_ref: str, status: str) -> None:
+    root = find_repo_root(_cwd_from_context(ctx))
+    touched = update_task_status(root, task_ref=task_ref, status=status)
+    _echo_touched(root, [touched])
+
+
+@task_group.command("close")
+@click.argument("task_ref")
+@click.option("--closer", required=True)
+@click.option("--note", required=True)
+@click.pass_context
+def task_close(ctx: click.Context, task_ref: str, closer: str, note: str) -> None:
+    root = find_repo_root(_cwd_from_context(ctx))
+    touched = close_task(root, task_ref=task_ref, closer=closer, note=note)
+    _echo_touched(root, [touched])
 
 
 def main() -> None:
