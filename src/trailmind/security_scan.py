@@ -121,4 +121,6 @@ def _skip_dir(path: Path) -> bool:
 
 
 def _skip_file(path: Path) -> bool:
+    if path.name == ".env" or path.name.startswith(".env."):
+        return False
     return path.name in _SKIPPED_FILE_NAMES or path.suffix in _SKIPPED_FILE_SUFFIXES

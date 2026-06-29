@@ -1,5 +1,6 @@
 from pathlib import Path
 
+import pytest
 from click.testing import CliRunner
 
 from trailmind.cli import cli
@@ -15,8 +16,9 @@ def test_scan_allows_public_fixtures(tmp_path: Path):
     assert scan_paths([tmp_path]) == []
 
 
-def test_scan_rejects_env_files(tmp_path: Path):
-    env_file = tmp_path / ".env.local"
+@pytest.mark.parametrize("filename", [".env", ".env.local", ".env.log", ".env.tmp"])
+def test_scan_rejects_env_files(tmp_path: Path, filename: str):
+    env_file = tmp_path / filename
     env_file.write_text("DEBUG=true\n", encoding="utf-8")
 
     findings = scan_paths([tmp_path])
