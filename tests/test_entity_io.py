@@ -35,6 +35,15 @@ def test_read_entity_rejects_missing_frontmatter(tmp_path: Path):
         read_entity(path)
 
 
+@pytest.mark.parametrize("frontmatter", ["0", "false", "null"])
+def test_read_entity_rejects_falsey_non_mapping_frontmatter(tmp_path: Path, frontmatter: str):
+    path = tmp_path / "bad.md"
+    path.write_text(f"---\n{frontmatter}\n---\nbody\n", encoding="utf-8")
+
+    with pytest.raises(EntityFormatError, match="frontmatter must be a YAML mapping"):
+        read_entity(path)
+
+
 def test_update_preserves_body(tmp_path: Path):
     path = tmp_path / "issue.md"
     write_entity(path, frontmatter={"id": "I-123456-001", "status": "open"}, body="## Description\n\nBug.\n")

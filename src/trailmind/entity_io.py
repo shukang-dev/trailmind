@@ -85,9 +85,14 @@ def read_entity(path: Path) -> tuple[dict[str, Any], str]:
     if not match:
         raise EntityFormatError(f"{path}: missing YAML frontmatter")
     try:
-        data = yaml.safe_load(match.group(1)) or {}
+        raw_frontmatter = match.group(1)
+        loaded = yaml.safe_load(raw_frontmatter)
     except yaml.YAMLError as exc:
         raise EntityFormatError(f"{path}: malformed YAML frontmatter: {exc}") from exc
+    if loaded is None and raw_frontmatter.strip() == "":
+        data = {}
+    else:
+        data = loaded
     if not isinstance(data, dict):
         raise EntityFormatError(f"{path}: frontmatter must be a YAML mapping")
     return data, match.group(2)
