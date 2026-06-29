@@ -141,7 +141,7 @@ def task_group() -> None:
 @click.option("--owner", required=True)
 @click.option("--title", required=True)
 @click.option("--code-paths", default="")
-@click.option("--design-doc", default="")
+@click.option("--design-doc", default=None)
 @click.option("--depends-on", default="")
 @click.option("--soft-depends-on", default="")
 @click.option("--known-issues", default="")
@@ -153,7 +153,7 @@ def task_add(
     owner: str,
     title: str,
     code_paths: str,
-    design_doc: str,
+    design_doc: str | None,
     depends_on: str,
     soft_depends_on: str,
     known_issues: str,

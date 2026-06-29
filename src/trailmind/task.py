@@ -116,7 +116,7 @@ def add_task(
     owner: str,
     title: str,
     code_paths: list[str],
-    design_doc: str,
+    design_doc: str | None,
     depends_on: list[str],
     soft_depends_on: list[str],
     known_issues: list[str],

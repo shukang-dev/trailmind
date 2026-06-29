@@ -1,3 +1,4 @@
+from datetime import date
 from pathlib import Path
 
 import pytest
@@ -32,27 +33,30 @@ def _repo_with_epic(tmp_path: Path) -> Path:
     return tmp_path
 
 
-def _add_task(repo: Path, title: str = "Build Login Flow"):
+def _add_task(repo: Path, title: str = "Build Login Flow", extra_args: list[str] | None = None):
+    args = [
+        "task",
+        "add",
+        "--epic",
+        "projects/demo_app/mvp",
+        "--filer",
+        "alice@example.com",
+        "--owner",
+        "alice@example.com",
+        "--title",
+        title,
+        "--code-paths",
+        "src/app.py, tests/test_app.py",
+        "--depends-on",
+        "",
+        "--soft-depends-on",
+        " , ",
+    ]
+    if extra_args:
+        args.extend(extra_args)
     return CliRunner().invoke(
         cli,
-        [
-            "task",
-            "add",
-            "--epic",
-            "projects/demo_app/mvp",
-            "--filer",
-            "alice@example.com",
-            "--owner",
-            "alice@example.com",
-            "--title",
-            title,
-            "--code-paths",
-            "src/app.py, tests/test_app.py",
-            "--depends-on",
-            "",
-            "--soft-depends-on",
-            " , ",
-        ],
+        args,
         obj={"cwd": repo},
     )
 
@@ -70,15 +74,34 @@ def test_task_add_creates_task(tmp_path: Path):
 
     frontmatter, body = read_entity(task_path)
     assert frontmatter["id"] == "T-123456-001"
+    assert frontmatter["title"] == "Build Login Flow"
     assert frontmatter["filer"] == "alice"
     assert frontmatter["owner"] == "alice"
     assert frontmatter["status"] == "planned"
+    assert date.fromisoformat(frontmatter["created"])
+    assert frontmatter["start"] is None
+    assert frontmatter["due"] is None
+    assert frontmatter["branches"] == {}
+    assert frontmatter["verify"] == {}
     assert frontmatter["code_paths"] == ["src/app.py", "tests/test_app.py"]
+    assert frontmatter["design_doc"] is None
     assert frontmatter["depends_on"] == []
     assert frontmatter["soft_depends_on"] == []
+    assert frontmatter["known_issues"] == []
     assert "## Scope" in body
     assert "## Acceptance" in body
     assert "## Activity Log" in body
+
+
+def test_task_add_writes_design_doc_when_specified(tmp_path: Path):
+    repo = _repo_with_epic(tmp_path)
+
+    result = _add_task(repo, extra_args=["--design-doc", "docs/specs/parser.md"])
+
+    assert result.exit_code == 0
+    task_path = repo / "projects" / "demo_app" / "mvp" / "tasks" / "T-123456-001-build-login-flow.md"
+    frontmatter, _body = read_entity(task_path)
+    assert frontmatter["design_doc"] == "docs/specs/parser.md"
 
 
 def test_task_update_status(tmp_path: Path):
