@@ -6,6 +6,13 @@ from pathlib import Path
 import click
 
 from trailmind import __version__
+from trailmind.dashboard import (
+    render_epic_dashboard,
+    render_epic_dashboard_at,
+    render_overview,
+    render_project_dashboard,
+    render_project_dashboard_at,
+)
 from trailmind.epic import init_epic
 from trailmind.errors import TrailmindError
 from trailmind.issue import add_issue, carry_issue, close_issue, link_issue
@@ -14,6 +21,7 @@ from trailmind.milestone import add_milestone
 from trailmind.paths import find_repo_root
 from trailmind.project import init_project
 from trailmind.roster import Roster
+from trailmind.serve import serve_repo
 from trailmind.task import add_task, close_task, split_csv, update_task_status
 
 
@@ -24,8 +32,40 @@ def cli() -> None:
 
 
 @cli.command("status")
-def status_command() -> None:
-    raise TrailmindError("not inside a Trailmind managed repository")
+@click.option("--overview", is_flag=True, help="Render the repository overview dashboard.")
+@click.option("--project", "project_slug", default=None, help="Render a project dashboard.")
+@click.option("--epic", "epic_ref", default=None, help="Render an epic dashboard.")
+@click.pass_context
+def status_command(ctx: click.Context, overview: bool, project_slug: str | None, epic_ref: str | None) -> None:
+    cwd = _cwd_from_context(ctx)
+    root = find_repo_root(cwd)
+    selected = sum(1 for item in [overview, project_slug, epic_ref] if item)
+    if selected > 1:
+        raise TrailmindError("status accepts only one scope flag")
+
+    if overview:
+        touched = render_overview(root)
+    elif project_slug:
+        touched = render_project_dashboard(root, project_slug)
+    elif epic_ref:
+        touched = render_epic_dashboard(root, epic_ref)
+    elif (cwd / "EPIC.md").is_file():
+        touched = render_epic_dashboard_at(root, cwd)
+    elif (cwd / "PROJECT.md").is_file():
+        touched = render_project_dashboard_at(root, cwd)
+    else:
+        touched = render_overview(root)
+
+    _echo_touched(root, [touched])
+
+
+@cli.command("serve")
+@click.option("--host", default="127.0.0.1", show_default=True)
+@click.option("--port", default=8888, show_default=True, type=int)
+@click.pass_context
+def serve_command(ctx: click.Context, host: str, port: int) -> None:
+    root = find_repo_root(_cwd_from_context(ctx))
+    serve_repo(root, host=host, port=port)
 
 
 def _cwd_from_context(ctx: click.Context) -> Path:

@@ -1,0 +1,150 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>{{ title }}</title>
+  <style>
+    :root {
+      color-scheme: light;
+      --bg: #f7f8fb;
+      --panel: #ffffff;
+      --ink: #20242c;
+      --muted: #5f6978;
+      --line: #d9dee8;
+      --accent: #8a4a2a;
+      --accent-soft: #f6eee9;
+    }
+    * { box-sizing: border-box; }
+    body { margin: 0; font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif; color: var(--ink); background: var(--bg); }
+    main { max-width: 1180px; margin: 0 auto; padding: 32px 20px 48px; }
+    header { margin-bottom: 24px; }
+    h1 { margin: 0 0 8px; font-size: 2rem; line-height: 1.15; letter-spacing: 0; }
+    h2 { margin: 0 0 10px; font-size: 1.2rem; letter-spacing: 0; }
+    p { margin: 0; color: var(--muted); line-height: 1.5; }
+    .path { color: var(--muted); font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: 0.84rem; }
+    .panel { border: 1px solid var(--line); border-radius: 8px; background: var(--panel); padding: 16px; margin-bottom: 16px; }
+    .metrics { display: flex; flex-wrap: wrap; gap: 10px; margin-top: 16px; }
+    .metric { min-width: 124px; border: 1px solid var(--line); border-radius: 8px; background: var(--panel); padding: 12px 14px; }
+    .metric strong { display: block; font-size: 1.35rem; line-height: 1.1; }
+    .metric span { color: var(--muted); font-size: 0.9rem; }
+    .pills { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 12px; }
+    .pill { display: inline-flex; align-items: center; min-height: 24px; padding: 2px 8px; border-radius: 999px; background: var(--accent-soft); color: var(--accent); font-size: 0.85rem; white-space: nowrap; }
+    table { width: 100%; border-collapse: collapse; background: var(--panel); border: 1px solid var(--line); border-radius: 8px; overflow: hidden; margin-bottom: 20px; }
+    th, td { padding: 10px 12px; border-bottom: 1px solid var(--line); text-align: left; vertical-align: top; }
+    th { color: var(--muted); font-size: 0.82rem; font-weight: 600; text-transform: uppercase; }
+    tr:last-child td { border-bottom: 0; }
+    details { margin-top: 6px; }
+    summary { color: var(--accent); cursor: pointer; }
+    pre { margin: 10px 0 0; white-space: pre-wrap; color: var(--muted); font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: 0.88rem; line-height: 1.45; }
+  </style>
+</head>
+<body>
+  <main>
+    <header>
+      <h1>{{ epic.title }}</h1>
+      <p>{{ epic.goal }}</p>
+      <p class="path">{{ epic.relative_path }}</p>
+      <div class="metrics" aria-label="Epic counts">
+        <div class="metric"><strong>{{ epic.task_count }}</strong><span>Tasks</span></div>
+        <div class="metric"><strong>{{ epic.issue_count }}</strong><span>Issues</span></div>
+        <div class="metric"><strong>{{ epic.milestone_count }}</strong><span>Milestones</span></div>
+      </div>
+      <div class="pills">
+        <span class="pill">{{ epic.state }}</span>
+        <span class="pill">project {{ epic.project }}</span>
+        {% if epic.start %}<span class="pill">start {{ epic.start }}</span>{% endif %}
+        {% if epic.target %}<span class="pill">target {{ epic.target }}</span>{% endif %}
+        {% for member in epic.roster %}
+        <span class="pill">{{ member }}</span>
+        {% endfor %}
+        {% for repo in epic.repos %}
+        <span class="pill">{{ repo }}</span>
+        {% endfor %}
+      </div>
+    </header>
+
+    {% if epic.body %}
+    <section class="panel">
+      <h2>Epic Notes</h2>
+      <pre>{{ epic.body }}</pre>
+    </section>
+    {% endif %}
+
+    <section>
+      <h2>Tasks</h2>
+      <table>
+        <thead>
+          <tr><th>Task</th><th>Status</th><th>Owner</th><th>Created</th></tr>
+        </thead>
+        <tbody>
+          {% for task in epic.tasks %}
+          <tr>
+            <td>
+              <strong>{{ task.id }} {{ task.title }}</strong>
+              <p class="path">{{ task.relative_path }}</p>
+              {% if task.body %}<details><summary>Notes</summary><pre>{{ task.body }}</pre></details>{% endif %}
+            </td>
+            <td>{{ task.status }}</td>
+            <td>{{ task.owner }}</td>
+            <td>{{ task.created }}</td>
+          </tr>
+          {% else %}
+          <tr><td colspan="4">No tasks.</td></tr>
+          {% endfor %}
+        </tbody>
+      </table>
+    </section>
+
+    <section>
+      <h2>Issues</h2>
+      <table>
+        <thead>
+          <tr><th>Issue</th><th>Status</th><th>Severity</th><th>Filed By</th></tr>
+        </thead>
+        <tbody>
+          {% for issue in epic.issues %}
+          <tr>
+            <td>
+              <strong>{{ issue.id }} {{ issue.title }}</strong>
+              <p class="path">{{ issue.relative_path }}</p>
+              {% if issue.body %}<details><summary>Notes</summary><pre>{{ issue.body }}</pre></details>{% endif %}
+            </td>
+            <td>{{ issue.status }}</td>
+            <td>{{ issue.severity }}</td>
+            <td>{{ issue.filer }}</td>
+          </tr>
+          {% else %}
+          <tr><td colspan="4">No issues.</td></tr>
+          {% endfor %}
+        </tbody>
+      </table>
+    </section>
+
+    <section>
+      <h2>Milestones</h2>
+      <table>
+        <thead>
+          <tr><th>Milestone</th><th>Status</th><th>Date</th><th>Created</th></tr>
+        </thead>
+        <tbody>
+          {% for milestone in epic.milestones %}
+          <tr>
+            <td>
+              <strong>{{ milestone.id }} {{ milestone.title }}</strong>
+              <p class="path">{{ milestone.relative_path }}</p>
+              {% if milestone.body %}<details><summary>Notes</summary><pre>{{ milestone.body }}</pre></details>{% endif %}
+            </td>
+            <td>{{ milestone.status }}</td>
+            <td>{{ milestone.date }}</td>
+            <td>{{ milestone.created }}</td>
+          </tr>
+          {% else %}
+          <tr><td colspan="4">No milestones.</td></tr>
+          {% endfor %}
+        </tbody>
+      </table>
+    </section>
+  </main>
+</body>
+</html>

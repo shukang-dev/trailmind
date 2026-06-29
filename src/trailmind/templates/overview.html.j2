@@ -1,0 +1,96 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>{{ title }}</title>
+  <style>
+    :root {
+      color-scheme: light;
+      --bg: #f7f8fb;
+      --panel: #ffffff;
+      --ink: #20242c;
+      --muted: #5f6978;
+      --line: #d9dee8;
+      --accent: #166b5f;
+      --accent-soft: #e7f3f1;
+    }
+    * { box-sizing: border-box; }
+    body {
+      margin: 0;
+      font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+      color: var(--ink);
+      background: var(--bg);
+    }
+    main { max-width: 1120px; margin: 0 auto; padding: 32px 20px 48px; }
+    header { margin-bottom: 24px; }
+    h1 { margin: 0 0 8px; font-size: 2rem; line-height: 1.15; letter-spacing: 0; }
+    h2 { margin: 0 0 8px; font-size: 1.05rem; letter-spacing: 0; }
+    p { margin: 0; color: var(--muted); line-height: 1.5; }
+    .metrics { display: flex; flex-wrap: wrap; gap: 12px; margin-top: 18px; }
+    .metric, .project {
+      border: 1px solid var(--line);
+      border-radius: 8px;
+      background: var(--panel);
+    }
+    .metric { min-width: 136px; padding: 12px 14px; }
+    .metric strong { display: block; font-size: 1.45rem; line-height: 1.1; }
+    .metric span { color: var(--muted); font-size: 0.9rem; }
+    .grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(260px, 1fr)); gap: 14px; }
+    .project { padding: 16px; }
+    .meta { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 12px; }
+    .pill {
+      display: inline-flex;
+      align-items: center;
+      min-height: 24px;
+      padding: 2px 8px;
+      border-radius: 999px;
+      background: var(--accent-soft);
+      color: var(--accent);
+      font-size: 0.85rem;
+      white-space: nowrap;
+    }
+    .path { color: var(--muted); font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: 0.84rem; }
+    .empty { border: 1px dashed var(--line); border-radius: 8px; padding: 20px; background: var(--panel); }
+  </style>
+</head>
+<body>
+  <main>
+    <header>
+      <h1>Trailmind Overview</h1>
+      <p class="path">{{ repo_root }}</p>
+      <div class="metrics" aria-label="Repository counts">
+        <div class="metric"><strong>{{ project_count }}</strong><span>Projects</span></div>
+        <div class="metric"><strong>{{ epic_count }}</strong><span>Epics</span></div>
+      </div>
+    </header>
+
+    {% if projects %}
+    <section class="grid" aria-label="Projects">
+      {% for project in projects %}
+      <article class="project">
+        <h2>{{ project.title }}</h2>
+        <p>{{ project.goal }}</p>
+        <div class="meta">
+          <span class="pill">{{ project.slug }}</span>
+          <span class="pill">{{ project.epic_count }} epics</span>
+          {% for owner in project.owners %}
+          <span class="pill">owner {{ owner }}</span>
+          {% endfor %}
+          {% for tag in project.tags %}
+          <span class="pill">{{ tag }}</span>
+          {% endfor %}
+        </div>
+        <p class="path">{{ project.relative_path }}/dashboard.html</p>
+      </article>
+      {% endfor %}
+    </section>
+    {% else %}
+    <section class="empty">
+      <h2>No projects</h2>
+      <p>No project dashboards are available yet.</p>
+    </section>
+    {% endif %}
+  </main>
+</body>
+</html>
