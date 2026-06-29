@@ -32,6 +32,12 @@ def test_roster_rejects_duplicate_email(tmp_path: Path):
         roster.add(email="alice@example.com", shortname="alice2", name="Alice 2", uid="654321")
 
 
+def test_roster_add_rejects_empty_supplied_uid(tmp_path: Path):
+    roster = Roster.load(tmp_path / "roster.yaml")
+    with pytest.raises(ValueError, match="uid must be exactly six digits"):
+        roster.add(email="alice@example.com", shortname="alice", name="Alice", uid="")
+
+
 def test_roster_load_rejects_invalid_yaml(tmp_path: Path):
     path = tmp_path / "roster.yaml"
     path.write_text("developers: [\n", encoding="utf-8")
@@ -160,6 +166,18 @@ def test_roster_cli_duplicate_email_is_user_facing(tmp_path: Path):
     assert duplicate_result.exit_code == 1
     assert "error: alice@example.com is already registered" in duplicate_result.output
     assert "Traceback" not in duplicate_result.output
+
+
+def test_roster_cli_rejects_empty_supplied_uid(tmp_path: Path):
+    (tmp_path / ".git").mkdir()
+    result = CliRunner().invoke(
+        cli,
+        ["roster", "add", "--email", "alice@example.com", "--shortname", "alice", "--name", "Alice", "--uid", ""],
+        obj={"cwd": tmp_path},
+    )
+    assert result.exit_code == 1
+    assert "error: uid must be exactly six digits" in result.output
+    assert "Traceback" not in result.output
 
 
 def test_roster_cli_bad_file_is_user_facing(tmp_path: Path):

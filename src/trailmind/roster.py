@@ -100,7 +100,7 @@ class Roster:
             raise ValueError(f"{normalized} is already registered")
         if any(dev.shortname == shortname for dev in self.developers):
             raise ValueError(f"shortname {shortname} is already registered")
-        final_uid = uid or developer_uid(normalized)
+        final_uid = developer_uid(normalized) if uid is None else uid.strip()
         if not final_uid.isdigit() or len(final_uid) != 6:
             raise ValueError("uid must be exactly six digits")
         if any(dev.uid == final_uid for dev in self.developers):
