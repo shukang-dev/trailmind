@@ -21,6 +21,7 @@ from trailmind.milestone import add_milestone
 from trailmind.paths import find_repo_root
 from trailmind.project import init_project
 from trailmind.roster import Roster
+from trailmind.security_scan import scan_paths
 from trailmind.serve import serve_repo
 from trailmind.task import add_task, close_task, split_csv, update_task_status
 
@@ -68,6 +69,20 @@ def serve_command(ctx: click.Context, host: str, port: int) -> None:
     serve_repo(root, host=host, port=port)
 
 
+@cli.command("scan")
+@click.pass_context
+def scan_command(ctx: click.Context) -> None:
+    root = find_repo_root(_cwd_from_context(ctx))
+    findings = scan_paths([root])
+    for finding in findings:
+        click.echo(f"{_relative_to_root(root, finding.path)}: {finding.message}", err=True)
+    if findings:
+        count = len(findings)
+        noun = "finding" if count == 1 else "findings"
+        raise TrailmindError(f"security scan found {count} {noun}")
+    click.echo("scan passed")
+
+
 def _cwd_from_context(ctx: click.Context) -> Path:
     if ctx.obj and "cwd" in ctx.obj:
         return Path(ctx.obj["cwd"])
@@ -81,6 +96,13 @@ def _csv(value: str) -> list[str]:
 def _echo_touched(repo_root: Path, paths: list[Path]) -> None:
     for path in paths:
         click.echo(path.relative_to(repo_root).as_posix())
+
+
+def _relative_to_root(repo_root: Path, path: Path) -> str:
+    try:
+        return path.resolve(strict=False).relative_to(repo_root.resolve(strict=False)).as_posix()
+    except ValueError:
+        return path.as_posix()
 
 
 @cli.group("roster")
