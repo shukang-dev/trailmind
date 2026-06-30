@@ -87,7 +87,12 @@ def _resolve_direct_inbox_path(repo_root: Path, raw: str) -> Path:
 
     scope_path = candidate.parents[1]
     marker = "PROJECT.md" if len(raw_parts) == 4 else "EPIC.md"
-    if not (scope_path / marker).is_file() or _parse_inbox_stem(candidate.stem) is None or not candidate.is_file():
+    if (
+        candidate.suffix != ".md"
+        or not (scope_path / marker).is_file()
+        or _parse_inbox_stem(candidate.stem) is None
+        or not candidate.is_file()
+    ):
         raise TrailmindError(f"inbox item {raw!r} not found")
     return candidate
 

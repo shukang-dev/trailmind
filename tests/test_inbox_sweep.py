@@ -241,6 +241,34 @@ def test_inbox_resolve_accepts_project_inbox_direct_path(tmp_path: Path):
     assert "Resolved by alice. Resolved by direct path." in body
 
 
+def test_inbox_resolve_rejects_official_inbox_non_markdown_direct_path(tmp_path: Path):
+    repo = _repo_with_project_and_epic(tmp_path)
+    today = date.today().strftime("%Y%m%d")
+    non_markdown_path = repo / "projects" / "demo_app" / "inbox" / f"IN-{today}-004-official-non-md.txt"
+    _write_inbox_item(non_markdown_path, item_id=f"IN-{today}-004", title="Official non markdown")
+    original_text = non_markdown_path.read_text(encoding="utf-8")
+
+    result = CliRunner().invoke(
+        cli,
+        [
+            "inbox",
+            "resolve",
+            f"projects/demo_app/inbox/IN-{today}-004-official-non-md.txt",
+            "--resolver",
+            "alice",
+            "--note",
+            "Must reject non-markdown files.",
+        ],
+        obj={"cwd": repo},
+    )
+
+    assert result.exit_code == 1
+    assert "Traceback" not in result.output
+    assert "inbox item" in result.output
+    assert "not found" in result.output
+    assert non_markdown_path.read_text(encoding="utf-8") == original_text
+
+
 def test_inbox_resolve_accepts_epic_inbox_direct_path(tmp_path: Path):
     repo = _repo_with_project_and_epic(tmp_path)
     today = date.today().strftime("%Y%m%d")
