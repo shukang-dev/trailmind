@@ -61,6 +61,14 @@ def _add_task(repo: Path, title: str = "Build Login Flow", extra_args: list[str]
     )
 
 
+def _update_task_status(repo: Path, status: str = "in_progress"):
+    return CliRunner().invoke(
+        cli,
+        ["task", "update", "T-123456-001", "--status", status],
+        obj={"cwd": repo},
+    )
+
+
 def test_task_add_creates_task(tmp_path: Path):
     repo = _repo_with_epic(tmp_path)
 
@@ -109,16 +117,13 @@ def test_task_update_status(tmp_path: Path):
     add_result = _add_task(repo)
     assert add_result.exit_code == 0
 
-    result = CliRunner().invoke(
-        cli,
-        ["task", "update", "T-123456-001", "--status", "in_progress"],
-        obj={"cwd": repo},
-    )
+    result = _update_task_status(repo)
 
     assert result.exit_code == 0
     task_path = repo / "projects" / "demo_app" / "mvp" / "tasks" / "T-123456-001-build-login-flow.md"
-    frontmatter, _body = read_entity(task_path)
+    frontmatter, body = read_entity(task_path)
     assert frontmatter["status"] == "in_progress"
+    assert "Status changed from created to in_progress by trailmind." in body
 
 
 def test_task_set_status_validates_transition_and_logs(tmp_path: Path):
@@ -194,6 +199,8 @@ def test_task_close_marks_done_and_logs(tmp_path: Path):
     repo = _repo_with_epic(tmp_path)
     add_result = _add_task(repo)
     assert add_result.exit_code == 0
+    update_result = _update_task_status(repo)
+    assert update_result.exit_code == 0
 
     result = CliRunner().invoke(
         cli,
@@ -209,10 +216,29 @@ def test_task_close_marks_done_and_logs(tmp_path: Path):
     assert body.index("## Activity Log") < body.index("Shipped login flow.")
 
 
+def test_task_close_rejects_invalid_transition_from_created(tmp_path: Path):
+    repo = _repo_with_epic(tmp_path)
+    add_result = _add_task(repo)
+    assert add_result.exit_code == 0
+
+    result = CliRunner().invoke(
+        cli,
+        ["task", "close", "T-123456-001", "--closer", "alice", "--note", "Done."],
+        obj={"cwd": repo},
+    )
+
+    assert result.exit_code == 1
+    assert "error:" in result.output
+    assert "invalid task status transition" in result.output
+    assert "Traceback" not in result.output
+
+
 def test_task_close_sanitizes_multiline_note_before_logging(tmp_path: Path):
     repo = _repo_with_epic(tmp_path)
     add_result = _add_task(repo)
     assert add_result.exit_code == 0
+    update_result = _update_task_status(repo)
+    assert update_result.exit_code == 0
 
     result = CliRunner().invoke(
         cli,
@@ -233,6 +259,8 @@ def test_task_close_sanitizes_multiline_closer_before_logging(tmp_path: Path):
     repo = _repo_with_epic(tmp_path)
     add_result = _add_task(repo)
     assert add_result.exit_code == 0
+    update_result = _update_task_status(repo)
+    assert update_result.exit_code == 0
 
     result = CliRunner().invoke(
         cli,
@@ -259,6 +287,8 @@ def test_task_close_rejects_blank_closer(tmp_path: Path):
     repo = _repo_with_epic(tmp_path)
     add_result = _add_task(repo)
     assert add_result.exit_code == 0
+    update_result = _update_task_status(repo)
+    assert update_result.exit_code == 0
 
     result = CliRunner().invoke(
         cli,

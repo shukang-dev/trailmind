@@ -9,7 +9,7 @@ from trailmind.ids import next_entity_id, slugify
 from trailmind.log import action_activity_entry, append_activity_entry, read_entity_user_facing
 from trailmind.resolver import resolve_entity
 from trailmind.roster import Roster
-from trailmind.task_status import TASK_STATUSES, validate_task_status, validate_task_transition
+from trailmind.task_status import validate_task_status, validate_task_transition
 
 
 def split_csv(value: str) -> list[str]:
@@ -145,7 +145,11 @@ def update_task_status(repo_root: Path, *, task_ref: str, status: str) -> Path:
 def close_task(repo_root: Path, *, task_ref: str, closer: str, note: str) -> Path:
     task_path = resolve_entity(repo_root, raw=task_ref, entity="T")
     frontmatter, body = read_entity_user_facing(task_path, label="task")
-    frontmatter["status"] = "done"
+    _current_status, target_status = validate_task_transition(
+        frontmatter.get("status", "created"),
+        "done",
+    )
+    frontmatter["status"] = target_status
     body = append_activity_entry(
         body,
         action_activity_entry(action="Closed", actor_label="closer", actor=closer, note=note),
