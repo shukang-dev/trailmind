@@ -170,6 +170,120 @@ def test_inbox_resolve_rejects_non_inbox_direct_path_without_modifying_project(t
     assert project_path.read_text(encoding="utf-8") == original_project_text
 
 
+def test_inbox_resolve_rejects_direct_path_outside_official_inboxes(tmp_path: Path):
+    repo = _repo_with_project_and_epic(tmp_path)
+    today = date.today().strftime("%Y%m%d")
+    stray_path = repo / "docs" / "inbox" / f"IN-{today}-001-note.md"
+    _write_inbox_item(stray_path, item_id=f"IN-{today}-001", title="Stray note")
+    original_text = stray_path.read_text(encoding="utf-8")
+
+    result = CliRunner().invoke(
+        cli,
+        [
+            "inbox",
+            "resolve",
+            f"docs/inbox/IN-{today}-001-note.md",
+            "--resolver",
+            "alice",
+            "--note",
+            "Must not touch arbitrary inbox folders.",
+        ],
+        obj={"cwd": repo},
+    )
+
+    assert result.exit_code == 1
+    assert "Traceback" not in result.output
+    assert "inbox item" in result.output
+    assert "not found" in result.output
+    assert stray_path.read_text(encoding="utf-8") == original_text
+
+
+def test_inbox_resolve_accepts_project_inbox_direct_path(tmp_path: Path):
+    repo = _repo_with_project_and_epic(tmp_path)
+    today = date.today().strftime("%Y%m%d")
+
+    add = CliRunner().invoke(
+        cli,
+        [
+            "inbox",
+            "add",
+            "--project",
+            "demo_app",
+            "--author",
+            "alice",
+            "--title",
+            "Project direct path",
+            "--note",
+            "Project direct path should resolve.",
+        ],
+        obj={"cwd": repo},
+    )
+    assert add.exit_code == 0
+
+    resolved = CliRunner().invoke(
+        cli,
+        [
+            "inbox",
+            "resolve",
+            f"projects/demo_app/inbox/IN-{today}-001-project-direct-path.md",
+            "--resolver",
+            "alice",
+            "--note",
+            "Resolved by direct path.",
+        ],
+        obj={"cwd": repo},
+    )
+
+    assert resolved.exit_code == 0
+    inbox_path = repo / "projects" / "demo_app" / "inbox" / f"IN-{today}-001-project-direct-path.md"
+    frontmatter, body = read_entity(inbox_path)
+    assert frontmatter["status"] == "resolved"
+    assert "Resolved by alice. Resolved by direct path." in body
+
+
+def test_inbox_resolve_accepts_epic_inbox_direct_path(tmp_path: Path):
+    repo = _repo_with_project_and_epic(tmp_path)
+    today = date.today().strftime("%Y%m%d")
+
+    add = CliRunner().invoke(
+        cli,
+        [
+            "inbox",
+            "add",
+            "--epic",
+            "projects/demo_app/mvp",
+            "--author",
+            "alice",
+            "--title",
+            "Epic direct path",
+            "--note",
+            "Epic direct path should resolve.",
+        ],
+        obj={"cwd": repo},
+    )
+    assert add.exit_code == 0
+
+    resolved = CliRunner().invoke(
+        cli,
+        [
+            "inbox",
+            "resolve",
+            f"projects/demo_app/mvp/inbox/IN-{today}-001-epic-direct-path.md",
+            "--resolver",
+            "alice",
+            "--note",
+            "Resolved by direct path.",
+        ],
+        obj={"cwd": repo},
+    )
+
+    assert resolved.exit_code == 0
+    inbox_path = repo / "projects" / "demo_app" / "mvp" / "inbox" / f"IN-{today}-001-epic-direct-path.md"
+    frontmatter, body = read_entity(inbox_path)
+    assert frontmatter["status"] == "resolved"
+    assert "Resolved by alice. Resolved by direct path." in body
+
+
 def test_inbox_add_uses_max_sequence_for_today(tmp_path: Path):
     repo = _repo_with_project_and_epic(tmp_path)
     today = date.today().strftime("%Y%m%d")

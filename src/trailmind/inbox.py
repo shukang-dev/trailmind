@@ -65,6 +65,7 @@ def _has_parent_reference(raw: str) -> bool:
 
 def _resolve_direct_inbox_path(repo_root: Path, raw: str) -> Path:
     windows_path = PureWindowsPath(raw)
+    raw_parts = PurePosixPath(raw).parts
     if (
         PurePosixPath(raw).is_absolute()
         or windows_path.is_absolute()
@@ -72,6 +73,9 @@ def _resolve_direct_inbox_path(repo_root: Path, raw: str) -> Path:
         or windows_path.root
         or "\\" in raw
         or _has_parent_reference(raw)
+        or len(raw_parts) not in {4, 5}
+        or raw_parts[0] != "projects"
+        or raw_parts[-2] != "inbox"
     ):
         raise TrailmindError(f"inbox item {raw!r} not found")
 
@@ -81,7 +85,9 @@ def _resolve_direct_inbox_path(repo_root: Path, raw: str) -> Path:
     except (OSError, RuntimeError, ValueError) as exc:
         raise TrailmindError(f"inbox item {raw!r} not found") from exc
 
-    if candidate.parent.name != "inbox" or _parse_inbox_stem(candidate.stem) is None or not candidate.is_file():
+    scope_path = candidate.parents[1]
+    marker = "PROJECT.md" if len(raw_parts) == 4 else "EPIC.md"
+    if not (scope_path / marker).is_file() or _parse_inbox_stem(candidate.stem) is None or not candidate.is_file():
         raise TrailmindError(f"inbox item {raw!r} not found")
     return candidate
 
