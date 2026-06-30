@@ -15,11 +15,13 @@ from trailmind.task_rules import (
     assert_deliverables_gate,
     assert_dependency_gate,
     format_soft_dependency_warning,
+    normalize_deliverable_item,
     soft_dependency_warnings,
     string_list_field,
 )
 from trailmind.task_status import (
     STATUS_NORMALIZATIONS,
+    is_terminal_task_status,
     normalize_task_status,
     validate_task_status,
     validate_task_transition,
@@ -28,6 +30,10 @@ from trailmind.task_status import (
 
 def split_csv(value: str) -> list[str]:
     return [item.strip() for item in value.split(",") if item.strip()]
+
+
+def _normalize_deliverable_items(items: list[str]) -> list[str]:
+    return [item for item in (normalize_deliverable_item(item) for item in items) if item]
 
 
 def _missing_epic(raw: str) -> TrailmindError:
@@ -149,6 +155,7 @@ def add_task(
     filer_shortname = roster.require_shortname(filer)
     filer_uid = roster.require_uid(filer)
     owner_shortname = roster.require_shortname(owner)
+    normalized_deliverables = _normalize_deliverable_items(deliverables)
 
     tasks_path = epic_path / "tasks"
     _ensure_tasks_directory(tasks_path)
@@ -172,7 +179,7 @@ def add_task(
             "depends_on": depends_on,
             "soft_depends_on": soft_depends_on,
             "known_issues": known_issues,
-            "deliverables": deliverables,
+            "deliverables": normalized_deliverables,
             "completed_deliverables": [],
         },
         body=_initial_body(title, filer_shortname),
@@ -217,14 +224,19 @@ def update_task_status(repo_root: Path, *, task_ref: str, status: str) -> Path:
 def add_task_deliverable(repo_root: Path, *, task_ref: str, item: str, actor: str) -> Path:
     task_path = resolve_entity(repo_root, raw=task_ref, entity="T")
     frontmatter, body = read_entity_user_facing(task_path, label="task")
-    deliverable = " ".join(item.split())
+    deliverable = normalize_deliverable_item(item)
     if not deliverable:
         raise TrailmindError("deliverable item is required")
-    deliverables = string_list_field(frontmatter, "deliverables", label="task")
+    status = normalize_task_status(frontmatter.get("status", "created"))
+    if is_terminal_task_status(status):
+        raise TrailmindError(f"cannot add deliverable to {status} task")
+    deliverables = _normalize_deliverable_items(string_list_field(frontmatter, "deliverables", label="task"))
     if deliverable not in deliverables:
         deliverables.append(deliverable)
     frontmatter["deliverables"] = deliverables
-    frontmatter["completed_deliverables"] = string_list_field(frontmatter, "completed_deliverables", label="task")
+    frontmatter["completed_deliverables"] = _normalize_deliverable_items(
+        string_list_field(frontmatter, "completed_deliverables", label="task")
+    )
     body = append_activity_entry(
         body,
         action_activity_entry(action="Added deliverable", actor_label="actor", actor=actor, note=deliverable),
@@ -236,13 +248,13 @@ def add_task_deliverable(repo_root: Path, *, task_ref: str, item: str, actor: st
 def complete_task_deliverable(repo_root: Path, *, task_ref: str, item: str, actor: str) -> Path:
     task_path = resolve_entity(repo_root, raw=task_ref, entity="T")
     frontmatter, body = read_entity_user_facing(task_path, label="task")
-    deliverable = " ".join(item.split())
+    deliverable = normalize_deliverable_item(item)
     if not deliverable:
         raise TrailmindError("deliverable item is required")
-    deliverables = string_list_field(frontmatter, "deliverables", label="task")
+    deliverables = _normalize_deliverable_items(string_list_field(frontmatter, "deliverables", label="task"))
     if deliverable not in deliverables:
         raise TrailmindError(f"deliverable {deliverable!r} is not defined on task")
-    completed = string_list_field(frontmatter, "completed_deliverables", label="task")
+    completed = _normalize_deliverable_items(string_list_field(frontmatter, "completed_deliverables", label="task"))
     if deliverable not in completed:
         completed.append(deliverable)
     frontmatter["deliverables"] = deliverables

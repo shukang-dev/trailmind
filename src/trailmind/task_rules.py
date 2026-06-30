@@ -36,6 +36,10 @@ def string_list_field(frontmatter: dict[str, Any], key: str, *, label: str) -> l
     return [str(item) for item in value if str(item).strip()]
 
 
+def normalize_deliverable_item(value: str) -> str:
+    return " ".join(value.split())
+
+
 def task_identity(frontmatter: dict[str, Any], path: Path) -> tuple[str, str]:
     task_id = str(frontmatter.get("id") or path.stem).strip()
     title = str(frontmatter.get("title") or path.stem).strip()
@@ -110,8 +114,21 @@ def assert_dependency_gate(repo_root: Path, frontmatter: dict[str, Any], *, targ
 
 
 def missing_deliverables(frontmatter: dict[str, Any]) -> list[str]:
-    deliverables = string_list_field(frontmatter, "deliverables", label="task")
-    completed = set(string_list_field(frontmatter, "completed_deliverables", label="task"))
+    deliverables = [
+        item
+        for item in (
+            normalize_deliverable_item(item) for item in string_list_field(frontmatter, "deliverables", label="task")
+        )
+        if item
+    ]
+    completed = {
+        item
+        for item in (
+            normalize_deliverable_item(item)
+            for item in string_list_field(frontmatter, "completed_deliverables", label="task")
+        )
+        if item
+    }
     return [item for item in deliverables if item not in completed]
 
 
