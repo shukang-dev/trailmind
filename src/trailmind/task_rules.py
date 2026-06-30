@@ -8,7 +8,7 @@ from typing import Any
 
 from trailmind.errors import TrailmindError
 from trailmind.log import read_entity_user_facing
-from trailmind.resolver import EntityNotFoundError, resolve_entity
+from trailmind.resolver import EntityAmbiguousError, EntityNotFoundError, resolve_entity
 from trailmind.task_status import is_terminal_task_status, normalize_task_status
 
 
@@ -49,22 +49,35 @@ def iter_task_files(repo_root: Path) -> list[Path]:
     return sorted(path for path in projects_path.glob("*/*/tasks/T-*.md") if path.is_file())
 
 
-def task_reference_status(repo_root: Path, ref: str) -> TaskReferenceStatus:
+def _unresolved_task_reference_status(ref: str, *, status: str, title: str) -> TaskReferenceStatus:
+    return TaskReferenceStatus(
+        ref=ref,
+        path=None,
+        task_id=ref,
+        title=title,
+        status=status,
+        terminal=False,
+        missing=True,
+    )
+
+
+def task_reference_status(repo_root: Path, ref: str, *, soft: bool = False) -> TaskReferenceStatus:
     try:
         task_path = resolve_entity(repo_root, raw=ref, entity="T")
     except EntityNotFoundError:
-        return TaskReferenceStatus(
-            ref=ref,
-            path=None,
-            task_id=ref,
-            title="missing task",
-            status="missing",
-            terminal=False,
-            missing=True,
-        )
-    frontmatter, _body = read_entity_user_facing(task_path, label="task")
-    task_id, title = task_identity(frontmatter, task_path)
-    status = normalize_task_status(frontmatter.get("status", "created"))
+        return _unresolved_task_reference_status(ref, status="missing", title="missing task")
+    except EntityAmbiguousError as exc:
+        if not soft:
+            raise
+        return _unresolved_task_reference_status(ref, status="unresolved", title=str(exc))
+    try:
+        frontmatter, _body = read_entity_user_facing(task_path, label="task")
+        task_id, title = task_identity(frontmatter, task_path)
+        status = normalize_task_status(frontmatter.get("status", "created"))
+    except TrailmindError as exc:
+        if not soft:
+            raise
+        return _unresolved_task_reference_status(ref, status="unresolved", title=str(exc))
     return TaskReferenceStatus(
         ref=ref,
         path=task_path,
@@ -83,7 +96,8 @@ def dependency_blockers(repo_root: Path, frontmatter: dict[str, Any]) -> list[Ta
 
 def soft_dependency_warnings(repo_root: Path, frontmatter: dict[str, Any]) -> list[TaskReferenceStatus]:
     refs = string_list_field(frontmatter, "soft_depends_on", label="task")
-    return [status for status in (task_reference_status(repo_root, ref) for ref in refs) if not status.terminal]
+    statuses = (task_reference_status(repo_root, ref, soft=True) for ref in refs)
+    return [status for status in statuses if not status.terminal]
 
 
 def assert_dependency_gate(repo_root: Path, frontmatter: dict[str, Any], *, target_status: str) -> None:

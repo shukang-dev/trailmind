@@ -183,6 +183,7 @@ def set_task_status(
     frontmatter, body = read_entity_user_facing(task_path, label="task")
     current_status, target_status = validate_task_transition(frontmatter.get("status", "created"), status)
     assert_dependency_gate(repo_root, frontmatter, target_status=target_status)
+    warning = format_soft_dependency_warning(soft_dependency_warnings(repo_root, frontmatter))
     frontmatter["status"] = target_status
     body = append_activity_entry(
         body,
@@ -194,7 +195,7 @@ def set_task_status(
         ),
     )
     write_entity(task_path, frontmatter=frontmatter, body=body)
-    return task_path, format_soft_dependency_warning(soft_dependency_warnings(repo_root, frontmatter))
+    return task_path, warning
 
 
 def update_task_status(repo_root: Path, *, task_ref: str, status: str) -> Path:
