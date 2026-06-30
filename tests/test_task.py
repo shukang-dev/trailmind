@@ -77,7 +77,7 @@ def test_task_add_creates_task(tmp_path: Path):
     assert frontmatter["title"] == "Build Login Flow"
     assert frontmatter["filer"] == "alice"
     assert frontmatter["owner"] == "alice"
-    assert frontmatter["status"] == "planned"
+    assert frontmatter["status"] == "created"
     assert date.fromisoformat(frontmatter["created"])
     assert frontmatter["start"] is None
     assert frontmatter["due"] is None
@@ -119,6 +119,50 @@ def test_task_update_status(tmp_path: Path):
     task_path = repo / "projects" / "demo_app" / "mvp" / "tasks" / "T-123456-001-build-login-flow.md"
     frontmatter, _body = read_entity(task_path)
     assert frontmatter["status"] == "in_progress"
+
+
+def test_task_set_status_validates_transition_and_logs(tmp_path: Path):
+    repo = _repo_with_epic(tmp_path)
+    add_result = _add_task(repo)
+    assert add_result.exit_code == 0
+
+    result = CliRunner().invoke(
+        cli,
+        [
+            "task",
+            "set-status",
+            "T-123456-001",
+            "ready",
+            "--actor",
+            "alice",
+            "--note",
+            "Ready for implementation.",
+        ],
+        obj={"cwd": repo},
+    )
+
+    assert result.exit_code == 0
+    task_path = repo / "projects" / "demo_app" / "mvp" / "tasks" / "T-123456-001-build-login-flow.md"
+    frontmatter, body = read_entity(task_path)
+    assert frontmatter["status"] == "ready"
+    assert "Status changed from created to ready by alice. Ready for implementation." in body
+
+
+def test_task_set_status_rejects_invalid_transition(tmp_path: Path):
+    repo = _repo_with_epic(tmp_path)
+    add_result = _add_task(repo)
+    assert add_result.exit_code == 0
+
+    result = CliRunner().invoke(
+        cli,
+        ["task", "set-status", "T-123456-001", "done", "--actor", "alice"],
+        obj={"cwd": repo},
+    )
+
+    assert result.exit_code == 1
+    assert "error:" in result.output
+    assert "invalid task status transition" in result.output
+    assert "Traceback" not in result.output
 
 
 @pytest.mark.parametrize(

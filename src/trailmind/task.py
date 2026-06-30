@@ -3,14 +3,13 @@ from __future__ import annotations
 from datetime import date
 from pathlib import Path, PurePosixPath, PureWindowsPath
 
-from trailmind.entity_io import EntityFormatError, read_entity, write_entity
+from trailmind.entity_io import write_entity
 from trailmind.errors import TrailmindError
 from trailmind.ids import next_entity_id, slugify
+from trailmind.log import action_activity_entry, append_activity_entry, read_entity_user_facing
 from trailmind.resolver import resolve_entity
 from trailmind.roster import Roster
-
-
-TASK_STATUSES = ("planned", "in_progress", "integration", "blocked", "done")
+from trailmind.task_status import TASK_STATUSES, validate_task_status, validate_task_transition
 
 
 def split_csv(value: str) -> list[str]:
@@ -47,17 +46,6 @@ def _resolve_epic(repo_root: Path, raw: str) -> Path:
     return candidate
 
 
-def _read_entity_user_facing(path: Path) -> tuple[dict[str, object], str]:
-    try:
-        return read_entity(path)
-    except EntityFormatError as exc:
-        raise TrailmindError(str(exc)) from exc
-    except UnicodeDecodeError as exc:
-        raise TrailmindError(f"could not read task file {path}: file must be valid UTF-8") from exc
-    except OSError as exc:
-        raise TrailmindError(f"could not read task file {path}: {exc}") from exc
-
-
 def _initial_body(title: str, filer: str) -> str:
     today = date.today().isoformat()
     return (
@@ -71,61 +59,10 @@ def _initial_body(title: str, filer: str) -> str:
     )
 
 
-def _activity_text(value: str) -> str:
-    return " ".join(value.split())
-
-
-def _activity_entry(action: str, actor: str, note: str | None = None) -> str:
-    sanitized_actor = _activity_text(actor)
-    if not sanitized_actor:
-        raise TrailmindError("activity actor is required")
-
-    entry = f"- {date.today().isoformat()}: {action} by {sanitized_actor}."
-    if note is not None:
-        sanitized_note = _activity_text(note)
-        if sanitized_note:
-            entry = f"{entry} {sanitized_note}"
-    return entry
-
-
 def _ensure_tasks_directory(tasks_path: Path) -> None:
     if tasks_path.exists() and not tasks_path.is_dir():
         raise TrailmindError(f"tasks path {tasks_path} is not a directory")
     tasks_path.mkdir(parents=True, exist_ok=True)
-
-
-def _append_activity_entry(body: str, entry: str) -> str:
-    text = body.rstrip("\n")
-    if not text:
-        return f"## Activity Log\n\n{entry}\n"
-
-    lines = text.splitlines()
-    for index, line in enumerate(lines):
-        if line.strip() != "## Activity Log":
-            continue
-
-        section_end = len(lines)
-        for cursor in range(index + 1, len(lines)):
-            if lines[cursor].startswith("## "):
-                section_end = cursor
-                break
-
-        before = lines[:section_end]
-        before.append(entry)
-        after = lines[section_end:]
-        if after:
-            before.append("")
-            before.extend(after)
-        return "\n".join(before) + "\n"
-
-    return f"{text}\n\n## Activity Log\n\n{entry}\n"
-
-
-def _validate_status(status: str) -> str:
-    if status not in TASK_STATUSES:
-        expected = ", ".join(TASK_STATUSES)
-        raise TrailmindError(f"invalid task status {status!r}; expected one of: {expected}")
-    return status
 
 
 def add_task(
@@ -158,7 +95,7 @@ def add_task(
             "title": title,
             "filer": filer_shortname,
             "owner": owner_shortname,
-            "status": "planned",
+            "status": "created",
             "created": date.today().isoformat(),
             "start": None,
             "due": None,
@@ -175,19 +112,43 @@ def add_task(
     return task_path
 
 
-def update_task_status(repo_root: Path, *, task_ref: str, status: str) -> Path:
-    status = _validate_status(status)
+def set_task_status(
+    repo_root: Path,
+    *,
+    task_ref: str,
+    status: str,
+    actor: str,
+    note: str | None = None,
+) -> Path:
     task_path = resolve_entity(repo_root, raw=task_ref, entity="T")
-    frontmatter, body = _read_entity_user_facing(task_path)
-    frontmatter["status"] = status
+    frontmatter, body = read_entity_user_facing(task_path, label="task")
+    current_status, target_status = validate_task_transition(frontmatter.get("status", "created"), status)
+    frontmatter["status"] = target_status
+    body = append_activity_entry(
+        body,
+        action_activity_entry(
+            action=f"Status changed from {current_status} to {target_status}",
+            actor_label="actor",
+            actor=actor,
+            note=note,
+        ),
+    )
     write_entity(task_path, frontmatter=frontmatter, body=body)
     return task_path
 
 
+def update_task_status(repo_root: Path, *, task_ref: str, status: str) -> Path:
+    status = validate_task_status(status)
+    return set_task_status(repo_root, task_ref=task_ref, status=status, actor="trailmind")
+
+
 def close_task(repo_root: Path, *, task_ref: str, closer: str, note: str) -> Path:
     task_path = resolve_entity(repo_root, raw=task_ref, entity="T")
-    frontmatter, body = _read_entity_user_facing(task_path)
+    frontmatter, body = read_entity_user_facing(task_path, label="task")
     frontmatter["status"] = "done"
-    body = _append_activity_entry(body, _activity_entry("Closed", closer, note))
+    body = append_activity_entry(
+        body,
+        action_activity_entry(action="Closed", actor_label="closer", actor=closer, note=note),
+    )
     write_entity(task_path, frontmatter=frontmatter, body=body)
     return task_path

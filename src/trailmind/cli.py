@@ -23,7 +23,7 @@ from trailmind.project import init_project
 from trailmind.roster import Roster
 from trailmind.security_scan import scan_paths
 from trailmind.serve import serve_repo
-from trailmind.task import add_task, close_task, split_csv, update_task_status
+from trailmind.task import add_task, close_task, set_task_status, split_csv, update_task_status
 
 
 @click.group()
@@ -246,6 +246,24 @@ def task_add(
 def task_update(ctx: click.Context, task_ref: str, status: str) -> None:
     root = find_repo_root(_cwd_from_context(ctx))
     touched = update_task_status(root, task_ref=task_ref, status=status)
+    _echo_touched(root, [touched])
+
+
+@task_group.command("set-status")
+@click.argument("task_ref")
+@click.argument("status")
+@click.option("--actor", required=True)
+@click.option("--note", default=None)
+@click.pass_context
+def task_set_status(
+    ctx: click.Context,
+    task_ref: str,
+    status: str,
+    actor: str,
+    note: str | None,
+) -> None:
+    root = find_repo_root(_cwd_from_context(ctx))
+    touched = set_task_status(root, task_ref=task_ref, status=status, actor=actor, note=note)
     _echo_touched(root, [touched])
 
 
