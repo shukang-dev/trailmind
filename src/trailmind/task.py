@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from dataclasses import dataclass
 from datetime import date
 from pathlib import Path, PurePosixPath, PureWindowsPath
 
@@ -9,7 +10,12 @@ from trailmind.ids import next_entity_id, slugify
 from trailmind.log import action_activity_entry, append_activity_entry, read_entity_user_facing
 from trailmind.resolver import resolve_entity
 from trailmind.roster import Roster
-from trailmind.task_status import validate_task_status, validate_task_transition
+from trailmind.task_status import (
+    STATUS_NORMALIZATIONS,
+    normalize_task_status,
+    validate_task_status,
+    validate_task_transition,
+)
 
 
 def split_csv(value: str) -> list[str]:
@@ -63,6 +69,47 @@ def _ensure_tasks_directory(tasks_path: Path) -> None:
     if tasks_path.exists() and not tasks_path.is_dir():
         raise TrailmindError(f"tasks path {tasks_path} is not a directory")
     tasks_path.mkdir(parents=True, exist_ok=True)
+
+
+@dataclass(frozen=True)
+class StatusNormalization:
+    path: Path
+    task_id: str
+    old_status: str
+    new_status: str
+    changed: bool
+
+
+def _iter_task_files(repo_root: Path) -> list[Path]:
+    projects_path = repo_root / "projects"
+    if not projects_path.exists():
+        return []
+    return sorted(path for path in projects_path.glob("*/*/tasks/T-*.md") if path.is_file())
+
+
+def normalize_task_statuses(repo_root: Path, *, write: bool) -> list[StatusNormalization]:
+    normalizations: list[StatusNormalization] = []
+    for task_path in _iter_task_files(repo_root):
+        frontmatter, body = read_entity_user_facing(task_path, label="task")
+        old_status = str(frontmatter.get("status", "created")).strip()
+        if old_status not in STATUS_NORMALIZATIONS:
+            normalize_task_status(old_status)
+            continue
+        new_status = normalize_task_status(old_status)
+        task_id = str(frontmatter.get("id") or task_path.stem)
+        if write:
+            frontmatter["status"] = new_status
+            write_entity(task_path, frontmatter=frontmatter, body=body)
+        normalizations.append(
+            StatusNormalization(
+                path=task_path,
+                task_id=task_id,
+                old_status=old_status,
+                new_status=new_status,
+                changed=write,
+            )
+        )
+    return normalizations
 
 
 def add_task(

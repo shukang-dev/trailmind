@@ -413,6 +413,44 @@ def test_task_add_missing_epic_is_user_facing(tmp_path: Path):
     assert "Traceback" not in result.output
 
 
+def test_task_normalize_statuses_reports_legacy_statuses_without_writing(tmp_path: Path):
+    repo = _repo_with_epic(tmp_path)
+    add_result = _add_task(repo)
+    assert add_result.exit_code == 0
+    task_path = repo / "projects" / "demo_app" / "mvp" / "tasks" / "T-123456-001-build-login-flow.md"
+    frontmatter, body = read_entity(task_path)
+    frontmatter["status"] = "planned"
+    from trailmind.entity_io import write_entity
+
+    write_entity(task_path, frontmatter=frontmatter, body=body)
+
+    result = CliRunner().invoke(cli, ["task", "normalize-statuses"], obj={"cwd": repo})
+
+    assert result.exit_code == 0
+    assert "T-123456-001 planned -> created" in result.output
+    reread_frontmatter, _body = read_entity(task_path)
+    assert reread_frontmatter["status"] == "planned"
+
+
+def test_task_normalize_statuses_writes_legacy_statuses_when_requested(tmp_path: Path):
+    repo = _repo_with_epic(tmp_path)
+    add_result = _add_task(repo)
+    assert add_result.exit_code == 0
+    task_path = repo / "projects" / "demo_app" / "mvp" / "tasks" / "T-123456-001-build-login-flow.md"
+    frontmatter, body = read_entity(task_path)
+    frontmatter["status"] = "integration"
+    from trailmind.entity_io import write_entity
+
+    write_entity(task_path, frontmatter=frontmatter, body=body)
+
+    result = CliRunner().invoke(cli, ["task", "normalize-statuses", "--write"], obj={"cwd": repo})
+
+    assert result.exit_code == 0
+    assert "T-123456-001 integration -> in_progress" in result.output
+    reread_frontmatter, _body = read_entity(task_path)
+    assert reread_frontmatter["status"] == "in_progress"
+
+
 @pytest.mark.parametrize(
     ("value", "expected"),
     [

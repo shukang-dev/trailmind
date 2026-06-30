@@ -23,7 +23,14 @@ from trailmind.project import init_project
 from trailmind.roster import Roster
 from trailmind.security_scan import scan_paths
 from trailmind.serve import serve_repo
-from trailmind.task import add_task, close_task, set_task_status, split_csv, update_task_status
+from trailmind.task import (
+    add_task,
+    close_task,
+    normalize_task_statuses,
+    set_task_status,
+    split_csv,
+    update_task_status,
+)
 
 
 @click.group()
@@ -265,6 +272,20 @@ def task_set_status(
     root = find_repo_root(_cwd_from_context(ctx))
     touched = set_task_status(root, task_ref=task_ref, status=status, actor=actor, note=note)
     _echo_touched(root, [touched])
+
+
+@task_group.command("normalize-statuses")
+@click.option("--write", "write_changes", is_flag=True, help="Rewrite legacy statuses in task files.")
+@click.pass_context
+def task_normalize_statuses(ctx: click.Context, write_changes: bool) -> None:
+    root = find_repo_root(_cwd_from_context(ctx))
+    normalizations = normalize_task_statuses(root, write=write_changes)
+    if not normalizations:
+        click.echo("No legacy task statuses found.")
+        return
+    for item in normalizations:
+        suffix = " updated" if item.changed else " dry-run"
+        click.echo(f"{item.task_id} {item.old_status} -> {item.new_status}{suffix}")
 
 
 @task_group.command("close")
