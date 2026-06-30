@@ -103,6 +103,36 @@ trailmind milestone add \
 trailmind scan
 ```
 
+## 项目自动化
+
+Trailmind v0.2 提供任务状态流转、依赖、交付物、收件箱分诊和 sweep 报告等工作流辅助能力。详见
+[v0.2 Project Automation 指南](docs/v0.2-project-automation.md)。
+
+```sh
+trailmind task add \
+  --epic projects/demo_app/mvp \
+  --filer alice@example.com \
+  --owner alice@example.com \
+  --title "Build Sign-In Form" \
+  --depends-on T-123456-001 \
+  --soft-depends-on T-123456-002 \
+  --known-issues I-123456-001 \
+  --deliverables "tests pass,docs updated"
+
+trailmind task set-status T-123456-003 ready --actor alice --note "Ready to start."
+trailmind task normalize-statuses
+trailmind task normalize-statuses --write
+
+trailmind task deliverable add T-123456-003 --item "docs updated" --actor alice
+trailmind task deliverable complete T-123456-003 --item "docs updated" --actor alice
+
+trailmind inbox add --epic projects/demo_app/mvp --author alice --title "Review release checklist" --note "Confirm before release."
+trailmind inbox list --epic projects/demo_app/mvp
+trailmind inbox resolve IN-20260630-001 --resolver alice --note "Filed a follow-up task."
+
+trailmind sweep --epic projects/demo_app/mvp
+```
+
 ## 主要功能
 
 - 用 Markdown 存储 Project、Epic、Task、Issue 和 Milestone。

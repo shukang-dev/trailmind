@@ -15,6 +15,7 @@ from trailmind.dashboard import (
 )
 from trailmind.epic import init_epic
 from trailmind.errors import TrailmindError
+from trailmind.inbox import add_inbox_item, list_inbox_items, resolve_inbox_item
 from trailmind.issue import add_issue, carry_issue, close_issue, link_issue
 from trailmind.log import log_activity
 from trailmind.milestone import add_milestone
@@ -23,7 +24,18 @@ from trailmind.project import init_project
 from trailmind.roster import Roster
 from trailmind.security_scan import scan_paths
 from trailmind.serve import serve_repo
-from trailmind.task import add_task, close_task, split_csv, update_task_status
+from trailmind.sweep import build_sweep_report, format_sweep_report
+from trailmind.task import (
+    add_task,
+    add_task_deliverable,
+    close_task,
+    complete_task_deliverable,
+    normalize_task_statuses,
+    set_task_status,
+    split_csv,
+    update_task_status,
+)
+from trailmind.task_rules import linked_open_issues_for_task
 
 
 @click.group()
@@ -60,6 +72,20 @@ def status_command(ctx: click.Context, overview: bool, project_slug: str | None,
     _echo_touched(root, [touched])
 
 
+@cli.command("sweep")
+@click.option("--project", "project_slug", default=None)
+@click.option("--epic", "epic_ref", default=None)
+@click.option("--stale-days", default=7, show_default=True, type=click.IntRange(min=1))
+@click.pass_context
+def sweep_command(ctx: click.Context, project_slug: str | None, epic_ref: str | None, stale_days: int) -> None:
+    root = find_repo_root(_cwd_from_context(ctx))
+    selected = sum(1 for item in [project_slug, epic_ref] if item)
+    if selected > 1:
+        raise TrailmindError("sweep accepts only one scope flag")
+    report = build_sweep_report(root, project=project_slug, epic=epic_ref, stale_days=stale_days)
+    click.echo(format_sweep_report(report), nl=False)
+
+
 @cli.command("serve")
 @click.option("--host", default="127.0.0.1", show_default=True)
 @click.option("--port", default=8888, show_default=True, type=int)
@@ -81,6 +107,56 @@ def scan_command(ctx: click.Context) -> None:
         noun = "finding" if count == 1 else "findings"
         raise TrailmindError(f"security scan found {count} {noun}")
     click.echo("scan passed")
+
+
+@cli.group("inbox")
+def inbox_group() -> None:
+    """Capture and triage project or epic inbox items."""
+
+
+@inbox_group.command("add")
+@click.option("--project", "project_slug", default=None)
+@click.option("--epic", "epic_ref", default=None)
+@click.option("--author", required=True)
+@click.option("--title", required=True)
+@click.option("--note", required=True)
+@click.pass_context
+def inbox_add(
+    ctx: click.Context,
+    project_slug: str | None,
+    epic_ref: str | None,
+    author: str,
+    title: str,
+    note: str,
+) -> None:
+    root = find_repo_root(_cwd_from_context(ctx))
+    touched = add_inbox_item(root, project=project_slug, epic=epic_ref, author=author, title=title, note=note)
+    _echo_touched(root, [touched])
+
+
+@inbox_group.command("list")
+@click.option("--project", "project_slug", default=None)
+@click.option("--epic", "epic_ref", default=None)
+@click.pass_context
+def inbox_list(ctx: click.Context, project_slug: str | None, epic_ref: str | None) -> None:
+    root = find_repo_root(_cwd_from_context(ctx))
+    items = list_inbox_items(root, project=project_slug, epic=epic_ref)
+    if not items:
+        click.echo("No inbox items.")
+        return
+    for item in items:
+        click.echo(f"{item.item_id} {item.status} {item.title}")
+
+
+@inbox_group.command("resolve")
+@click.argument("item_ref")
+@click.option("--resolver", required=True)
+@click.option("--note", required=True)
+@click.pass_context
+def inbox_resolve(ctx: click.Context, item_ref: str, resolver: str, note: str) -> None:
+    root = find_repo_root(_cwd_from_context(ctx))
+    touched = resolve_inbox_item(root, item_ref=item_ref, resolver=resolver, note=note)
+    _echo_touched(root, [touched])
 
 
 def _cwd_from_context(ctx: click.Context) -> Path:
@@ -210,6 +286,7 @@ def task_group() -> None:
 @click.option("--depends-on", default="")
 @click.option("--soft-depends-on", default="")
 @click.option("--known-issues", default="")
+@click.option("--deliverables", default="")
 @click.pass_context
 def task_add(
     ctx: click.Context,
@@ -222,6 +299,7 @@ def task_add(
     depends_on: str,
     soft_depends_on: str,
     known_issues: str,
+    deliverables: str,
 ) -> None:
     root = find_repo_root(_cwd_from_context(ctx))
     touched = add_task(
@@ -235,6 +313,7 @@ def task_add(
         depends_on=split_csv(depends_on),
         soft_depends_on=split_csv(soft_depends_on),
         known_issues=split_csv(known_issues),
+        deliverables=split_csv(deliverables),
     )
     _echo_touched(root, [touched])
 
@@ -249,6 +328,40 @@ def task_update(ctx: click.Context, task_ref: str, status: str) -> None:
     _echo_touched(root, [touched])
 
 
+@task_group.command("set-status")
+@click.argument("task_ref")
+@click.argument("status")
+@click.option("--actor", required=True)
+@click.option("--note", default=None)
+@click.pass_context
+def task_set_status(
+    ctx: click.Context,
+    task_ref: str,
+    status: str,
+    actor: str,
+    note: str | None,
+) -> None:
+    root = find_repo_root(_cwd_from_context(ctx))
+    touched, warning = set_task_status(root, task_ref=task_ref, status=status, actor=actor, note=note)
+    _echo_touched(root, [touched])
+    if warning:
+        click.echo(warning)
+
+
+@task_group.command("normalize-statuses")
+@click.option("--write", "write_changes", is_flag=True, help="Rewrite legacy statuses in task files.")
+@click.pass_context
+def task_normalize_statuses(ctx: click.Context, write_changes: bool) -> None:
+    root = find_repo_root(_cwd_from_context(ctx))
+    normalizations = normalize_task_statuses(root, write=write_changes)
+    if not normalizations:
+        click.echo("No legacy task statuses found.")
+        return
+    for item in normalizations:
+        suffix = " updated" if item.changed else " dry-run"
+        click.echo(f"{item.task_id} {item.old_status} -> {item.new_status}{suffix}")
+
+
 @task_group.command("close")
 @click.argument("task_ref")
 @click.option("--closer", required=True)
@@ -257,6 +370,41 @@ def task_update(ctx: click.Context, task_ref: str, status: str) -> None:
 def task_close(ctx: click.Context, task_ref: str, closer: str, note: str) -> None:
     root = find_repo_root(_cwd_from_context(ctx))
     touched = close_task(root, task_ref=task_ref, closer=closer, note=note)
+    _echo_touched(root, [touched])
+    try:
+        open_issues = linked_open_issues_for_task(root, touched)
+    except TrailmindError as exc:
+        click.echo(f"linked issue report skipped: {exc.format_message()}")
+        return
+    if open_issues:
+        details = ", ".join(f"{issue.issue_id} {issue.title}" for issue in open_issues)
+        click.echo(f"linked open issues remain: {details}")
+
+
+@task_group.group("deliverable")
+def task_deliverable_group() -> None:
+    """Manage task deliverables."""
+
+
+@task_deliverable_group.command("add")
+@click.argument("task_ref")
+@click.option("--item", required=True)
+@click.option("--actor", required=True)
+@click.pass_context
+def task_deliverable_add(ctx: click.Context, task_ref: str, item: str, actor: str) -> None:
+    root = find_repo_root(_cwd_from_context(ctx))
+    touched = add_task_deliverable(root, task_ref=task_ref, item=item, actor=actor)
+    _echo_touched(root, [touched])
+
+
+@task_deliverable_group.command("complete")
+@click.argument("task_ref")
+@click.option("--item", required=True)
+@click.option("--actor", required=True)
+@click.pass_context
+def task_deliverable_complete(ctx: click.Context, task_ref: str, item: str, actor: str) -> None:
+    root = find_repo_root(_cwd_from_context(ctx))
+    touched = complete_task_deliverable(root, task_ref=task_ref, item=item, actor=actor)
     _echo_touched(root, [touched])
 
 

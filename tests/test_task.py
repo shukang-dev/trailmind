@@ -61,6 +61,14 @@ def _add_task(repo: Path, title: str = "Build Login Flow", extra_args: list[str]
     )
 
 
+def _update_task_status(repo: Path, status: str = "in_progress"):
+    return CliRunner().invoke(
+        cli,
+        ["task", "update", "T-123456-001", "--status", status],
+        obj={"cwd": repo},
+    )
+
+
 def test_task_add_creates_task(tmp_path: Path):
     repo = _repo_with_epic(tmp_path)
 
@@ -77,7 +85,7 @@ def test_task_add_creates_task(tmp_path: Path):
     assert frontmatter["title"] == "Build Login Flow"
     assert frontmatter["filer"] == "alice"
     assert frontmatter["owner"] == "alice"
-    assert frontmatter["status"] == "planned"
+    assert frontmatter["status"] == "created"
     assert date.fromisoformat(frontmatter["created"])
     assert frontmatter["start"] is None
     assert frontmatter["due"] is None
@@ -88,6 +96,8 @@ def test_task_add_creates_task(tmp_path: Path):
     assert frontmatter["depends_on"] == []
     assert frontmatter["soft_depends_on"] == []
     assert frontmatter["known_issues"] == []
+    assert frontmatter["deliverables"] == []
+    assert frontmatter["completed_deliverables"] == []
     assert "## Scope" in body
     assert "## Acceptance" in body
     assert "## Activity Log" in body
@@ -109,16 +119,57 @@ def test_task_update_status(tmp_path: Path):
     add_result = _add_task(repo)
     assert add_result.exit_code == 0
 
+    result = _update_task_status(repo)
+
+    assert result.exit_code == 0
+    task_path = repo / "projects" / "demo_app" / "mvp" / "tasks" / "T-123456-001-build-login-flow.md"
+    frontmatter, body = read_entity(task_path)
+    assert frontmatter["status"] == "in_progress"
+    assert "Status changed from created to in_progress by trailmind." in body
+
+
+def test_task_set_status_validates_transition_and_logs(tmp_path: Path):
+    repo = _repo_with_epic(tmp_path)
+    add_result = _add_task(repo)
+    assert add_result.exit_code == 0
+
     result = CliRunner().invoke(
         cli,
-        ["task", "update", "T-123456-001", "--status", "in_progress"],
+        [
+            "task",
+            "set-status",
+            "T-123456-001",
+            "ready",
+            "--actor",
+            "alice",
+            "--note",
+            "Ready for implementation.",
+        ],
         obj={"cwd": repo},
     )
 
     assert result.exit_code == 0
     task_path = repo / "projects" / "demo_app" / "mvp" / "tasks" / "T-123456-001-build-login-flow.md"
-    frontmatter, _body = read_entity(task_path)
-    assert frontmatter["status"] == "in_progress"
+    frontmatter, body = read_entity(task_path)
+    assert frontmatter["status"] == "ready"
+    assert "Status changed from created to ready by alice. Ready for implementation." in body
+
+
+def test_task_set_status_rejects_invalid_transition(tmp_path: Path):
+    repo = _repo_with_epic(tmp_path)
+    add_result = _add_task(repo)
+    assert add_result.exit_code == 0
+
+    result = CliRunner().invoke(
+        cli,
+        ["task", "set-status", "T-123456-001", "done", "--actor", "alice"],
+        obj={"cwd": repo},
+    )
+
+    assert result.exit_code == 1
+    assert "error:" in result.output
+    assert "invalid task status transition" in result.output
+    assert "Traceback" not in result.output
 
 
 @pytest.mark.parametrize(
@@ -150,6 +201,8 @@ def test_task_close_marks_done_and_logs(tmp_path: Path):
     repo = _repo_with_epic(tmp_path)
     add_result = _add_task(repo)
     assert add_result.exit_code == 0
+    update_result = _update_task_status(repo)
+    assert update_result.exit_code == 0
 
     result = CliRunner().invoke(
         cli,
@@ -165,10 +218,29 @@ def test_task_close_marks_done_and_logs(tmp_path: Path):
     assert body.index("## Activity Log") < body.index("Shipped login flow.")
 
 
+def test_task_close_rejects_invalid_transition_from_created(tmp_path: Path):
+    repo = _repo_with_epic(tmp_path)
+    add_result = _add_task(repo)
+    assert add_result.exit_code == 0
+
+    result = CliRunner().invoke(
+        cli,
+        ["task", "close", "T-123456-001", "--closer", "alice", "--note", "Done."],
+        obj={"cwd": repo},
+    )
+
+    assert result.exit_code == 1
+    assert "error:" in result.output
+    assert "invalid task status transition" in result.output
+    assert "Traceback" not in result.output
+
+
 def test_task_close_sanitizes_multiline_note_before_logging(tmp_path: Path):
     repo = _repo_with_epic(tmp_path)
     add_result = _add_task(repo)
     assert add_result.exit_code == 0
+    update_result = _update_task_status(repo)
+    assert update_result.exit_code == 0
 
     result = CliRunner().invoke(
         cli,
@@ -189,6 +261,8 @@ def test_task_close_sanitizes_multiline_closer_before_logging(tmp_path: Path):
     repo = _repo_with_epic(tmp_path)
     add_result = _add_task(repo)
     assert add_result.exit_code == 0
+    update_result = _update_task_status(repo)
+    assert update_result.exit_code == 0
 
     result = CliRunner().invoke(
         cli,
@@ -215,6 +289,8 @@ def test_task_close_rejects_blank_closer(tmp_path: Path):
     repo = _repo_with_epic(tmp_path)
     add_result = _add_task(repo)
     assert add_result.exit_code == 0
+    update_result = _update_task_status(repo)
+    assert update_result.exit_code == 0
 
     result = CliRunner().invoke(
         cli,
@@ -337,6 +413,70 @@ def test_task_add_missing_epic_is_user_facing(tmp_path: Path):
     assert "error:" in result.output
     assert "epic projects/demo_app/missing does not exist" in result.output
     assert "Traceback" not in result.output
+
+
+def test_task_normalize_statuses_reports_legacy_statuses_without_writing(tmp_path: Path):
+    repo = _repo_with_epic(tmp_path)
+    add_result = _add_task(repo)
+    assert add_result.exit_code == 0
+    task_path = repo / "projects" / "demo_app" / "mvp" / "tasks" / "T-123456-001-build-login-flow.md"
+    frontmatter, body = read_entity(task_path)
+    frontmatter["status"] = "planned"
+    from trailmind.entity_io import write_entity
+
+    write_entity(task_path, frontmatter=frontmatter, body=body)
+
+    result = CliRunner().invoke(cli, ["task", "normalize-statuses"], obj={"cwd": repo})
+
+    assert result.exit_code == 0
+    assert "T-123456-001 planned -> created" in result.output
+    reread_frontmatter, _body = read_entity(task_path)
+    assert reread_frontmatter["status"] == "planned"
+
+
+def test_task_normalize_statuses_writes_legacy_statuses_when_requested(tmp_path: Path):
+    repo = _repo_with_epic(tmp_path)
+    add_result = _add_task(repo)
+    assert add_result.exit_code == 0
+    task_path = repo / "projects" / "demo_app" / "mvp" / "tasks" / "T-123456-001-build-login-flow.md"
+    frontmatter, body = read_entity(task_path)
+    frontmatter["status"] = "integration"
+    from trailmind.entity_io import write_entity
+
+    write_entity(task_path, frontmatter=frontmatter, body=body)
+
+    result = CliRunner().invoke(cli, ["task", "normalize-statuses", "--write"], obj={"cwd": repo})
+
+    assert result.exit_code == 0
+    assert "T-123456-001 integration -> in_progress" in result.output
+    reread_frontmatter, _body = read_entity(task_path)
+    assert reread_frontmatter["status"] == "in_progress"
+
+
+def test_task_normalize_statuses_write_does_not_partially_update_when_later_task_is_invalid(tmp_path: Path):
+    repo = _repo_with_epic(tmp_path)
+    first_add_result = _add_task(repo)
+    assert first_add_result.exit_code == 0
+    second_add_result = _add_task(repo, title="Build Logout Flow")
+    assert second_add_result.exit_code == 0
+    first_task_path = repo / "projects" / "demo_app" / "mvp" / "tasks" / "T-123456-001-build-login-flow.md"
+    second_task_path = repo / "projects" / "demo_app" / "mvp" / "tasks" / "T-123456-002-build-logout-flow.md"
+    first_frontmatter, first_body = read_entity(first_task_path)
+    second_frontmatter, second_body = read_entity(second_task_path)
+    first_frontmatter["status"] = "planned"
+    second_frontmatter["status"] = "paused"
+    from trailmind.entity_io import write_entity
+
+    write_entity(first_task_path, frontmatter=first_frontmatter, body=first_body)
+    write_entity(second_task_path, frontmatter=second_frontmatter, body=second_body)
+
+    result = CliRunner().invoke(cli, ["task", "normalize-statuses", "--write"], obj={"cwd": repo})
+
+    assert result.exit_code == 1
+    assert "invalid task status" in result.output
+    assert "Traceback" not in result.output
+    reread_first_frontmatter, _body = read_entity(first_task_path)
+    assert reread_first_frontmatter["status"] == "planned"
 
 
 @pytest.mark.parametrize(

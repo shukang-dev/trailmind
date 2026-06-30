@@ -7,7 +7,7 @@ from click.testing import CliRunner
 import trailmind.issue as issue_module
 import trailmind.log as log_module
 from trailmind.cli import cli
-from trailmind.entity_io import read_entity
+from trailmind.entity_io import read_entity, write_entity
 
 
 def _repo_with_epic(tmp_path: Path) -> Path:
@@ -95,14 +95,14 @@ def _add_task(repo: Path):
     )
 
 
-def _add_issue(repo: Path, title: str = "Login Fails"):
+def _add_issue(repo: Path, title: str = "Login Fails", epic: str = "projects/demo_app/mvp"):
     return CliRunner().invoke(
         cli,
         [
             "issue",
             "add",
             "--epic",
-            "projects/demo_app/mvp",
+            epic,
             "--filer",
             "alice@example.com",
             "--title",
@@ -114,6 +114,18 @@ def _add_issue(repo: Path, title: str = "Login Fails"):
         ],
         obj={"cwd": repo},
     )
+
+
+def _move_task_to_in_progress(repo: Path):
+    return CliRunner().invoke(
+        cli,
+        ["task", "set-status", "T-123456-001", "in_progress", "--actor", "alice"],
+        obj={"cwd": repo},
+    )
+
+
+def _login_task_path(repo: Path) -> Path:
+    return repo / "projects" / "demo_app" / "mvp" / "tasks" / "T-123456-001-build-login-flow.md"
 
 
 def test_issue_add_link_close_and_log(tmp_path: Path):
@@ -439,3 +451,176 @@ def test_issue_and_milestone_add_when_folder_path_is_file_is_user_facing(
     assert message in result.output
     assert "not a directory" in result.output
     assert "Traceback" not in result.output
+
+
+def test_task_close_reports_linked_open_issues(tmp_path: Path):
+    repo = _repo_with_epic(tmp_path)
+    task_result = _add_task(repo)
+    assert task_result.exit_code == 0
+    issue_result = _add_issue(repo)
+    assert issue_result.exit_code == 0
+    link_result = CliRunner().invoke(
+        cli,
+        ["issue", "link", "--issue", "I-123456-001", "--task", "T-123456-001"],
+        obj={"cwd": repo},
+    )
+    assert link_result.exit_code == 0
+    progress = _move_task_to_in_progress(repo)
+    assert progress.exit_code == 0
+
+    result = CliRunner().invoke(
+        cli,
+        ["task", "close", "T-123456-001", "--closer", "alice", "--note", "Task work complete."],
+        obj={"cwd": repo},
+    )
+
+    assert result.exit_code == 0
+    assert "projects/demo_app/mvp/tasks/T-123456-001-build-login-flow.md" in result.output
+    assert "linked open issues remain" in result.output
+    assert "I-123456-001" in result.output
+
+
+def test_task_close_does_not_report_closed_linked_issues(tmp_path: Path):
+    repo = _repo_with_epic(tmp_path)
+    task_result = _add_task(repo)
+    assert task_result.exit_code == 0
+    issue_result = _add_issue(repo)
+    assert issue_result.exit_code == 0
+    link_result = CliRunner().invoke(
+        cli,
+        ["issue", "link", "--issue", "I-123456-001", "--task", "T-123456-001"],
+        obj={"cwd": repo},
+    )
+    assert link_result.exit_code == 0
+    close_issue_result = CliRunner().invoke(
+        cli,
+        [
+            "issue",
+            "close",
+            "I-123456-001",
+            "--closer",
+            "alice",
+            "--status",
+            "done",
+            "--note",
+            "Already fixed.",
+        ],
+        obj={"cwd": repo},
+    )
+    assert close_issue_result.exit_code == 0
+    progress = _move_task_to_in_progress(repo)
+    assert progress.exit_code == 0
+
+    result = CliRunner().invoke(
+        cli,
+        ["task", "close", "T-123456-001", "--closer", "alice", "--note", "Task work complete."],
+        obj={"cwd": repo},
+    )
+
+    assert result.exit_code == 0
+    assert "projects/demo_app/mvp/tasks/T-123456-001-build-login-flow.md" in result.output
+    assert "linked open issues remain" not in result.output
+    assert "I-123456-001" not in result.output
+
+
+def test_task_close_warns_when_linked_issue_report_is_ambiguous(tmp_path: Path):
+    repo = _repo_with_epic(tmp_path)
+    task_result = _add_task(repo)
+    assert task_result.exit_code == 0
+    issue_result = _add_issue(repo)
+    assert issue_result.exit_code == 0
+    link_result = CliRunner().invoke(
+        cli,
+        ["issue", "link", "--issue", "I-123456-001", "--task", "T-123456-001"],
+        obj={"cwd": repo},
+    )
+    assert link_result.exit_code == 0
+    duplicate_issue_path = repo / "projects" / "demo_app" / "mvp" / "issues" / "I-123456-001-duplicate.md"
+    write_entity(
+        duplicate_issue_path,
+        frontmatter={
+            "id": "I-123456-001",
+            "title": "Duplicate Login Issue",
+            "filer": "alice",
+            "status": "open",
+            "severity": "high",
+            "created": date.today().isoformat(),
+            "linked_tasks": ["T-123456-001"],
+            "carried_into": [],
+        },
+        body="# Duplicate Login Issue\n",
+    )
+    progress = _move_task_to_in_progress(repo)
+    assert progress.exit_code == 0
+
+    result = CliRunner().invoke(
+        cli,
+        ["task", "close", "T-123456-001", "--closer", "alice", "--note", "Task work complete."],
+        obj={"cwd": repo},
+    )
+
+    assert result.exit_code == 0
+    assert "projects/demo_app/mvp/tasks/T-123456-001-build-login-flow.md" in result.output
+    assert "linked issue report skipped:" in result.output
+    task_frontmatter, _task_body = read_entity(_login_task_path(repo))
+    assert task_frontmatter["status"] == "done"
+
+
+def test_task_close_warns_when_known_issues_is_malformed(tmp_path: Path):
+    repo = _repo_with_epic(tmp_path)
+    task_result = _add_task(repo)
+    assert task_result.exit_code == 0
+    progress = _move_task_to_in_progress(repo)
+    assert progress.exit_code == 0
+    task_path = _login_task_path(repo)
+    task_frontmatter, task_body = read_entity(task_path)
+    task_frontmatter["known_issues"] = "I-123456-001"
+    write_entity(task_path, frontmatter=task_frontmatter, body=task_body)
+
+    result = CliRunner().invoke(
+        cli,
+        ["task", "close", "T-123456-001", "--closer", "alice", "--note", "Task work complete."],
+        obj={"cwd": repo},
+    )
+
+    assert result.exit_code == 0
+    assert "projects/demo_app/mvp/tasks/T-123456-001-build-login-flow.md" in result.output
+    assert "linked issue report skipped:" in result.output
+    task_frontmatter, _task_body = read_entity(task_path)
+    assert task_frontmatter["status"] == "done"
+
+
+def test_task_close_reports_same_epic_linked_issue_when_duplicate_id_exists_elsewhere(tmp_path: Path):
+    repo = _repo_with_epic(tmp_path)
+    _add_second_epic(repo)
+    task_result = _add_task(repo)
+    assert task_result.exit_code == 0
+    issue_result = _add_issue(repo)
+    assert issue_result.exit_code == 0
+    duplicate_issue_result = _add_issue(repo, title="Next Epic Login Fails", epic="projects/demo_app/next")
+    assert duplicate_issue_result.exit_code == 0
+    link_result = CliRunner().invoke(
+        cli,
+        [
+            "issue",
+            "link",
+            "--issue",
+            "projects/demo_app/mvp/issues/I-123456-001-login-fails.md",
+            "--task",
+            "T-123456-001",
+        ],
+        obj={"cwd": repo},
+    )
+    assert link_result.exit_code == 0
+    progress = _move_task_to_in_progress(repo)
+    assert progress.exit_code == 0
+
+    result = CliRunner().invoke(
+        cli,
+        ["task", "close", "T-123456-001", "--closer", "alice", "--note", "Task work complete."],
+        obj={"cwd": repo},
+    )
+
+    assert result.exit_code == 0
+    assert "linked open issues remain: I-123456-001 Login Fails" in result.output
+    assert "Next Epic Login Fails" not in result.output

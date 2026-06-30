@@ -1,20 +1,39 @@
 from __future__ import annotations
 
+from dataclasses import dataclass
 from datetime import date
 from pathlib import Path, PurePosixPath, PureWindowsPath
+from typing import Any
 
-from trailmind.entity_io import EntityFormatError, read_entity, write_entity
+from trailmind.entity_io import write_entity
 from trailmind.errors import TrailmindError
 from trailmind.ids import next_entity_id, slugify
+from trailmind.log import action_activity_entry, append_activity_entry, read_entity_user_facing
 from trailmind.resolver import resolve_entity
 from trailmind.roster import Roster
-
-
-TASK_STATUSES = ("planned", "in_progress", "integration", "blocked", "done")
+from trailmind.task_rules import (
+    assert_deliverables_gate,
+    assert_dependency_gate,
+    format_soft_dependency_warning,
+    normalize_deliverable_item,
+    soft_dependency_warnings,
+    string_list_field,
+)
+from trailmind.task_status import (
+    STATUS_NORMALIZATIONS,
+    is_terminal_task_status,
+    normalize_task_status,
+    validate_task_status,
+    validate_task_transition,
+)
 
 
 def split_csv(value: str) -> list[str]:
     return [item.strip() for item in value.split(",") if item.strip()]
+
+
+def _normalize_deliverable_items(items: list[str]) -> list[str]:
+    return [item for item in (normalize_deliverable_item(item) for item in items) if item]
 
 
 def _missing_epic(raw: str) -> TrailmindError:
@@ -47,17 +66,6 @@ def _resolve_epic(repo_root: Path, raw: str) -> Path:
     return candidate
 
 
-def _read_entity_user_facing(path: Path) -> tuple[dict[str, object], str]:
-    try:
-        return read_entity(path)
-    except EntityFormatError as exc:
-        raise TrailmindError(str(exc)) from exc
-    except UnicodeDecodeError as exc:
-        raise TrailmindError(f"could not read task file {path}: file must be valid UTF-8") from exc
-    except OSError as exc:
-        raise TrailmindError(f"could not read task file {path}: {exc}") from exc
-
-
 def _initial_body(title: str, filer: str) -> str:
     today = date.today().isoformat()
     return (
@@ -71,61 +79,61 @@ def _initial_body(title: str, filer: str) -> str:
     )
 
 
-def _activity_text(value: str) -> str:
-    return " ".join(value.split())
-
-
-def _activity_entry(action: str, actor: str, note: str | None = None) -> str:
-    sanitized_actor = _activity_text(actor)
-    if not sanitized_actor:
-        raise TrailmindError("activity actor is required")
-
-    entry = f"- {date.today().isoformat()}: {action} by {sanitized_actor}."
-    if note is not None:
-        sanitized_note = _activity_text(note)
-        if sanitized_note:
-            entry = f"{entry} {sanitized_note}"
-    return entry
-
-
 def _ensure_tasks_directory(tasks_path: Path) -> None:
     if tasks_path.exists() and not tasks_path.is_dir():
         raise TrailmindError(f"tasks path {tasks_path} is not a directory")
     tasks_path.mkdir(parents=True, exist_ok=True)
 
 
-def _append_activity_entry(body: str, entry: str) -> str:
-    text = body.rstrip("\n")
-    if not text:
-        return f"## Activity Log\n\n{entry}\n"
+@dataclass(frozen=True)
+class StatusNormalization:
+    path: Path
+    task_id: str
+    old_status: str
+    new_status: str
+    changed: bool
 
-    lines = text.splitlines()
-    for index, line in enumerate(lines):
-        if line.strip() != "## Activity Log":
+
+@dataclass(frozen=True)
+class _PendingStatusNormalization:
+    result: StatusNormalization
+    frontmatter: dict[str, Any]
+    body: str
+
+
+def _iter_task_files(repo_root: Path) -> list[Path]:
+    projects_path = repo_root / "projects"
+    if not projects_path.exists():
+        return []
+    return sorted(path for path in projects_path.glob("*/*/tasks/T-*.md") if path.is_file())
+
+
+def normalize_task_statuses(repo_root: Path, *, write: bool) -> list[StatusNormalization]:
+    normalizations: list[StatusNormalization] = []
+    pending_writes: list[_PendingStatusNormalization] = []
+    for task_path in _iter_task_files(repo_root):
+        frontmatter, body = read_entity_user_facing(task_path, label="task")
+        old_status = str(frontmatter.get("status", "created")).strip()
+        if old_status not in STATUS_NORMALIZATIONS:
+            normalize_task_status(old_status)
             continue
+        new_status = normalize_task_status(old_status)
+        task_id = str(frontmatter.get("id") or task_path.stem)
+        result = StatusNormalization(
+            path=task_path,
+            task_id=task_id,
+            old_status=old_status,
+            new_status=new_status,
+            changed=write,
+        )
+        normalizations.append(result)
+        pending_writes.append(_PendingStatusNormalization(result=result, frontmatter=frontmatter, body=body))
 
-        section_end = len(lines)
-        for cursor in range(index + 1, len(lines)):
-            if lines[cursor].startswith("## "):
-                section_end = cursor
-                break
-
-        before = lines[:section_end]
-        before.append(entry)
-        after = lines[section_end:]
-        if after:
-            before.append("")
-            before.extend(after)
-        return "\n".join(before) + "\n"
-
-    return f"{text}\n\n## Activity Log\n\n{entry}\n"
-
-
-def _validate_status(status: str) -> str:
-    if status not in TASK_STATUSES:
-        expected = ", ".join(TASK_STATUSES)
-        raise TrailmindError(f"invalid task status {status!r}; expected one of: {expected}")
-    return status
+    if write:
+        for item in pending_writes:
+            item.frontmatter["status"] = item.result.new_status
+            write_entity(item.result.path, frontmatter=item.frontmatter, body=item.body)
+    return normalizations
 
 
 def add_task(
@@ -140,12 +148,14 @@ def add_task(
     depends_on: list[str],
     soft_depends_on: list[str],
     known_issues: list[str],
+    deliverables: list[str],
 ) -> Path:
     epic_path = _resolve_epic(repo_root, epic)
     roster = Roster.load(repo_root / "roster.yaml")
     filer_shortname = roster.require_shortname(filer)
     filer_uid = roster.require_uid(filer)
     owner_shortname = roster.require_shortname(owner)
+    normalized_deliverables = _normalize_deliverable_items(deliverables)
 
     tasks_path = epic_path / "tasks"
     _ensure_tasks_directory(tasks_path)
@@ -158,7 +168,7 @@ def add_task(
             "title": title,
             "filer": filer_shortname,
             "owner": owner_shortname,
-            "status": "planned",
+            "status": "created",
             "created": date.today().isoformat(),
             "start": None,
             "due": None,
@@ -169,25 +179,107 @@ def add_task(
             "depends_on": depends_on,
             "soft_depends_on": soft_depends_on,
             "known_issues": known_issues,
+            "deliverables": normalized_deliverables,
+            "completed_deliverables": [],
         },
         body=_initial_body(title, filer_shortname),
     )
     return task_path
 
 
-def update_task_status(repo_root: Path, *, task_ref: str, status: str) -> Path:
-    status = _validate_status(status)
+def set_task_status(
+    repo_root: Path,
+    *,
+    task_ref: str,
+    status: str,
+    actor: str,
+    note: str | None = None,
+) -> tuple[Path, str | None]:
     task_path = resolve_entity(repo_root, raw=task_ref, entity="T")
-    frontmatter, body = _read_entity_user_facing(task_path)
-    frontmatter["status"] = status
+    frontmatter, body = read_entity_user_facing(task_path, label="task")
+    current_status, target_status = validate_task_transition(frontmatter.get("status", "created"), status)
+    assert_dependency_gate(repo_root, frontmatter, target_status=target_status)
+    assert_deliverables_gate(frontmatter, target_status=target_status)
+    warning = format_soft_dependency_warning(soft_dependency_warnings(repo_root, frontmatter))
+    frontmatter["status"] = target_status
+    body = append_activity_entry(
+        body,
+        action_activity_entry(
+            action=f"Status changed from {current_status} to {target_status}",
+            actor_label="actor",
+            actor=actor,
+            note=note,
+        ),
+    )
+    write_entity(task_path, frontmatter=frontmatter, body=body)
+    return task_path, warning
+
+
+def update_task_status(repo_root: Path, *, task_ref: str, status: str) -> Path:
+    status = validate_task_status(status)
+    path, _warning = set_task_status(repo_root, task_ref=task_ref, status=status, actor="trailmind")
+    return path
+
+
+def add_task_deliverable(repo_root: Path, *, task_ref: str, item: str, actor: str) -> Path:
+    task_path = resolve_entity(repo_root, raw=task_ref, entity="T")
+    frontmatter, body = read_entity_user_facing(task_path, label="task")
+    deliverable = normalize_deliverable_item(item)
+    if not deliverable:
+        raise TrailmindError("deliverable item is required")
+    status = normalize_task_status(frontmatter.get("status", "created"))
+    if is_terminal_task_status(status):
+        raise TrailmindError(f"cannot add deliverable to {status} task")
+    deliverables = _normalize_deliverable_items(string_list_field(frontmatter, "deliverables", label="task"))
+    if deliverable not in deliverables:
+        deliverables.append(deliverable)
+    frontmatter["deliverables"] = deliverables
+    frontmatter["completed_deliverables"] = _normalize_deliverable_items(
+        string_list_field(frontmatter, "completed_deliverables", label="task")
+    )
+    body = append_activity_entry(
+        body,
+        action_activity_entry(action="Added deliverable", actor_label="actor", actor=actor, note=deliverable),
+    )
+    write_entity(task_path, frontmatter=frontmatter, body=body)
+    return task_path
+
+
+def complete_task_deliverable(repo_root: Path, *, task_ref: str, item: str, actor: str) -> Path:
+    task_path = resolve_entity(repo_root, raw=task_ref, entity="T")
+    frontmatter, body = read_entity_user_facing(task_path, label="task")
+    deliverable = normalize_deliverable_item(item)
+    if not deliverable:
+        raise TrailmindError("deliverable item is required")
+    deliverables = _normalize_deliverable_items(string_list_field(frontmatter, "deliverables", label="task"))
+    if deliverable not in deliverables:
+        raise TrailmindError(f"deliverable {deliverable!r} is not defined on task")
+    completed = _normalize_deliverable_items(string_list_field(frontmatter, "completed_deliverables", label="task"))
+    if deliverable not in completed:
+        completed.append(deliverable)
+    frontmatter["deliverables"] = deliverables
+    frontmatter["completed_deliverables"] = completed
+    body = append_activity_entry(
+        body,
+        action_activity_entry(action="Completed deliverable", actor_label="actor", actor=actor, note=deliverable),
+    )
     write_entity(task_path, frontmatter=frontmatter, body=body)
     return task_path
 
 
 def close_task(repo_root: Path, *, task_ref: str, closer: str, note: str) -> Path:
     task_path = resolve_entity(repo_root, raw=task_ref, entity="T")
-    frontmatter, body = _read_entity_user_facing(task_path)
-    frontmatter["status"] = "done"
-    body = _append_activity_entry(body, _activity_entry("Closed", closer, note))
+    frontmatter, body = read_entity_user_facing(task_path, label="task")
+    _current_status, target_status = validate_task_transition(
+        frontmatter.get("status", "created"),
+        "done",
+    )
+    assert_dependency_gate(repo_root, frontmatter, target_status="done")
+    assert_deliverables_gate(frontmatter, target_status="done")
+    frontmatter["status"] = target_status
+    body = append_activity_entry(
+        body,
+        action_activity_entry(action="Closed", actor_label="closer", actor=closer, note=note),
+    )
     write_entity(task_path, frontmatter=frontmatter, body=body)
     return task_path
