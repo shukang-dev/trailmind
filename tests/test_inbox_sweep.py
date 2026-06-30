@@ -559,6 +559,49 @@ def test_sweep_rejects_multiple_scope_flags_without_traceback(tmp_path: Path):
     assert "sweep accepts only one scope flag" in result.output
 
 
+def test_sweep_malformed_task_frontmatter_is_user_facing_without_traceback(tmp_path: Path):
+    repo = _repo_with_project_and_epic(tmp_path)
+    task_path = repo / "projects" / "demo_app" / "mvp" / "tasks" / "T-123456-999-bad.md"
+    task_path.write_text("---\n: bad\n---\n# Bad\n", encoding="utf-8")
+
+    result = CliRunner().invoke(cli, ["sweep", "--epic", "projects/demo_app/mvp"], obj={"cwd": repo})
+
+    assert result.exit_code == 1
+    assert "error:" in result.output
+    assert "Traceback" not in result.output
+    assert (
+        "malformed YAML frontmatter" in result.output
+        or "missing YAML frontmatter" in result.output
+    )
+
+
+@pytest.mark.parametrize(
+    "inbox_path",
+    [
+        Path("projects/demo_app/inbox/IN-20000101-001-bad.md"),
+        Path("projects/demo_app/mvp/inbox/IN-20000101-001-bad.md"),
+    ],
+)
+def test_sweep_malformed_open_inbox_frontmatter_is_user_facing_without_traceback(
+    tmp_path: Path,
+    inbox_path: Path,
+):
+    repo = _repo_with_project_and_epic(tmp_path)
+    malformed_path = repo / inbox_path
+    malformed_path.parent.mkdir(parents=True, exist_ok=True)
+    malformed_path.write_text("---\n: bad\n---\n# Bad\n", encoding="utf-8")
+
+    result = CliRunner().invoke(cli, ["sweep"], obj={"cwd": repo})
+
+    assert result.exit_code == 1
+    assert "error:" in result.output
+    assert "Traceback" not in result.output
+    assert (
+        "malformed YAML frontmatter" in result.output
+        or "missing YAML frontmatter" in result.output
+    )
+
+
 def test_sweep_project_output_includes_paths_for_duplicate_inbox_ids(tmp_path: Path):
     repo = _repo_with_project_and_epic(tmp_path)
     runner = CliRunner()
