@@ -72,6 +72,14 @@ def _write_inbox_item(path: Path, *, item_id: str, title: str, status: str = "op
     )
 
 
+def _file_snapshot(root: Path) -> dict[str, bytes]:
+    return {
+        path.relative_to(root).as_posix(): path.read_bytes()
+        for path in sorted(root.rglob("*"))
+        if path.is_file()
+    }
+
+
 def test_inbox_add_list_and_resolve_for_epic(tmp_path: Path):
     repo = _repo_with_project_and_epic(tmp_path)
     today = date.today().strftime("%Y%m%d")
@@ -525,10 +533,200 @@ def test_sweep_reports_ready_blocked_missing_deliverables_and_open_inbox(tmp_pat
     assert "Project Automation Sweep" in result.output
     assert "Ready" in result.output
     assert "T-123456-001 Build parser" in result.output
+    assert "projects/demo_app/mvp/tasks/T-123456-001-build-parser.md" in result.output
     assert "Blocked" in result.output
     assert "T-123456-002 Build UI" in result.output
+    assert "projects/demo_app/mvp/tasks/T-123456-002-build-ui.md" in result.output
     assert "unsatisfied: T-123456-001" in result.output
     assert "Missing deliverables" in result.output
     assert "screenshots attached" in result.output
     assert "Open inbox" in result.output
     assert "Capture release risk" in result.output
+    assert f"projects/demo_app/mvp/inbox/IN-{date.today():%Y%m%d}-001-capture-release-risk.md" in result.output
+
+
+def test_sweep_rejects_multiple_scope_flags_without_traceback(tmp_path: Path):
+    repo = _repo_with_project_and_epic(tmp_path)
+
+    result = CliRunner().invoke(
+        cli,
+        ["sweep", "--project", "demo_app", "--epic", "projects/demo_app/mvp"],
+        obj={"cwd": repo},
+    )
+
+    assert result.exit_code == 1
+    assert "Traceback" not in result.output
+    assert "sweep accepts only one scope flag" in result.output
+
+
+def test_sweep_project_output_includes_paths_for_duplicate_inbox_ids(tmp_path: Path):
+    repo = _repo_with_project_and_epic(tmp_path)
+    runner = CliRunner()
+    second_epic = runner.invoke(
+        cli,
+        [
+            "epic",
+            "init",
+            "--project",
+            "demo_app",
+            "--slug",
+            "api",
+            "--title",
+            "API",
+            "--goal",
+            "Backend release",
+        ],
+        obj={"cwd": repo},
+    )
+    assert second_epic.exit_code == 0
+    first = runner.invoke(
+        cli,
+        [
+            "inbox",
+            "add",
+            "--epic",
+            "projects/demo_app/mvp",
+            "--author",
+            "alice",
+            "--title",
+            "Duplicate risk",
+            "--note",
+            "MVP risk.",
+        ],
+        obj={"cwd": repo},
+    )
+    assert first.exit_code == 0
+    second = runner.invoke(
+        cli,
+        [
+            "inbox",
+            "add",
+            "--epic",
+            "projects/demo_app/api",
+            "--author",
+            "alice",
+            "--title",
+            "Duplicate risk",
+            "--note",
+            "API risk.",
+        ],
+        obj={"cwd": repo},
+    )
+    assert second.exit_code == 0
+
+    result = runner.invoke(cli, ["sweep", "--project", "demo_app"], obj={"cwd": repo})
+
+    today = date.today().strftime("%Y%m%d")
+    assert result.exit_code == 0
+    assert f"IN-{today}-001 Duplicate risk (projects/demo_app/api/inbox/IN-{today}-001-duplicate-risk.md)" in result.output
+    assert f"IN-{today}-001 Duplicate risk (projects/demo_app/mvp/inbox/IN-{today}-001-duplicate-risk.md)" in result.output
+
+
+def test_sweep_rejects_tasks_path_that_is_not_a_directory_without_traceback(tmp_path: Path):
+    repo = _repo_with_project_and_epic(tmp_path)
+    tasks_path = repo / "projects" / "demo_app" / "mvp" / "tasks"
+    tasks_path.rmdir()
+    tasks_path.write_text("not a directory\n", encoding="utf-8")
+
+    result = CliRunner().invoke(cli, ["sweep", "--epic", "projects/demo_app/mvp"], obj={"cwd": repo})
+
+    assert result.exit_code == 1
+    assert "Traceback" not in result.output
+    assert f"tasks path {tasks_path} is not a directory" in result.output
+
+
+def test_sweep_reports_stale_task_at_cutoff(tmp_path: Path):
+    repo = _repo_with_project_and_epic(tmp_path)
+    runner = CliRunner()
+    add = runner.invoke(
+        cli,
+        [
+            "task",
+            "add",
+            "--epic",
+            "projects/demo_app/mvp",
+            "--filer",
+            "alice@example.com",
+            "--owner",
+            "alice@example.com",
+            "--title",
+            "Old task",
+        ],
+        obj={"cwd": repo},
+    )
+    assert add.exit_code == 0
+    task_path = repo / "projects" / "demo_app" / "mvp" / "tasks" / "T-123456-001-old-task.md"
+    frontmatter, body = read_entity(task_path)
+    frontmatter["created"] = "2000-01-01"
+    body = body.replace(date.today().isoformat(), "2000-01-01")
+    write_entity(task_path, frontmatter=frontmatter, body=body)
+
+    result = runner.invoke(
+        cli,
+        ["sweep", "--epic", "projects/demo_app/mvp", "--stale-days", "7"],
+        obj={"cwd": repo},
+    )
+
+    assert result.exit_code == 0
+    assert "Stale" in result.output
+    assert "T-123456-001 Old task" in result.output
+    assert "projects/demo_app/mvp/tasks/T-123456-001-old-task.md" in result.output
+
+
+def test_sweep_stale_days_must_be_positive(tmp_path: Path):
+    repo = _repo_with_project_and_epic(tmp_path)
+
+    result = CliRunner().invoke(
+        cli,
+        ["sweep", "--epic", "projects/demo_app/mvp", "--stale-days", "0"],
+        obj={"cwd": repo},
+    )
+
+    assert result.exit_code == 2
+    assert "Traceback" not in result.output
+    assert "Invalid value for '--stale-days'" in result.output
+
+
+def test_sweep_is_read_only(tmp_path: Path):
+    repo = _repo_with_project_and_epic(tmp_path)
+    runner = CliRunner()
+    add_task = runner.invoke(
+        cli,
+        [
+            "task",
+            "add",
+            "--epic",
+            "projects/demo_app/mvp",
+            "--filer",
+            "alice@example.com",
+            "--owner",
+            "alice@example.com",
+            "--title",
+            "Read only task",
+        ],
+        obj={"cwd": repo},
+    )
+    assert add_task.exit_code == 0
+    add_inbox = runner.invoke(
+        cli,
+        [
+            "inbox",
+            "add",
+            "--epic",
+            "projects/demo_app/mvp",
+            "--author",
+            "alice",
+            "--title",
+            "Read only inbox",
+            "--note",
+            "Do not mutate.",
+        ],
+        obj={"cwd": repo},
+    )
+    assert add_inbox.exit_code == 0
+    before = _file_snapshot(repo)
+
+    result = runner.invoke(cli, ["sweep", "--epic", "projects/demo_app/mvp"], obj={"cwd": repo})
+
+    assert result.exit_code == 0
+    assert _file_snapshot(repo) == before

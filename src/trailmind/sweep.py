@@ -4,6 +4,7 @@ from dataclasses import dataclass, field
 from datetime import date
 from pathlib import Path
 
+from trailmind.errors import TrailmindError
 from trailmind.inbox import InboxItem, open_inbox_items_under
 from trailmind.log import read_entity_user_facing
 from trailmind.scopes import iter_epic_dirs, resolve_project_dir
@@ -31,6 +32,7 @@ class SweepTask:
 
 @dataclass(frozen=True)
 class SweepReport:
+    repo_root: Path
     ready: list[SweepTask]
     blocked: list[SweepTask]
     stale: list[SweepTask]
@@ -65,6 +67,8 @@ def build_sweep_report(
         tasks_dir = epic_dir / "tasks"
         if not tasks_dir.exists():
             continue
+        if not tasks_dir.is_dir():
+            raise TrailmindError(f"tasks path {tasks_dir} is not a directory")
         for task_path in sorted(tasks_dir.glob("T-*.md")):
             frontmatter, body = read_entity_user_facing(task_path, label="task")
             task_id, title = task_identity(frontmatter, task_path)
@@ -93,6 +97,7 @@ def build_sweep_report(
             if last_seen is not None and (today - last_seen).days >= stale_days:
                 stale.append(task)
     return SweepReport(
+        repo_root=repo_root,
         ready=ready,
         blocked=blocked,
         stale=stale,
@@ -103,15 +108,15 @@ def build_sweep_report(
 
 def format_sweep_report(report: SweepReport) -> str:
     lines = ["Project Automation Sweep"]
-    _append_task_section(lines, "Ready", report.ready)
-    _append_task_section(lines, "Blocked", report.blocked)
-    _append_task_section(lines, "Stale", report.stale)
-    _append_missing_deliverables(lines, report.missing_deliverables)
-    _append_inbox(lines, report.open_inbox)
+    _append_task_section(lines, "Ready", report.ready, repo_root=report.repo_root)
+    _append_task_section(lines, "Blocked", report.blocked, repo_root=report.repo_root)
+    _append_task_section(lines, "Stale", report.stale, repo_root=report.repo_root)
+    _append_missing_deliverables(lines, report.missing_deliverables, repo_root=report.repo_root)
+    _append_inbox(lines, report.open_inbox, repo_root=report.repo_root)
     return "\n".join(lines) + "\n"
 
 
-def _append_task_section(lines: list[str], title: str, tasks: list[SweepTask]) -> None:
+def _append_task_section(lines: list[str], title: str, tasks: list[SweepTask], *, repo_root: Path) -> None:
     lines.append("")
     lines.append(title)
     if not tasks:
@@ -125,10 +130,11 @@ def _append_task_section(lines: list[str], title: str, tasks: list[SweepTask]) -
         elif task.soft_warnings:
             refs = ", ".join(item.task_id for item in task.soft_warnings)
             suffix = f" - soft: {refs}"
-        lines.append(f"- {task.task_id} {task.title} [{task.status}]{suffix}")
+        path = _relative_to_root(repo_root, task.path)
+        lines.append(f"- {task.task_id} {task.title} [{task.status}] ({path}){suffix}")
 
 
-def _append_missing_deliverables(lines: list[str], tasks: list[SweepTask]) -> None:
+def _append_missing_deliverables(lines: list[str], tasks: list[SweepTask], *, repo_root: Path) -> None:
     lines.append("")
     lines.append("Missing deliverables")
     if not tasks:
@@ -136,14 +142,23 @@ def _append_missing_deliverables(lines: list[str], tasks: list[SweepTask]) -> No
         return
     for task in tasks:
         missing = ", ".join(task.missing_deliverables)
-        lines.append(f"- {task.task_id} {task.title}: {missing}")
+        path = _relative_to_root(repo_root, task.path)
+        lines.append(f"- {task.task_id} {task.title} ({path}): {missing}")
 
 
-def _append_inbox(lines: list[str], items: list[InboxItem]) -> None:
+def _append_inbox(lines: list[str], items: list[InboxItem], *, repo_root: Path) -> None:
     lines.append("")
     lines.append("Open inbox")
     if not items:
         lines.append("- none")
         return
     for item in items:
-        lines.append(f"- {item.item_id} {item.title}")
+        path = _relative_to_root(repo_root, item.path)
+        lines.append(f"- {item.item_id} {item.title} ({path})")
+
+
+def _relative_to_root(repo_root: Path, path: Path) -> str:
+    try:
+        return path.relative_to(repo_root).as_posix()
+    except ValueError:
+        return path.as_posix()
