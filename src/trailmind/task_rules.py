@@ -3,7 +3,7 @@ from __future__ import annotations
 import re
 from dataclasses import dataclass
 from datetime import date
-from pathlib import Path
+from pathlib import Path, PurePosixPath, PureWindowsPath
 from typing import Any
 
 from trailmind.errors import TrailmindError
@@ -14,6 +14,7 @@ from trailmind.task_status import is_terminal_task_status, normalize_task_status
 
 GATED_TASK_STATUSES = {"ready", "in_progress", "done"}
 ACTIVITY_DATE_RE = re.compile(r"^- (\d{4}-\d{2}-\d{2}):")
+SLUG_SUFFIX_RE = re.compile(r"^[a-z0-9]+(?:-[a-z0-9]+)*$")
 
 
 @dataclass(frozen=True)
@@ -44,13 +45,66 @@ def string_list_field(frontmatter: dict[str, Any], key: str, *, label: str) -> l
     return [str(item) for item in value if str(item).strip()]
 
 
+def _is_path_like_ref(raw: str) -> bool:
+    windows_path = PureWindowsPath(raw)
+    return (
+        raw in {".", ".."}
+        or "/" in raw
+        or "\\" in raw
+        or raw.endswith(".md")
+        or PurePosixPath(raw).is_absolute()
+        or windows_path.is_absolute()
+        or bool(windows_path.drive)
+        or bool(windows_path.root)
+    )
+
+
+def _matches_bare_issue_id(path: Path, raw: str) -> bool:
+    stem = path.stem
+    if stem == raw:
+        return True
+    prefix = f"{raw}-"
+    if not stem.startswith(prefix):
+        return False
+    return bool(SLUG_SUFFIX_RE.fullmatch(stem[len(prefix) :]))
+
+
+def _relative_display(repo_root: Path, path: Path) -> str:
+    try:
+        return path.relative_to(repo_root).as_posix()
+    except ValueError:
+        return path.as_posix()
+
+
+def _resolve_linked_issue(repo_root: Path, task_path: Path, ref: str) -> Path:
+    if _is_path_like_ref(ref):
+        return resolve_entity(repo_root, raw=ref, entity="I")
+
+    local_issues_path = task_path.parent.parent / "issues"
+    local_matches = sorted(
+        (
+            path
+            for path in local_issues_path.glob("I-*.md")
+            if path.is_file() and _matches_bare_issue_id(path, ref)
+        ),
+        key=lambda path: _relative_display(repo_root, path),
+    )
+    if len(local_matches) == 1:
+        return local_matches[0]
+    if len(local_matches) > 1:
+        candidates = ", ".join(_relative_display(repo_root, path) for path in local_matches)
+        raise EntityAmbiguousError(f"I entity {ref!r} is ambiguous; candidates: {candidates}")
+    return resolve_entity(repo_root, raw=ref, entity="I")
+
+
 def linked_open_issues_for_task(repo_root: Path, task_path: Path) -> list[LinkedIssueStatus]:
     frontmatter, _body = read_entity_user_facing(task_path, label="task")
     refs = string_list_field(frontmatter, "known_issues", label="task")
     open_issues: list[LinkedIssueStatus] = []
     for ref in refs:
+        issue_ref = ref.strip()
         try:
-            issue_path = resolve_entity(repo_root, raw=ref, entity="I")
+            issue_path = _resolve_linked_issue(repo_root, task_path, issue_ref)
         except EntityNotFoundError:
             continue
         issue_frontmatter, _issue_body = read_entity_user_facing(issue_path, label="issue")

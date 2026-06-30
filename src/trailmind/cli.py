@@ -305,7 +305,11 @@ def task_close(ctx: click.Context, task_ref: str, closer: str, note: str) -> Non
     root = find_repo_root(_cwd_from_context(ctx))
     touched = close_task(root, task_ref=task_ref, closer=closer, note=note)
     _echo_touched(root, [touched])
-    open_issues = linked_open_issues_for_task(root, touched)
+    try:
+        open_issues = linked_open_issues_for_task(root, touched)
+    except TrailmindError as exc:
+        click.echo(f"linked issue report skipped: {exc.format_message()}")
+        return
     if open_issues:
         details = ", ".join(f"{issue.issue_id} {issue.title}" for issue in open_issues)
         click.echo(f"linked open issues remain: {details}")
