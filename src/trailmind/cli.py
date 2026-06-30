@@ -24,6 +24,7 @@ from trailmind.project import init_project
 from trailmind.roster import Roster
 from trailmind.security_scan import scan_paths
 from trailmind.serve import serve_repo
+from trailmind.sweep import build_sweep_report, format_sweep_report
 from trailmind.task import (
     add_task,
     add_task_deliverable,
@@ -69,6 +70,17 @@ def status_command(ctx: click.Context, overview: bool, project_slug: str | None,
         touched = render_overview(root)
 
     _echo_touched(root, [touched])
+
+
+@cli.command("sweep")
+@click.option("--project", "project_slug", default=None)
+@click.option("--epic", "epic_ref", default=None)
+@click.option("--stale-days", default=7, show_default=True, type=int)
+@click.pass_context
+def sweep_command(ctx: click.Context, project_slug: str | None, epic_ref: str | None, stale_days: int) -> None:
+    root = find_repo_root(_cwd_from_context(ctx))
+    report = build_sweep_report(root, project=project_slug, epic=epic_ref, stale_days=stale_days)
+    click.echo(format_sweep_report(report), nl=False)
 
 
 @cli.command("serve")

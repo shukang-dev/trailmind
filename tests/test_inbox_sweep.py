@@ -458,3 +458,77 @@ def test_iter_epic_dirs_rejects_projects_path_that_is_not_a_directory(tmp_path: 
 
     with pytest.raises(TrailmindError, match="projects path .* is not a directory"):
         iter_epic_dirs(tmp_path)
+
+
+def test_sweep_reports_ready_blocked_missing_deliverables_and_open_inbox(tmp_path: Path):
+    repo = _repo_with_project_and_epic(tmp_path)
+    runner = CliRunner()
+    parser = runner.invoke(
+        cli,
+        [
+            "task",
+            "add",
+            "--epic",
+            "projects/demo_app/mvp",
+            "--filer",
+            "alice@example.com",
+            "--owner",
+            "alice@example.com",
+            "--title",
+            "Build parser",
+        ],
+        obj={"cwd": repo},
+    )
+    assert parser.exit_code == 0
+    ui = runner.invoke(
+        cli,
+        [
+            "task",
+            "add",
+            "--epic",
+            "projects/demo_app/mvp",
+            "--filer",
+            "alice@example.com",
+            "--owner",
+            "alice@example.com",
+            "--title",
+            "Build UI",
+            "--depends-on",
+            "T-123456-001",
+            "--deliverables",
+            "screenshots attached",
+        ],
+        obj={"cwd": repo},
+    )
+    assert ui.exit_code == 0
+    inbox = runner.invoke(
+        cli,
+        [
+            "inbox",
+            "add",
+            "--epic",
+            "projects/demo_app/mvp",
+            "--author",
+            "alice",
+            "--title",
+            "Capture release risk",
+            "--note",
+            "Need release notes.",
+        ],
+        obj={"cwd": repo},
+    )
+    assert inbox.exit_code == 0
+
+    result = runner.invoke(cli, ["sweep", "--epic", "projects/demo_app/mvp"], obj={"cwd": repo})
+
+    assert result.exit_code == 0
+    assert "Project Automation Sweep" in result.output
+    assert "Ready" in result.output
+    assert "T-123456-001 Build parser" in result.output
+    assert "Blocked" in result.output
+    assert "T-123456-002 Build UI" in result.output
+    assert "unsatisfied: T-123456-001" in result.output
+    assert "Missing deliverables" in result.output
+    assert "screenshots attached" in result.output
+    assert "Open inbox" in result.output
+    assert "Capture release risk" in result.output
