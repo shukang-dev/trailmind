@@ -11,6 +11,7 @@ from trailmind.ids import next_entity_id, slugify
 from trailmind.log import action_activity_entry, append_activity_entry, read_entity_user_facing
 from trailmind.resolver import resolve_entity
 from trailmind.roster import Roster
+from trailmind.task_rules import assert_dependency_gate, format_soft_dependency_warning, soft_dependency_warnings
 from trailmind.task_status import (
     STATUS_NORMALIZATIONS,
     normalize_task_status,
@@ -177,10 +178,11 @@ def set_task_status(
     status: str,
     actor: str,
     note: str | None = None,
-) -> Path:
+) -> tuple[Path, str | None]:
     task_path = resolve_entity(repo_root, raw=task_ref, entity="T")
     frontmatter, body = read_entity_user_facing(task_path, label="task")
     current_status, target_status = validate_task_transition(frontmatter.get("status", "created"), status)
+    assert_dependency_gate(repo_root, frontmatter, target_status=target_status)
     frontmatter["status"] = target_status
     body = append_activity_entry(
         body,
@@ -192,12 +194,13 @@ def set_task_status(
         ),
     )
     write_entity(task_path, frontmatter=frontmatter, body=body)
-    return task_path
+    return task_path, format_soft_dependency_warning(soft_dependency_warnings(repo_root, frontmatter))
 
 
 def update_task_status(repo_root: Path, *, task_ref: str, status: str) -> Path:
     status = validate_task_status(status)
-    return set_task_status(repo_root, task_ref=task_ref, status=status, actor="trailmind")
+    path, _warning = set_task_status(repo_root, task_ref=task_ref, status=status, actor="trailmind")
+    return path
 
 
 def close_task(repo_root: Path, *, task_ref: str, closer: str, note: str) -> Path:
@@ -207,6 +210,7 @@ def close_task(repo_root: Path, *, task_ref: str, closer: str, note: str) -> Pat
         frontmatter.get("status", "created"),
         "done",
     )
+    assert_dependency_gate(repo_root, frontmatter, target_status="done")
     frontmatter["status"] = target_status
     body = append_activity_entry(
         body,

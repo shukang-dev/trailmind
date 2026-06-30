@@ -270,8 +270,10 @@ def task_set_status(
     note: str | None,
 ) -> None:
     root = find_repo_root(_cwd_from_context(ctx))
-    touched = set_task_status(root, task_ref=task_ref, status=status, actor=actor, note=note)
+    touched, warning = set_task_status(root, task_ref=task_ref, status=status, actor=actor, note=note)
     _echo_touched(root, [touched])
+    if warning:
+        click.echo(warning)
 
 
 @task_group.command("normalize-statuses")
