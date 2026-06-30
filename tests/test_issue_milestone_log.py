@@ -439,3 +439,34 @@ def test_issue_and_milestone_add_when_folder_path_is_file_is_user_facing(
     assert message in result.output
     assert "not a directory" in result.output
     assert "Traceback" not in result.output
+
+
+def test_task_close_reports_linked_open_issues(tmp_path: Path):
+    repo = _repo_with_epic(tmp_path)
+    task_result = _add_task(repo)
+    assert task_result.exit_code == 0
+    issue_result = _add_issue(repo)
+    assert issue_result.exit_code == 0
+    link_result = CliRunner().invoke(
+        cli,
+        ["issue", "link", "--issue", "I-123456-001", "--task", "T-123456-001"],
+        obj={"cwd": repo},
+    )
+    assert link_result.exit_code == 0
+    progress = CliRunner().invoke(
+        cli,
+        ["task", "set-status", "T-123456-001", "in_progress", "--actor", "alice"],
+        obj={"cwd": repo},
+    )
+    assert progress.exit_code == 0
+
+    result = CliRunner().invoke(
+        cli,
+        ["task", "close", "T-123456-001", "--closer", "alice", "--note", "Task work complete."],
+        obj={"cwd": repo},
+    )
+
+    assert result.exit_code == 0
+    assert "projects/demo_app/mvp/tasks/T-123456-001-build-login-flow.md" in result.output
+    assert "linked open issues remain" in result.output
+    assert "I-123456-001" in result.output

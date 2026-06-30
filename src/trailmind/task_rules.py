@@ -27,6 +27,14 @@ class TaskReferenceStatus:
     missing: bool
 
 
+@dataclass(frozen=True)
+class LinkedIssueStatus:
+    issue_id: str
+    title: str
+    status: str
+    path: Path
+
+
 def string_list_field(frontmatter: dict[str, Any], key: str, *, label: str) -> list[str]:
     value = frontmatter.get(key)
     if value is None:
@@ -34,6 +42,25 @@ def string_list_field(frontmatter: dict[str, Any], key: str, *, label: str) -> l
     if not isinstance(value, list):
         raise TrailmindError(f"{label} field {key} must be a list")
     return [str(item) for item in value if str(item).strip()]
+
+
+def linked_open_issues_for_task(repo_root: Path, task_path: Path) -> list[LinkedIssueStatus]:
+    frontmatter, _body = read_entity_user_facing(task_path, label="task")
+    refs = string_list_field(frontmatter, "known_issues", label="task")
+    open_issues: list[LinkedIssueStatus] = []
+    for ref in refs:
+        try:
+            issue_path = resolve_entity(repo_root, raw=ref, entity="I")
+        except EntityNotFoundError:
+            continue
+        issue_frontmatter, _issue_body = read_entity_user_facing(issue_path, label="issue")
+        status = str(issue_frontmatter.get("status", "open")).strip()
+        if status != "open":
+            continue
+        issue_id = str(issue_frontmatter.get("id") or issue_path.stem).strip()
+        title = str(issue_frontmatter.get("title") or issue_path.stem).strip()
+        open_issues.append(LinkedIssueStatus(issue_id=issue_id, title=title, status=status, path=issue_path))
+    return open_issues
 
 
 def normalize_deliverable_item(value: str) -> str:
