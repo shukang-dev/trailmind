@@ -96,6 +96,8 @@ def test_task_add_creates_task(tmp_path: Path):
     assert frontmatter["depends_on"] == []
     assert frontmatter["soft_depends_on"] == []
     assert frontmatter["known_issues"] == []
+    assert frontmatter["deliverables"] == []
+    assert frontmatter["completed_deliverables"] == []
     assert "## Scope" in body
     assert "## Acceptance" in body
     assert "## Activity Log" in body

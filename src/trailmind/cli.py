@@ -25,7 +25,9 @@ from trailmind.security_scan import scan_paths
 from trailmind.serve import serve_repo
 from trailmind.task import (
     add_task,
+    add_task_deliverable,
     close_task,
+    complete_task_deliverable,
     normalize_task_statuses,
     set_task_status,
     split_csv,
@@ -217,6 +219,7 @@ def task_group() -> None:
 @click.option("--depends-on", default="")
 @click.option("--soft-depends-on", default="")
 @click.option("--known-issues", default="")
+@click.option("--deliverables", default="")
 @click.pass_context
 def task_add(
     ctx: click.Context,
@@ -229,6 +232,7 @@ def task_add(
     depends_on: str,
     soft_depends_on: str,
     known_issues: str,
+    deliverables: str,
 ) -> None:
     root = find_repo_root(_cwd_from_context(ctx))
     touched = add_task(
@@ -242,6 +246,7 @@ def task_add(
         depends_on=split_csv(depends_on),
         soft_depends_on=split_csv(soft_depends_on),
         known_issues=split_csv(known_issues),
+        deliverables=split_csv(deliverables),
     )
     _echo_touched(root, [touched])
 
@@ -298,6 +303,33 @@ def task_normalize_statuses(ctx: click.Context, write_changes: bool) -> None:
 def task_close(ctx: click.Context, task_ref: str, closer: str, note: str) -> None:
     root = find_repo_root(_cwd_from_context(ctx))
     touched = close_task(root, task_ref=task_ref, closer=closer, note=note)
+    _echo_touched(root, [touched])
+
+
+@task_group.group("deliverable")
+def task_deliverable_group() -> None:
+    """Manage task deliverables."""
+
+
+@task_deliverable_group.command("add")
+@click.argument("task_ref")
+@click.option("--item", required=True)
+@click.option("--actor", required=True)
+@click.pass_context
+def task_deliverable_add(ctx: click.Context, task_ref: str, item: str, actor: str) -> None:
+    root = find_repo_root(_cwd_from_context(ctx))
+    touched = add_task_deliverable(root, task_ref=task_ref, item=item, actor=actor)
+    _echo_touched(root, [touched])
+
+
+@task_deliverable_group.command("complete")
+@click.argument("task_ref")
+@click.option("--item", required=True)
+@click.option("--actor", required=True)
+@click.pass_context
+def task_deliverable_complete(ctx: click.Context, task_ref: str, item: str, actor: str) -> None:
+    root = find_repo_root(_cwd_from_context(ctx))
+    touched = complete_task_deliverable(root, task_ref=task_ref, item=item, actor=actor)
     _echo_touched(root, [touched])
 
 

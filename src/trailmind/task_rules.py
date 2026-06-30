@@ -109,6 +109,21 @@ def assert_dependency_gate(repo_root: Path, frontmatter: dict[str, Any], *, targ
         raise TrailmindError(f"unsatisfied hard dependencies: {details}")
 
 
+def missing_deliverables(frontmatter: dict[str, Any]) -> list[str]:
+    deliverables = string_list_field(frontmatter, "deliverables", label="task")
+    completed = set(string_list_field(frontmatter, "completed_deliverables", label="task"))
+    return [item for item in deliverables if item not in completed]
+
+
+def assert_deliverables_gate(frontmatter: dict[str, Any], *, target_status: str) -> None:
+    if target_status != "done":
+        return
+    missing = missing_deliverables(frontmatter)
+    if missing:
+        details = ", ".join(missing)
+        raise TrailmindError(f"missing completed deliverables: {details}")
+
+
 def format_soft_dependency_warning(warnings: list[TaskReferenceStatus]) -> str | None:
     if not warnings:
         return None

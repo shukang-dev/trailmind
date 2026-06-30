@@ -11,7 +11,13 @@ from trailmind.ids import next_entity_id, slugify
 from trailmind.log import action_activity_entry, append_activity_entry, read_entity_user_facing
 from trailmind.resolver import resolve_entity
 from trailmind.roster import Roster
-from trailmind.task_rules import assert_dependency_gate, format_soft_dependency_warning, soft_dependency_warnings
+from trailmind.task_rules import (
+    assert_deliverables_gate,
+    assert_dependency_gate,
+    format_soft_dependency_warning,
+    soft_dependency_warnings,
+    string_list_field,
+)
 from trailmind.task_status import (
     STATUS_NORMALIZATIONS,
     normalize_task_status,
@@ -136,6 +142,7 @@ def add_task(
     depends_on: list[str],
     soft_depends_on: list[str],
     known_issues: list[str],
+    deliverables: list[str],
 ) -> Path:
     epic_path = _resolve_epic(repo_root, epic)
     roster = Roster.load(repo_root / "roster.yaml")
@@ -165,6 +172,8 @@ def add_task(
             "depends_on": depends_on,
             "soft_depends_on": soft_depends_on,
             "known_issues": known_issues,
+            "deliverables": deliverables,
+            "completed_deliverables": [],
         },
         body=_initial_body(title, filer_shortname),
     )
@@ -183,6 +192,7 @@ def set_task_status(
     frontmatter, body = read_entity_user_facing(task_path, label="task")
     current_status, target_status = validate_task_transition(frontmatter.get("status", "created"), status)
     assert_dependency_gate(repo_root, frontmatter, target_status=target_status)
+    assert_deliverables_gate(frontmatter, target_status=target_status)
     warning = format_soft_dependency_warning(soft_dependency_warnings(repo_root, frontmatter))
     frontmatter["status"] = target_status
     body = append_activity_entry(
@@ -204,6 +214,47 @@ def update_task_status(repo_root: Path, *, task_ref: str, status: str) -> Path:
     return path
 
 
+def add_task_deliverable(repo_root: Path, *, task_ref: str, item: str, actor: str) -> Path:
+    task_path = resolve_entity(repo_root, raw=task_ref, entity="T")
+    frontmatter, body = read_entity_user_facing(task_path, label="task")
+    deliverable = " ".join(item.split())
+    if not deliverable:
+        raise TrailmindError("deliverable item is required")
+    deliverables = string_list_field(frontmatter, "deliverables", label="task")
+    if deliverable not in deliverables:
+        deliverables.append(deliverable)
+    frontmatter["deliverables"] = deliverables
+    frontmatter["completed_deliverables"] = string_list_field(frontmatter, "completed_deliverables", label="task")
+    body = append_activity_entry(
+        body,
+        action_activity_entry(action="Added deliverable", actor_label="actor", actor=actor, note=deliverable),
+    )
+    write_entity(task_path, frontmatter=frontmatter, body=body)
+    return task_path
+
+
+def complete_task_deliverable(repo_root: Path, *, task_ref: str, item: str, actor: str) -> Path:
+    task_path = resolve_entity(repo_root, raw=task_ref, entity="T")
+    frontmatter, body = read_entity_user_facing(task_path, label="task")
+    deliverable = " ".join(item.split())
+    if not deliverable:
+        raise TrailmindError("deliverable item is required")
+    deliverables = string_list_field(frontmatter, "deliverables", label="task")
+    if deliverable not in deliverables:
+        raise TrailmindError(f"deliverable {deliverable!r} is not defined on task")
+    completed = string_list_field(frontmatter, "completed_deliverables", label="task")
+    if deliverable not in completed:
+        completed.append(deliverable)
+    frontmatter["deliverables"] = deliverables
+    frontmatter["completed_deliverables"] = completed
+    body = append_activity_entry(
+        body,
+        action_activity_entry(action="Completed deliverable", actor_label="actor", actor=actor, note=deliverable),
+    )
+    write_entity(task_path, frontmatter=frontmatter, body=body)
+    return task_path
+
+
 def close_task(repo_root: Path, *, task_ref: str, closer: str, note: str) -> Path:
     task_path = resolve_entity(repo_root, raw=task_ref, entity="T")
     frontmatter, body = read_entity_user_facing(task_path, label="task")
@@ -212,6 +263,7 @@ def close_task(repo_root: Path, *, task_ref: str, closer: str, note: str) -> Pat
         "done",
     )
     assert_dependency_gate(repo_root, frontmatter, target_status="done")
+    assert_deliverables_gate(frontmatter, target_status="done")
     frontmatter["status"] = target_status
     body = append_activity_entry(
         body,
