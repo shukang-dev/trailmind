@@ -4,6 +4,7 @@ from trailmind.errors import TrailmindError
 from trailmind.task_status import (
     TASK_STATUSES,
     TERMINAL_TASK_STATUSES,
+    is_terminal_task_status,
     normalize_task_status,
     validate_task_status,
     validate_task_transition,
@@ -36,6 +37,24 @@ def test_normalize_task_status_accepts_current_and_legacy_values(raw: str, expec
 def test_validate_task_status_rejects_unknown_status():
     with pytest.raises(TrailmindError, match="invalid task status"):
         validate_task_status("paused")
+
+
+@pytest.mark.parametrize("status", ["done", "wontfix"])
+def test_is_terminal_task_status_accepts_terminal_values(status: str):
+    assert is_terminal_task_status(status) is True
+
+
+@pytest.mark.parametrize(
+    "status",
+    ["created", "ready", "in_progress", "blocked", "planned", "integration"],
+)
+def test_is_terminal_task_status_rejects_non_terminal_values(status: str):
+    assert is_terminal_task_status(status) is False
+
+
+def test_is_terminal_task_status_rejects_unknown_status():
+    with pytest.raises(TrailmindError, match="invalid task status"):
+        is_terminal_task_status("paused")
 
 
 @pytest.mark.parametrize(
