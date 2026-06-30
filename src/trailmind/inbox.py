@@ -1,0 +1,146 @@
+from __future__ import annotations
+
+from dataclasses import dataclass
+from datetime import date
+from pathlib import Path
+
+from trailmind.entity_io import write_entity
+from trailmind.errors import TrailmindError
+from trailmind.ids import slugify
+from trailmind.log import action_activity_entry, append_activity_entry, read_entity_user_facing
+from trailmind.scopes import resolve_project_or_epic_scope
+
+
+@dataclass(frozen=True)
+class InboxItem:
+    path: Path
+    item_id: str
+    title: str
+    status: str
+
+
+def _next_inbox_id(inbox_path: Path) -> str:
+    today = date.today().strftime("%Y%m%d")
+    existing = sorted(inbox_path.glob(f"IN-{today}-*.md"))
+    return f"IN-{today}-{len(existing) + 1:03d}"
+
+
+def _iter_inbox_files(repo_root: Path) -> list[Path]:
+    projects_path = repo_root / "projects"
+    if not projects_path.exists():
+        return []
+    return sorted(path for path in projects_path.glob("**/inbox/IN-*.md") if path.is_file())
+
+
+def _resolve_inbox_item(repo_root: Path, raw: str) -> Path:
+    if "/" in raw or raw.endswith(".md"):
+        candidate = repo_root / raw
+        try:
+            candidate.resolve(strict=False).relative_to(repo_root.resolve())
+        except (OSError, RuntimeError, ValueError) as exc:
+            raise TrailmindError(f"inbox item {raw!r} not found") from exc
+        if candidate.is_file():
+            return candidate
+    matches = [path for path in _iter_inbox_files(repo_root) if path.stem == raw or path.stem.startswith(f"{raw}-")]
+    if not matches:
+        raise TrailmindError(f"inbox item {raw!r} not found")
+    if len(matches) > 1:
+        candidates = ", ".join(path.relative_to(repo_root).as_posix() for path in matches)
+        raise TrailmindError(f"inbox item {raw!r} is ambiguous; candidates: {candidates}")
+    return matches[0]
+
+
+def add_inbox_item(
+    repo_root: Path,
+    *,
+    project: str | None,
+    epic: str | None,
+    author: str,
+    title: str,
+    note: str,
+) -> Path:
+    scope_path, scope = resolve_project_or_epic_scope(repo_root, project=project, epic=epic)
+    inbox_path = scope_path / "inbox"
+    if inbox_path.exists() and not inbox_path.is_dir():
+        raise TrailmindError(f"inbox path {inbox_path} is not a directory")
+    inbox_path.mkdir(parents=True, exist_ok=True)
+    item_id = _next_inbox_id(inbox_path)
+    item_path = inbox_path / f"{item_id}-{slugify(title)}.md"
+    body = (
+        f"# {title}\n\n"
+        "## Note\n\n"
+        f"{note}\n\n"
+        "## Activity Log\n\n"
+        f"{action_activity_entry(action='Captured', actor_label='author', actor=author)}\n"
+    )
+    write_entity(
+        item_path,
+        frontmatter={
+            "id": item_id,
+            "title": title,
+            "author": author,
+            "scope": scope,
+            "status": "open",
+            "created": date.today().isoformat(),
+            "resolved": None,
+        },
+        body=body,
+    )
+    return item_path
+
+
+def list_inbox_items(repo_root: Path, *, project: str | None, epic: str | None) -> list[InboxItem]:
+    scope_path, _scope = resolve_project_or_epic_scope(repo_root, project=project, epic=epic)
+    inbox_path = scope_path / "inbox"
+    if not inbox_path.exists():
+        return []
+    if not inbox_path.is_dir():
+        raise TrailmindError(f"inbox path {inbox_path} is not a directory")
+    items: list[InboxItem] = []
+    for path in sorted(inbox_path.glob("IN-*.md")):
+        frontmatter, _body = read_entity_user_facing(path, label="inbox")
+        items.append(
+            InboxItem(
+                path=path,
+                item_id=str(frontmatter.get("id") or path.stem),
+                title=str(frontmatter.get("title") or path.stem),
+                status=str(frontmatter.get("status") or "open"),
+            )
+        )
+    return items
+
+
+def open_inbox_items_under(scope_path: Path) -> list[InboxItem]:
+    inbox_path = scope_path / "inbox"
+    if not inbox_path.exists():
+        return []
+    if not inbox_path.is_dir():
+        raise TrailmindError(f"inbox path {inbox_path} is not a directory")
+    items: list[InboxItem] = []
+    for path in sorted(inbox_path.glob("IN-*.md")):
+        frontmatter, _body = read_entity_user_facing(path, label="inbox")
+        status = str(frontmatter.get("status") or "open")
+        if status != "open":
+            continue
+        items.append(
+            InboxItem(
+                path=path,
+                item_id=str(frontmatter.get("id") or path.stem),
+                title=str(frontmatter.get("title") or path.stem),
+                status=status,
+            )
+        )
+    return items
+
+
+def resolve_inbox_item(repo_root: Path, *, item_ref: str, resolver: str, note: str) -> Path:
+    item_path = _resolve_inbox_item(repo_root, item_ref)
+    frontmatter, body = read_entity_user_facing(item_path, label="inbox")
+    frontmatter["status"] = "resolved"
+    frontmatter["resolved"] = date.today().isoformat()
+    body = append_activity_entry(
+        body,
+        action_activity_entry(action="Resolved", actor_label="resolver", actor=resolver, note=note),
+    )
+    write_entity(item_path, frontmatter=frontmatter, body=body)
+    return item_path

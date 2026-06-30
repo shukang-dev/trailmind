@@ -15,6 +15,7 @@ from trailmind.dashboard import (
 )
 from trailmind.epic import init_epic
 from trailmind.errors import TrailmindError
+from trailmind.inbox import add_inbox_item, list_inbox_items, resolve_inbox_item
 from trailmind.issue import add_issue, carry_issue, close_issue, link_issue
 from trailmind.log import log_activity
 from trailmind.milestone import add_milestone
@@ -91,6 +92,56 @@ def scan_command(ctx: click.Context) -> None:
         noun = "finding" if count == 1 else "findings"
         raise TrailmindError(f"security scan found {count} {noun}")
     click.echo("scan passed")
+
+
+@cli.group("inbox")
+def inbox_group() -> None:
+    """Capture and triage project or epic inbox items."""
+
+
+@inbox_group.command("add")
+@click.option("--project", "project_slug", default=None)
+@click.option("--epic", "epic_ref", default=None)
+@click.option("--author", required=True)
+@click.option("--title", required=True)
+@click.option("--note", required=True)
+@click.pass_context
+def inbox_add(
+    ctx: click.Context,
+    project_slug: str | None,
+    epic_ref: str | None,
+    author: str,
+    title: str,
+    note: str,
+) -> None:
+    root = find_repo_root(_cwd_from_context(ctx))
+    touched = add_inbox_item(root, project=project_slug, epic=epic_ref, author=author, title=title, note=note)
+    _echo_touched(root, [touched])
+
+
+@inbox_group.command("list")
+@click.option("--project", "project_slug", default=None)
+@click.option("--epic", "epic_ref", default=None)
+@click.pass_context
+def inbox_list(ctx: click.Context, project_slug: str | None, epic_ref: str | None) -> None:
+    root = find_repo_root(_cwd_from_context(ctx))
+    items = list_inbox_items(root, project=project_slug, epic=epic_ref)
+    if not items:
+        click.echo("No inbox items.")
+        return
+    for item in items:
+        click.echo(f"{item.item_id} {item.status} {item.title}")
+
+
+@inbox_group.command("resolve")
+@click.argument("item_ref")
+@click.option("--resolver", required=True)
+@click.option("--note", required=True)
+@click.pass_context
+def inbox_resolve(ctx: click.Context, item_ref: str, resolver: str, note: str) -> None:
+    root = find_repo_root(_cwd_from_context(ctx))
+    touched = resolve_inbox_item(root, item_ref=item_ref, resolver=resolver, note=note)
+    _echo_touched(root, [touched])
 
 
 def _cwd_from_context(ctx: click.Context) -> Path:
