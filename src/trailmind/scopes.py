@@ -58,6 +58,8 @@ def iter_epic_dirs(repo_root: Path, *, project: str | None = None, epic: str | N
     if project:
         project_dirs = [resolve_project_dir(repo_root, project)]
     elif projects_root.exists():
+        if not projects_root.is_dir():
+            raise TrailmindError(f"projects path {projects_root} is not a directory")
         project_dirs = sorted(path for path in projects_root.iterdir() if (path / "PROJECT.md").is_file())
     else:
         project_dirs = []
