@@ -451,6 +451,32 @@ def test_task_normalize_statuses_writes_legacy_statuses_when_requested(tmp_path:
     assert reread_frontmatter["status"] == "in_progress"
 
 
+def test_task_normalize_statuses_write_does_not_partially_update_when_later_task_is_invalid(tmp_path: Path):
+    repo = _repo_with_epic(tmp_path)
+    first_add_result = _add_task(repo)
+    assert first_add_result.exit_code == 0
+    second_add_result = _add_task(repo, title="Build Logout Flow")
+    assert second_add_result.exit_code == 0
+    first_task_path = repo / "projects" / "demo_app" / "mvp" / "tasks" / "T-123456-001-build-login-flow.md"
+    second_task_path = repo / "projects" / "demo_app" / "mvp" / "tasks" / "T-123456-002-build-logout-flow.md"
+    first_frontmatter, first_body = read_entity(first_task_path)
+    second_frontmatter, second_body = read_entity(second_task_path)
+    first_frontmatter["status"] = "planned"
+    second_frontmatter["status"] = "paused"
+    from trailmind.entity_io import write_entity
+
+    write_entity(first_task_path, frontmatter=first_frontmatter, body=first_body)
+    write_entity(second_task_path, frontmatter=second_frontmatter, body=second_body)
+
+    result = CliRunner().invoke(cli, ["task", "normalize-statuses", "--write"], obj={"cwd": repo})
+
+    assert result.exit_code == 1
+    assert "invalid task status" in result.output
+    assert "Traceback" not in result.output
+    reread_first_frontmatter, _body = read_entity(first_task_path)
+    assert reread_first_frontmatter["status"] == "planned"
+
+
 @pytest.mark.parametrize(
     ("value", "expected"),
     [

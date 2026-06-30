@@ -3,6 +3,7 @@ from __future__ import annotations
 from dataclasses import dataclass
 from datetime import date
 from pathlib import Path, PurePosixPath, PureWindowsPath
+from typing import Any
 
 from trailmind.entity_io import write_entity
 from trailmind.errors import TrailmindError
@@ -80,6 +81,13 @@ class StatusNormalization:
     changed: bool
 
 
+@dataclass(frozen=True)
+class _PendingStatusNormalization:
+    result: StatusNormalization
+    frontmatter: dict[str, Any]
+    body: str
+
+
 def _iter_task_files(repo_root: Path) -> list[Path]:
     projects_path = repo_root / "projects"
     if not projects_path.exists():
@@ -89,6 +97,7 @@ def _iter_task_files(repo_root: Path) -> list[Path]:
 
 def normalize_task_statuses(repo_root: Path, *, write: bool) -> list[StatusNormalization]:
     normalizations: list[StatusNormalization] = []
+    pending_writes: list[_PendingStatusNormalization] = []
     for task_path in _iter_task_files(repo_root):
         frontmatter, body = read_entity_user_facing(task_path, label="task")
         old_status = str(frontmatter.get("status", "created")).strip()
@@ -97,18 +106,20 @@ def normalize_task_statuses(repo_root: Path, *, write: bool) -> list[StatusNorma
             continue
         new_status = normalize_task_status(old_status)
         task_id = str(frontmatter.get("id") or task_path.stem)
-        if write:
-            frontmatter["status"] = new_status
-            write_entity(task_path, frontmatter=frontmatter, body=body)
-        normalizations.append(
-            StatusNormalization(
-                path=task_path,
-                task_id=task_id,
-                old_status=old_status,
-                new_status=new_status,
-                changed=write,
-            )
+        result = StatusNormalization(
+            path=task_path,
+            task_id=task_id,
+            old_status=old_status,
+            new_status=new_status,
+            changed=write,
         )
+        normalizations.append(result)
+        pending_writes.append(_PendingStatusNormalization(result=result, frontmatter=frontmatter, body=body))
+
+    if write:
+        for item in pending_writes:
+            item.frontmatter["status"] = item.result.new_status
+            write_entity(item.result.path, frontmatter=item.frontmatter, body=item.body)
     return normalizations
 
 
