@@ -408,7 +408,7 @@ def task_pickup(
     no_excerpts: bool,
 ) -> None:
     root = find_repo_root(_cwd_from_context(ctx))
-    if write_log and not actor:
+    if write_log and (not actor or not actor.strip()):
         raise TrailmindError("pickup logging requires --actor")
     pack = build_task_pickup(
         root,

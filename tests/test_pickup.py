@@ -237,6 +237,24 @@ def test_task_pickup_log_requires_actor_without_modifying_file(tmp_path: Path):
     assert _task_path(repo).read_text(encoding="utf-8") == before
 
 
+def test_task_pickup_json_log_rejects_blank_actor_before_printing_pack(tmp_path: Path):
+    repo = _repo_with_task(tmp_path)
+    before = _task_path(repo).read_text(encoding="utf-8")
+
+    result = CliRunner().invoke(
+        cli,
+        ["task", "pickup", "T-123456-001", "--json", "--log", "--actor", "   "],
+        obj={"cwd": repo},
+    )
+
+    assert result.exit_code == 1
+    assert "pickup logging requires --actor" in result.output
+    assert not result.output.lstrip().startswith("{")
+    with pytest.raises(json.JSONDecodeError):
+        json.loads(result.output)
+    assert _task_path(repo).read_text(encoding="utf-8") == before
+
+
 def test_task_pickup_log_records_one_activity_entry(tmp_path: Path):
     repo = _repo_with_task(tmp_path)
 
