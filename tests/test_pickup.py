@@ -815,6 +815,22 @@ def test_task_pickup_rejects_invalid_activity_limit_without_modifying_file(tmp_p
     assert _task_path(repo).read_text(encoding="utf-8") == before
 
 
+def test_task_pickup_direct_path_escape_is_user_facing_without_traceback(tmp_path: Path):
+    repo = _repo_with_task(tmp_path)
+    before = _task_path(repo).read_text(encoding="utf-8")
+
+    result = CliRunner().invoke(cli, ["task", "pickup", "../secret.md"], obj={"cwd": repo})
+
+    assert result.exit_code == 1
+    assert "Traceback" not in result.output
+    assert (
+        "entity path '../secret.md' not found" in result.output
+        or "entity path '../secret.md' not found outside repository" in result.output
+        or "entity path '../secret.md' could not resolve" in result.output
+    )
+    assert _task_path(repo).read_text(encoding="utf-8") == before
+
+
 def test_task_pickup_reports_directory_and_non_utf8_excerpts(tmp_path: Path):
     repo = _repo_with_task(tmp_path)
     (repo / "docs").mkdir()
