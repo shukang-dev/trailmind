@@ -780,3 +780,77 @@ def test_issue_pickup_json_log_rejects_blank_actor_before_printing_pack(tmp_path
     with pytest.raises(json.JSONDecodeError):
         json.loads(result.output)
     assert _issue_path(repo).read_text(encoding="utf-8") == before
+
+
+def test_task_pickup_malformed_frontmatter_is_user_facing_without_traceback(tmp_path: Path):
+    repo = _repo_with_task(tmp_path)
+    _task_path(repo).write_text("---\n: bad\n---\n# Bad\n", encoding="utf-8")
+
+    result = CliRunner().invoke(cli, ["task", "pickup", "T-123456-001"], obj={"cwd": repo})
+
+    assert result.exit_code == 1
+    assert "Traceback" not in result.output
+    assert "malformed YAML frontmatter" in result.output
+
+
+def test_issue_pickup_malformed_frontmatter_is_user_facing_without_traceback(tmp_path: Path):
+    repo = _repo_with_issue(tmp_path)
+    _issue_path(repo).write_text("---\n: bad\n---\n# Bad\n", encoding="utf-8")
+
+    result = CliRunner().invoke(cli, ["issue", "pickup", "I-123456-001"], obj={"cwd": repo})
+
+    assert result.exit_code == 1
+    assert "Traceback" not in result.output
+    assert "malformed YAML frontmatter" in result.output
+
+
+def test_task_pickup_rejects_invalid_activity_limit_without_modifying_file(tmp_path: Path):
+    repo = _repo_with_task(tmp_path)
+    before = _task_path(repo).read_text(encoding="utf-8")
+
+    result = CliRunner().invoke(cli, ["task", "pickup", "T-123456-001", "--activity-limit", "0"], obj={"cwd": repo})
+
+    assert result.exit_code == 2
+    assert "Invalid value for '--activity-limit'" in result.output
+    assert _task_path(repo).read_text(encoding="utf-8") == before
+
+
+def test_task_pickup_reports_directory_and_non_utf8_excerpts(tmp_path: Path):
+    repo = _repo_with_task(tmp_path)
+    (repo / "docs").mkdir()
+    (repo / "binary.dat").write_bytes(b"\xff\xfe\x00")
+    task_path = _task_path(repo)
+    frontmatter, body = read_entity(task_path)
+    frontmatter["code_paths"] = ["docs", "binary.dat"]
+    write_entity(task_path, frontmatter=frontmatter, body=body)
+
+    result = CliRunner().invoke(cli, ["task", "pickup", "T-123456-001", "--json"], obj={"cwd": repo})
+
+    assert result.exit_code == 0
+    data = json.loads(result.output)
+    assert data["excerpts"][0]["skip_reason"] == "directory"
+    assert data["excerpts"][1]["skip_reason"] == "non-utf-8"
+
+
+def test_task_pickup_path_escape_is_user_facing_without_traceback(tmp_path: Path):
+    repo = _repo_with_task(tmp_path)
+    task_path = _task_path(repo)
+    frontmatter, body = read_entity(task_path)
+    frontmatter["code_paths"] = ["../secret.txt"]
+    write_entity(task_path, frontmatter=frontmatter, body=body)
+
+    result = CliRunner().invoke(cli, ["task", "pickup", "T-123456-001"], obj={"cwd": repo})
+
+    assert result.exit_code == 1
+    assert "Traceback" not in result.output
+    assert "referenced path escapes repository" in result.output
+
+
+def test_task_pickup_json_is_read_only(tmp_path: Path):
+    repo = _repo_with_task(tmp_path)
+    before = _task_path(repo).read_text(encoding="utf-8")
+
+    result = CliRunner().invoke(cli, ["task", "pickup", "T-123456-001", "--json"], obj={"cwd": repo})
+
+    assert result.exit_code == 0
+    assert _task_path(repo).read_text(encoding="utf-8") == before
