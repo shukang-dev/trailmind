@@ -519,3 +519,138 @@ def test_task_pickup_terminal_task_hint(tmp_path: Path):
     assert pack.next_actions == [
         "Task is terminal (done); do not pick it up for implementation unless reopening is intentional."
     ]
+
+
+def _repo_with_issue(tmp_path: Path) -> Path:
+    repo = _repo_with_task(tmp_path)
+    result = CliRunner().invoke(
+        cli,
+        [
+            "issue",
+            "add",
+            "--epic",
+            "projects/demo_app/mvp",
+            "--filer",
+            "alice@example.com",
+            "--title",
+            "Parser bug",
+            "--description",
+            "Parser fails on flags.",
+            "--severity",
+            "high",
+        ],
+        obj={"cwd": repo},
+    )
+    assert result.exit_code == 0
+    return repo
+
+
+def _issue_path(repo: Path) -> Path:
+    return repo / "projects" / "demo_app" / "mvp" / "issues" / "I-123456-001-parser-bug.md"
+
+
+def test_issue_pickup_cli_prints_markdown(tmp_path: Path):
+    repo = _repo_with_issue(tmp_path)
+
+    result = CliRunner().invoke(cli, ["issue", "pickup", "I-123456-001"], obj={"cwd": repo})
+
+    assert result.exit_code == 0
+    assert "# Issue Pickup: I-123456-001 Parser bug" in result.output
+    assert "## Linked Tasks" in result.output
+    assert "Parser fails on flags." in result.output
+
+
+def test_issue_pickup_cli_prints_json(tmp_path: Path):
+    repo = _repo_with_issue(tmp_path)
+
+    result = CliRunner().invoke(cli, ["issue", "pickup", "I-123456-001", "--json"], obj={"cwd": repo})
+
+    assert result.exit_code == 0
+    data = json.loads(result.output)
+    assert data["kind"] == "issue"
+    assert data["item"]["id"] == "I-123456-001"
+    assert data["item"]["severity"] == "high"
+    assert "Decide whether to link this issue to a task, carry it forward, or close it." in data["next_actions"]
+
+
+def test_issue_pickup_reports_linked_task(tmp_path: Path):
+    repo = _repo_with_issue(tmp_path)
+    link = CliRunner().invoke(cli, ["issue", "link", "--issue", "I-123456-001", "--task", "T-123456-001"], obj={"cwd": repo})
+    assert link.exit_code == 0
+
+    result = CliRunner().invoke(cli, ["issue", "pickup", "I-123456-001", "--json", "--no-excerpts"], obj={"cwd": repo})
+
+    data = json.loads(result.output)
+    assert data["linked_items"]["tasks"][0]["task_id"] == "T-123456-001"
+    assert data["excerpts"][0] == {"path": "src/app.py", "skipped": True, "skip_reason": "excluded"}
+    assert "Inspect linked task state before closing the issue." in data["next_actions"]
+
+
+def test_issue_pickup_terminal_issue_hint(tmp_path: Path):
+    repo = _repo_with_issue(tmp_path)
+    issue_path = _issue_path(repo)
+    frontmatter, body = read_entity(issue_path)
+    frontmatter["status"] = "done"
+    write_entity(issue_path, frontmatter=frontmatter, body=body)
+
+    result = CliRunner().invoke(cli, ["issue", "pickup", "I-123456-001", "--json"], obj={"cwd": repo})
+
+    data = json.loads(result.output)
+    assert data["next_actions"] == ["Issue is terminal (done); only pick it up if reopening is intentional."]
+
+
+def test_issue_pickup_reports_carried_metadata(tmp_path: Path):
+    repo = _repo_with_issue(tmp_path)
+    issue_path = _issue_path(repo)
+    frontmatter, body = read_entity(issue_path)
+    frontmatter["carried_into"] = ["projects/demo_app/mvp"]
+    write_entity(issue_path, frontmatter=frontmatter, body=body)
+
+    result = CliRunner().invoke(cli, ["issue", "pickup", "I-123456-001", "--json"], obj={"cwd": repo})
+
+    data = json.loads(result.output)
+    assert data["item"]["frontmatter"]["carried_into"] == ["projects/demo_app/mvp"]
+    assert "Inspect carried-into epics before changing issue status." in data["next_actions"]
+
+
+def test_issue_pickup_log_records_one_activity_entry(tmp_path: Path):
+    repo = _repo_with_issue(tmp_path)
+
+    result = CliRunner().invoke(
+        cli,
+        ["issue", "pickup", "I-123456-001", "--log", "--actor", "alice"],
+        obj={"cwd": repo},
+    )
+
+    assert result.exit_code == 0
+    _frontmatter, body = read_entity(_issue_path(repo))
+    assert body.count("Picked up for handoff by alice.") == 1
+
+
+def test_issue_pickup_log_requires_actor_without_modifying_file(tmp_path: Path):
+    repo = _repo_with_issue(tmp_path)
+    before = _issue_path(repo).read_text(encoding="utf-8")
+
+    result = CliRunner().invoke(cli, ["issue", "pickup", "I-123456-001", "--log"], obj={"cwd": repo})
+
+    assert result.exit_code == 1
+    assert "pickup logging requires --actor" in result.output
+    assert _issue_path(repo).read_text(encoding="utf-8") == before
+
+
+def test_issue_pickup_json_log_rejects_blank_actor_before_printing_pack(tmp_path: Path):
+    repo = _repo_with_issue(tmp_path)
+    before = _issue_path(repo).read_text(encoding="utf-8")
+
+    result = CliRunner().invoke(
+        cli,
+        ["issue", "pickup", "I-123456-001", "--json", "--log", "--actor", "   "],
+        obj={"cwd": repo},
+    )
+
+    assert result.exit_code == 1
+    assert "pickup logging requires --actor" in result.output
+    assert not result.output.lstrip().startswith("{")
+    with pytest.raises(json.JSONDecodeError):
+        json.loads(result.output)
+    assert _issue_path(repo).read_text(encoding="utf-8") == before

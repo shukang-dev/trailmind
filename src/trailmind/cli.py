@@ -22,8 +22,10 @@ from trailmind.log import log_activity
 from trailmind.milestone import add_milestone
 from trailmind.paths import find_repo_root
 from trailmind.pickup import (
+    build_issue_pickup,
     build_task_pickup,
     format_pickup_markdown,
+    log_issue_pickup,
     log_task_pickup,
     pickup_pack_to_dict,
 )
@@ -509,6 +511,45 @@ def issue_carry(ctx: click.Context, issue_ref: str, to_epic: str) -> None:
     root = find_repo_root(_cwd_from_context(ctx))
     touched = carry_issue(root, raw_issue=issue_ref, to_epic=to_epic)
     _echo_touched(root, touched)
+
+
+@issue_group.command("pickup")
+@click.argument("issue_ref")
+@click.option("--json", "json_output", is_flag=True, help="Print structured JSON instead of Markdown.")
+@click.option("--log", "write_log", is_flag=True, help="Record an explicit pickup Activity Log entry.")
+@click.option("--actor", default=None, help="Actor for --log.")
+@click.option("--max-lines", default=80, show_default=True, type=click.IntRange(min=1))
+@click.option("--activity-limit", default=10, show_default=True, type=click.IntRange(min=1))
+@click.option("--no-excerpts", is_flag=True, help="List referenced paths without file contents.")
+@click.pass_context
+def issue_pickup(
+    ctx: click.Context,
+    issue_ref: str,
+    json_output: bool,
+    write_log: bool,
+    actor: str | None,
+    max_lines: int,
+    activity_limit: int,
+    no_excerpts: bool,
+) -> None:
+    root = find_repo_root(_cwd_from_context(ctx))
+    if write_log and (not actor or not actor.strip()):
+        raise TrailmindError("pickup logging requires --actor")
+    pack = build_issue_pickup(
+        root,
+        issue_ref=issue_ref,
+        max_lines=max_lines,
+        activity_limit=activity_limit,
+        include_excerpts=not no_excerpts,
+    )
+    if json_output:
+        click.echo(json.dumps(pickup_pack_to_dict(pack), ensure_ascii=False, indent=2))
+        output_format = "json"
+    else:
+        click.echo(format_pickup_markdown(pack), nl=False)
+        output_format = "markdown"
+    if write_log and actor:
+        log_issue_pickup(root, issue_ref=issue_ref, actor=actor, output_format=output_format)
 
 
 @cli.group("milestone")

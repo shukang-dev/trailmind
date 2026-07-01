@@ -182,6 +182,46 @@ def _task_next_actions(
     return actions
 
 
+def _linked_task_summaries(repo_root: Path, refs: list[str]) -> tuple[list[dict[str, Any]], list[str]]:
+    tasks: list[dict[str, Any]] = []
+    warnings: list[str] = []
+    for ref in refs:
+        try:
+            task_path = resolve_entity(repo_root, raw=ref, entity="T")
+            frontmatter, _body = read_entity_user_facing(task_path, label="task")
+            status = normalize_task_status(frontmatter.get("status", "created"))
+        except TrailmindError as exc:
+            warnings.append(f"linked task {ref}: {exc.format_message()}")
+            continue
+        tasks.append(
+            {
+                "ref": ref,
+                "task_id": _string_value(frontmatter, "id", task_path.stem),
+                "title": _string_value(frontmatter, "title", task_path.stem),
+                "status": status,
+                "terminal": is_terminal_task_status(status),
+                "path": _relative_to_root(repo_root, task_path),
+                "code_paths": string_list_field(frontmatter, "code_paths", label="task"),
+            }
+        )
+    return tasks, warnings
+
+
+def _issue_next_actions(status: str, linked_tasks: list[dict[str, Any]], carried_into: list[str]) -> list[str]:
+    if status in {"done", "wontfix"}:
+        return [f"Issue is terminal ({status}); only pick it up if reopening is intentional."]
+    actions: list[str] = []
+    if linked_tasks:
+        open_tasks = [item for item in linked_tasks if not item["terminal"]]
+        if open_tasks:
+            actions.append("Inspect linked task state before closing the issue.")
+    else:
+        actions.append("Decide whether to link this issue to a task, carry it forward, or close it.")
+    if carried_into:
+        actions.append("Inspect carried-into epics before changing issue status.")
+    return actions
+
+
 def _task_ref_status_to_dict(item: Any, repo_root: Path) -> dict[str, Any]:
     return {
         "ref": item.ref,
@@ -304,6 +344,55 @@ def build_task_pickup(
     )
 
 
+def build_issue_pickup(
+    repo_root: Path,
+    *,
+    issue_ref: str,
+    max_lines: int = 80,
+    activity_limit: int = 10,
+    include_excerpts: bool = True,
+) -> PickupPack:
+    if max_lines < 1:
+        raise TrailmindError("max lines must be at least 1")
+    issue_path = resolve_entity(repo_root, raw=issue_ref, entity="I")
+    frontmatter, body = read_entity_user_facing(issue_path, label="issue")
+    status = _string_value(frontmatter, "status", "open")
+    linked_refs = string_list_field(frontmatter, "linked_tasks", label="issue")
+    carried_into = string_list_field(frontmatter, "carried_into", label="issue")
+    linked_tasks, warnings = _linked_task_summaries(repo_root, linked_refs)
+    excerpt_refs: list[str] = []
+    for task in linked_tasks:
+        excerpt_refs.extend(str(item) for item in task.get("code_paths", []))
+    excerpts = (
+        [excerpt_file(repo_root, ref, max_lines=max_lines) for ref in excerpt_refs]
+        if include_excerpts
+        else _skipped_excerpt_refs(excerpt_refs)
+    )
+    item = {
+        "id": _string_value(frontmatter, "id", issue_path.stem),
+        "title": _string_value(frontmatter, "title", issue_path.stem),
+        "status": status,
+        "severity": _string_value(frontmatter, "severity"),
+        "filer": _string_value(frontmatter, "filer"),
+        "path": _relative_to_root(repo_root, issue_path),
+        "description": extract_markdown_section(body, "Description"),
+        "resolution": extract_markdown_section(body, "Resolution"),
+        "frontmatter": {"linked_tasks": linked_refs, "carried_into": carried_into},
+    }
+    return PickupPack(
+        kind="issue",
+        generated_at=date.today().isoformat(),
+        item=item,
+        dependencies={},
+        linked_items={"tasks": linked_tasks},
+        deliverables={},
+        activity=extract_activity_entries(body, limit=activity_limit),
+        excerpts=excerpts,
+        next_actions=_issue_next_actions(status, linked_tasks, carried_into),
+        warnings=warnings + _excerpt_warnings(excerpts),
+    )
+
+
 def log_task_pickup(repo_root: Path, *, task_ref: str, actor: str, output_format: str) -> Path:
     task_path = resolve_entity(repo_root, raw=task_ref, entity="T")
     frontmatter, body = read_entity_user_facing(task_path, label="task")
@@ -318,6 +407,22 @@ def log_task_pickup(repo_root: Path, *, task_ref: str, actor: str, output_format
     )
     write_entity(task_path, frontmatter=frontmatter, body=body)
     return task_path
+
+
+def log_issue_pickup(repo_root: Path, *, issue_ref: str, actor: str, output_format: str) -> Path:
+    issue_path = resolve_entity(repo_root, raw=issue_ref, entity="I")
+    frontmatter, body = read_entity_user_facing(issue_path, label="issue")
+    body = append_activity_entry(
+        body,
+        action_activity_entry(
+            action="Picked up for handoff",
+            actor_label="actor",
+            actor=actor,
+            note=f"Output format: {output_format}.",
+        ),
+    )
+    write_entity(issue_path, frontmatter=frontmatter, body=body)
+    return issue_path
 
 
 def _list_lines(items: list[str]) -> list[str]:
