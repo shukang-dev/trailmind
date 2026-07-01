@@ -585,6 +585,7 @@ def test_issue_pickup_reports_linked_task(tmp_path: Path):
 
     data = json.loads(result.output)
     assert data["linked_items"]["tasks"][0]["task_id"] == "T-123456-001"
+    assert data["linked_items"]["tasks"][0]["design_doc"] is None
     assert data["excerpts"][0] == {"path": "src/app.py", "skipped": True, "skip_reason": "excluded"}
     assert "Inspect linked task state before closing the issue." in data["next_actions"]
 
@@ -644,9 +645,55 @@ def test_issue_pickup_prefers_local_linked_task_when_duplicate_id_exists(tmp_pat
             "terminal": False,
             "path": "projects/demo_app/mvp/tasks/T-123456-001-build-parser.md",
             "code_paths": ["src/app.py"],
+            "design_doc": None,
         }
     ]
     assert not data["warnings"]
+
+
+def test_issue_pickup_includes_linked_task_design_doc_excerpt(tmp_path: Path):
+    repo = _repo_with_issue(tmp_path)
+    link = CliRunner().invoke(cli, ["issue", "link", "--issue", "I-123456-001", "--task", "T-123456-001"], obj={"cwd": repo})
+    assert link.exit_code == 0
+    (repo / "docs").mkdir()
+    (repo / "docs" / "parser.md").write_text("# Parser design\n\nHandle flags explicitly.\n", encoding="utf-8")
+    task_path = _task_path(repo)
+    frontmatter, body = read_entity(task_path)
+    frontmatter["design_doc"] = "docs/parser.md"
+    write_entity(task_path, frontmatter=frontmatter, body=body)
+
+    result = CliRunner().invoke(cli, ["issue", "pickup", "I-123456-001", "--json"], obj={"cwd": repo})
+
+    assert result.exit_code == 0
+    data = json.loads(result.output)
+    assert data["linked_items"]["tasks"][0]["design_doc"] == "docs/parser.md"
+    assert data["excerpts"][0]["path"] == "src/app.py"
+    assert data["excerpts"][1]["path"] == "docs/parser.md"
+    assert data["excerpts"][1]["skipped"] is False
+    assert data["excerpts"][1]["content"] == "# Parser design\n\nHandle flags explicitly."
+
+
+def test_issue_pickup_no_excerpts_lists_linked_task_code_paths_and_design_doc(tmp_path: Path):
+    repo = _repo_with_issue(tmp_path)
+    link = CliRunner().invoke(cli, ["issue", "link", "--issue", "I-123456-001", "--task", "T-123456-001"], obj={"cwd": repo})
+    assert link.exit_code == 0
+    task_path = _task_path(repo)
+    frontmatter, body = read_entity(task_path)
+    frontmatter["design_doc"] = "docs/parser.md"
+    write_entity(task_path, frontmatter=frontmatter, body=body)
+
+    result = CliRunner().invoke(
+        cli,
+        ["issue", "pickup", "I-123456-001", "--json", "--no-excerpts"],
+        obj={"cwd": repo},
+    )
+
+    assert result.exit_code == 0
+    data = json.loads(result.output)
+    assert data["excerpts"] == [
+        {"path": "src/app.py", "skipped": True, "skip_reason": "excluded"},
+        {"path": "docs/parser.md", "skipped": True, "skip_reason": "excluded"},
+    ]
 
 
 def test_issue_pickup_warns_and_skips_linked_task_with_malformed_code_paths(tmp_path: Path):
@@ -664,6 +711,28 @@ def test_issue_pickup_warns_and_skips_linked_task_with_malformed_code_paths(tmp_
     data = json.loads(result.output)
     assert data["linked_items"]["tasks"] == []
     assert data["warnings"] == ["linked task T-123456-001: task field code_paths must be a list"]
+
+
+def test_issue_pickup_warns_and_skips_unsafe_linked_task_design_doc_path(tmp_path: Path):
+    repo = _repo_with_issue(tmp_path)
+    link = CliRunner().invoke(cli, ["issue", "link", "--issue", "I-123456-001", "--task", "T-123456-001"], obj={"cwd": repo})
+    assert link.exit_code == 0
+    task_path = _task_path(repo)
+    frontmatter, body = read_entity(task_path)
+    frontmatter["design_doc"] = "../secret.txt"
+    write_entity(task_path, frontmatter=frontmatter, body=body)
+
+    result = CliRunner().invoke(cli, ["issue", "pickup", "I-123456-001", "--json"], obj={"cwd": repo})
+
+    assert result.exit_code == 0
+    assert "Traceback" not in result.output
+    data = json.loads(result.output)
+    assert "../secret.txt" not in [excerpt["path"] for excerpt in data["excerpts"]]
+    assert data["linked_items"]["tasks"][0]["design_doc"] == "../secret.txt"
+    assert any(
+        "linked task excerpt ../secret.txt: referenced path escapes repository: ../secret.txt" in warning
+        for warning in data["warnings"]
+    )
 
 
 def test_issue_pickup_warns_and_skips_unsafe_linked_task_excerpt_path(tmp_path: Path):

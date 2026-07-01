@@ -193,6 +193,7 @@ def _linked_task_summaries(repo_root: Path, issue_path: Path, refs: list[str]) -
             frontmatter, _body = read_entity_user_facing(task_path, label="task")
             status = normalize_task_status(frontmatter.get("status", "created"))
             code_paths = string_list_field(frontmatter, "code_paths", label="task")
+            design_doc = frontmatter.get("design_doc")
         except TrailmindError as exc:
             warnings.append(f"linked task {task_ref}: {exc.format_message()}")
             continue
@@ -205,6 +206,7 @@ def _linked_task_summaries(repo_root: Path, issue_path: Path, refs: list[str]) -
                 "terminal": is_terminal_task_status(status),
                 "path": _relative_to_root(repo_root, task_path),
                 "code_paths": code_paths,
+                "design_doc": design_doc,
             }
         )
     return tasks, warnings
@@ -387,6 +389,9 @@ def build_issue_pickup(
     excerpt_refs: list[str] = []
     for task in linked_tasks:
         excerpt_refs.extend(str(item) for item in task.get("code_paths", []))
+        design_doc = task.get("design_doc")
+        if isinstance(design_doc, str) and design_doc.strip():
+            excerpt_refs.append(design_doc.strip())
     excerpts, excerpt_warnings = _issue_linked_task_excerpts(
         repo_root,
         excerpt_refs,
