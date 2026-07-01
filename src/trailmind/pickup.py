@@ -55,7 +55,7 @@ def extract_markdown_section(body: str, heading: str) -> str | None:
     start: int | None = None
     end = len(lines)
     for index, line in enumerate(lines):
-        match = SECTION_RE.match(line)
+        match = SECTION_RE.match(line.strip())
         if not match:
             continue
         if start is None and match.group(1).strip().casefold() == wanted:

@@ -20,6 +20,14 @@ def test_extract_markdown_section_returns_named_section_body():
     assert extract_markdown_section(body, "Missing") is None
 
 
+def test_extract_markdown_section_strips_heading_whitespace():
+    indented_heading = "# Title\n\n  ## Scope  \n\nBuild it.\n"
+    indented_next_heading = "# Title\n\n## Scope\n\nBuild it.\n\n  ## Acceptance  \n\n- Works\n"
+
+    assert extract_markdown_section(indented_heading, "Scope") == "Build it."
+    assert extract_markdown_section(indented_next_heading, "Scope") == "Build it."
+
+
 def test_extract_activity_entries_returns_recent_entries():
     body = (
         "# Task\n\n"
