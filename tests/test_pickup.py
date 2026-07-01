@@ -746,7 +746,35 @@ def test_issue_pickup_warns_and_skips_linked_task_with_yaml_date_design_doc(tmp_
     assert result.exit_code == 0
     assert "Traceback" not in result.output
     data = json.loads(result.output)
-    assert data["linked_items"]["tasks"] == []
+    assert data["linked_items"]["tasks"][0]["task_id"] == "T-123456-001"
+    assert data["linked_items"]["tasks"][0]["code_paths"] == ["src/app.py"]
+    assert data["linked_items"]["tasks"][0]["design_doc"] is None
+    assert data["excerpts"][0]["path"] == "src/app.py"
+    assert data["excerpts"][0]["skipped"] is False
+    assert "Inspect linked task state before closing the issue." in data["next_actions"]
+    assert data["warnings"] == ["linked task T-123456-001: task field design_doc must be a string"]
+
+
+def test_issue_pickup_no_excerpts_keeps_linked_task_code_paths_with_invalid_design_doc(tmp_path: Path):
+    repo = _repo_with_issue(tmp_path)
+    link = CliRunner().invoke(cli, ["issue", "link", "--issue", "I-123456-001", "--task", "T-123456-001"], obj={"cwd": repo})
+    assert link.exit_code == 0
+    task_path = _task_path(repo)
+    text = task_path.read_text(encoding="utf-8")
+    task_path.write_text(text.replace("depends_on:", "design_doc: 2026-07-01\ndepends_on:"), encoding="utf-8")
+
+    result = CliRunner().invoke(
+        cli,
+        ["issue", "pickup", "I-123456-001", "--json", "--no-excerpts"],
+        obj={"cwd": repo},
+    )
+
+    assert result.exit_code == 0
+    assert "Traceback" not in result.output
+    data = json.loads(result.output)
+    assert data["linked_items"]["tasks"][0]["task_id"] == "T-123456-001"
+    assert data["linked_items"]["tasks"][0]["design_doc"] is None
+    assert data["excerpts"] == [{"path": "src/app.py", "skipped": True, "skip_reason": "excluded"}]
     assert data["warnings"] == ["linked task T-123456-001: task field design_doc must be a string"]
 
 

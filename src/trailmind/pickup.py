@@ -203,10 +203,14 @@ def _linked_task_summaries(repo_root: Path, issue_path: Path, refs: list[str]) -
             frontmatter, _body = read_entity_user_facing(task_path, label="task")
             status = normalize_task_status(frontmatter.get("status", "created"))
             code_paths = string_list_field(frontmatter, "code_paths", label="task")
-            design_doc = _optional_string_field(frontmatter, "design_doc", label="task")
         except TrailmindError as exc:
             warnings.append(f"linked task {task_ref}: {exc.format_message()}")
             continue
+        try:
+            design_doc = _optional_string_field(frontmatter, "design_doc", label="task")
+        except TrailmindError as exc:
+            warnings.append(f"linked task {task_ref}: {exc.format_message()}")
+            design_doc = None
         tasks.append(
             {
                 "ref": task_ref,
