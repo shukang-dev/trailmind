@@ -354,6 +354,23 @@ def test_task_pickup_json_rejects_non_string_design_doc_without_traceback_or_mut
     assert task_path.read_text(encoding="utf-8") == before
 
 
+def test_task_pickup_json_serializes_nested_frontmatter_dates(tmp_path: Path):
+    repo = _repo_with_task(tmp_path)
+    task_path = _task_path(repo)
+    text = task_path.read_text(encoding="utf-8")
+    text = text.replace("branches: {}\n", "branches:\n  main:\n    checked_at: 2026-07-01\n")
+    text = text.replace("verify: {}\n", "verify:\n  last_checked: 2026-07-02\n")
+    task_path.write_text(text, encoding="utf-8")
+
+    result = CliRunner().invoke(cli, ["task", "pickup", "T-123456-001", "--json"], obj={"cwd": repo})
+
+    assert result.exit_code == 0
+    assert "Traceback" not in result.output
+    data = json.loads(result.output)
+    assert data["item"]["frontmatter"]["branches"]["main"]["checked_at"] == "2026-07-01"
+    assert data["item"]["frontmatter"]["verify"]["last_checked"] == "2026-07-02"
+
+
 def test_build_task_pickup_prefers_local_known_issue_when_duplicate_id_exists(tmp_path: Path):
     repo = _repo_with_task(tmp_path)
     runner = CliRunner()
@@ -793,11 +810,10 @@ def test_issue_pickup_warns_and_skips_unsafe_linked_task_design_doc_path(tmp_pat
     assert "Traceback" not in result.output
     data = json.loads(result.output)
     assert "../secret.txt" not in [excerpt["path"] for excerpt in data["excerpts"]]
-    assert data["linked_items"]["tasks"][0]["design_doc"] == "../secret.txt"
-    assert any(
-        "linked task excerpt ../secret.txt: referenced path escapes repository: ../secret.txt" in warning
-        for warning in data["warnings"]
-    )
+    assert data["linked_items"]["tasks"][0]["design_doc"] is None
+    assert data["excerpts"][0]["path"] == "src/app.py"
+    assert data["excerpts"][0]["skipped"] is False
+    assert data["warnings"] == ["linked task T-123456-001: referenced path escapes repository: ../secret.txt"]
 
 
 def test_issue_pickup_no_excerpts_warns_and_skips_unsafe_linked_task_design_doc_path(tmp_path: Path):
@@ -819,11 +835,9 @@ def test_issue_pickup_no_excerpts_warns_and_skips_unsafe_linked_task_design_doc_
     assert "Traceback" not in result.output
     data = json.loads(result.output)
     assert "../secret.txt" not in [excerpt["path"] for excerpt in data["excerpts"]]
-    assert data["linked_items"]["tasks"][0]["design_doc"] == "../secret.txt"
-    assert any(
-        "linked task excerpt ../secret.txt: referenced path escapes repository: ../secret.txt" in warning
-        for warning in data["warnings"]
-    )
+    assert data["linked_items"]["tasks"][0]["design_doc"] is None
+    assert data["excerpts"] == [{"path": "src/app.py", "skipped": True, "skip_reason": "excluded"}]
+    assert data["warnings"] == ["linked task T-123456-001: referenced path escapes repository: ../secret.txt"]
 
 
 def test_issue_pickup_warns_and_skips_unsafe_linked_task_excerpt_path(tmp_path: Path):

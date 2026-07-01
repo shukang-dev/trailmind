@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from collections.abc import Mapping, Sequence
 import re
 from dataclasses import dataclass, field
 from datetime import date
@@ -47,18 +48,32 @@ def build_base_pickup_pack(*, kind: str, repo_path: str) -> PickupPack:
 
 
 def pickup_pack_to_dict(pack: PickupPack) -> dict[str, Any]:
-    return {
-        "kind": pack.kind,
-        "generated_at": pack.generated_at,
-        "item": pack.item,
-        "dependencies": pack.dependencies,
-        "linked_items": pack.linked_items,
-        "deliverables": pack.deliverables,
-        "activity": pack.activity,
-        "excerpts": pack.excerpts,
-        "next_actions": pack.next_actions,
-        "warnings": pack.warnings,
-    }
+    return _json_safe(
+        {
+            "kind": pack.kind,
+            "generated_at": pack.generated_at,
+            "item": pack.item,
+            "dependencies": pack.dependencies,
+            "linked_items": pack.linked_items,
+            "deliverables": pack.deliverables,
+            "activity": pack.activity,
+            "excerpts": pack.excerpts,
+            "next_actions": pack.next_actions,
+            "warnings": pack.warnings,
+        }
+    )
+
+
+def _json_safe(value: Any) -> Any:
+    if value is None or isinstance(value, (str, int, float, bool)):
+        return value
+    if isinstance(value, date):
+        return value.isoformat()
+    if isinstance(value, Mapping):
+        return {str(key): _json_safe(item) for key, item in value.items()}
+    if isinstance(value, Sequence) and not isinstance(value, (str, bytes, bytearray)):
+        return [_json_safe(item) for item in value]
+    return str(value)
 
 
 def extract_markdown_section(body: str, heading: str) -> str | None:
@@ -208,6 +223,8 @@ def _linked_task_summaries(repo_root: Path, issue_path: Path, refs: list[str]) -
             continue
         try:
             design_doc = _optional_string_field(frontmatter, "design_doc", label="task")
+            if design_doc is not None:
+                _safe_relative_path(design_doc)
         except TrailmindError as exc:
             warnings.append(f"linked task {task_ref}: {exc.format_message()}")
             design_doc = None
