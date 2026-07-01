@@ -7,6 +7,15 @@ from pathlib import Path, PurePosixPath, PureWindowsPath
 from typing import Any
 
 from trailmind.errors import TrailmindError
+from trailmind.log import read_entity_user_facing
+from trailmind.resolver import resolve_entity
+from trailmind.task_rules import (
+    dependency_blockers,
+    missing_deliverables,
+    soft_dependency_warnings,
+    string_list_field,
+)
+from trailmind.task_status import is_terminal_task_status, normalize_task_status
 
 
 SECTION_RE = re.compile(r"^##\s+(.+?)\s*$")
@@ -131,3 +140,237 @@ def excerpt_file(repo_root: Path, raw_path: str, *, max_lines: int) -> dict[str,
         "content": "\n".join(selected),
         "skipped": False,
     }
+
+
+def _relative_to_root(repo_root: Path, path: Path) -> str:
+    try:
+        return path.relative_to(repo_root).as_posix()
+    except ValueError:
+        return path.as_posix()
+
+
+def _string_value(frontmatter: dict[str, Any], key: str, default: str = "") -> str:
+    value = frontmatter.get(key)
+    if value is None:
+        return default
+    return str(value)
+
+
+def _task_next_actions(
+    status: str,
+    blockers: list[dict[str, Any]],
+    missing: list[str],
+    open_issues: list[dict[str, Any]],
+) -> list[str]:
+    actions: list[str] = []
+    if is_terminal_task_status(status):
+        return [f"Task is terminal ({status}); do not pick it up for implementation unless reopening is intentional."]
+    if blockers:
+        actions.append("Hard dependencies are not terminal; do not start implementation yet.")
+    if status == "blocked":
+        actions.append("Task is blocked; resolve or update the blocker before implementation.")
+    if missing:
+        actions.append("Complete missing deliverables before closing the task.")
+    if open_issues:
+        actions.append("Review linked open issues before closing the task.")
+    if not blockers and status in {"created", "ready"}:
+        actions.append("Task is ready to start.")
+    if status == "in_progress":
+        actions.append("Continue from recent activity and verify current worktree state.")
+    return actions
+
+
+def _task_ref_status_to_dict(item: Any, repo_root: Path) -> dict[str, Any]:
+    return {
+        "ref": item.ref,
+        "task_id": item.task_id,
+        "title": item.title,
+        "status": item.status,
+        "terminal": item.terminal,
+        "missing": item.missing,
+        "path": _relative_to_root(repo_root, item.path) if item.path else None,
+    }
+
+
+def _known_issue_summaries(repo_root: Path, refs: list[str]) -> tuple[list[dict[str, Any]], list[str]]:
+    issues: list[dict[str, Any]] = []
+    warnings: list[str] = []
+    for ref in refs:
+        try:
+            issue_path = resolve_entity(repo_root, raw=ref, entity="I")
+            frontmatter, _body = read_entity_user_facing(issue_path, label="issue")
+        except TrailmindError as exc:
+            warnings.append(f"linked issue {ref}: {exc.format_message()}")
+            continue
+        issues.append(
+            {
+                "id": _string_value(frontmatter, "id", issue_path.stem),
+                "title": _string_value(frontmatter, "title", issue_path.stem),
+                "status": _string_value(frontmatter, "status", "open"),
+                "path": _relative_to_root(repo_root, issue_path),
+            }
+        )
+    return issues, warnings
+
+
+def _skipped_excerpt_refs(references: list[str]) -> list[dict[str, Any]]:
+    skipped: list[dict[str, Any]] = []
+    for ref in references:
+        relative = _safe_relative_path(ref)
+        skipped.append({"path": relative.as_posix(), "skipped": True, "skip_reason": "excluded"})
+    return skipped
+
+
+def _excerpt_warnings(excerpts: list[dict[str, Any]]) -> list[str]:
+    warnings: list[str] = []
+    for excerpt in excerpts:
+        if excerpt.get("skipped") and excerpt.get("skip_reason") != "excluded":
+            warnings.append(f"{excerpt['path']} excerpt skipped: {excerpt.get('skip_reason')}")
+    return warnings
+
+
+def build_task_pickup(
+    repo_root: Path,
+    *,
+    task_ref: str,
+    max_lines: int = 80,
+    activity_limit: int = 10,
+    include_excerpts: bool = True,
+) -> PickupPack:
+    if max_lines < 1:
+        raise TrailmindError("max lines must be at least 1")
+    task_path = resolve_entity(repo_root, raw=task_ref, entity="T")
+    frontmatter, body = read_entity_user_facing(task_path, label="task")
+    status = normalize_task_status(frontmatter.get("status", "created"))
+    depends_on = string_list_field(frontmatter, "depends_on", label="task")
+    soft_depends_on = string_list_field(frontmatter, "soft_depends_on", label="task")
+    known_issues = string_list_field(frontmatter, "known_issues", label="task")
+    deliverables = string_list_field(frontmatter, "deliverables", label="task")
+    completed = string_list_field(frontmatter, "completed_deliverables", label="task")
+    blockers = [_task_ref_status_to_dict(item, repo_root) for item in dependency_blockers(repo_root, frontmatter)]
+    soft_warnings = [_task_ref_status_to_dict(item, repo_root) for item in soft_dependency_warnings(repo_root, frontmatter)]
+    issue_summaries, issue_warnings = _known_issue_summaries(repo_root, known_issues)
+    open_issues = [item for item in issue_summaries if item["status"] == "open"]
+    missing = missing_deliverables(frontmatter)
+    references = string_list_field(frontmatter, "code_paths", label="task")
+    design_doc = frontmatter.get("design_doc")
+    if isinstance(design_doc, str) and design_doc.strip():
+        references.append(design_doc.strip())
+    excerpts = (
+        [excerpt_file(repo_root, ref, max_lines=max_lines) for ref in references]
+        if include_excerpts
+        else _skipped_excerpt_refs(references)
+    )
+    warnings = (
+        issue_warnings
+        + [f"{item['task_id']} soft dependency is {item['status']}" for item in soft_warnings]
+        + _excerpt_warnings(excerpts)
+    )
+    item = {
+        "id": _string_value(frontmatter, "id", task_path.stem),
+        "title": _string_value(frontmatter, "title", task_path.stem),
+        "status": status,
+        "owner": _string_value(frontmatter, "owner"),
+        "filer": _string_value(frontmatter, "filer"),
+        "path": _relative_to_root(repo_root, task_path),
+        "scope": extract_markdown_section(body, "Scope"),
+        "acceptance": extract_markdown_section(body, "Acceptance"),
+        "frontmatter": {
+            "depends_on": depends_on,
+            "soft_depends_on": soft_depends_on,
+            "known_issues": known_issues,
+            "deliverables": deliverables,
+            "completed_deliverables": completed,
+            "code_paths": string_list_field(frontmatter, "code_paths", label="task"),
+            "design_doc": design_doc,
+            "branches": frontmatter.get("branches") or {},
+            "verify": frontmatter.get("verify") or {},
+        },
+    }
+    return PickupPack(
+        kind="task",
+        generated_at=date.today().isoformat(),
+        item=item,
+        dependencies={"hard": blockers, "soft": soft_warnings},
+        linked_items={"issues": issue_summaries},
+        deliverables={"required": deliverables, "completed": completed, "missing": missing},
+        activity=extract_activity_entries(body, limit=activity_limit),
+        excerpts=excerpts,
+        next_actions=_task_next_actions(status, blockers, missing, open_issues),
+        warnings=warnings,
+    )
+
+
+def _list_lines(items: list[str]) -> list[str]:
+    if not items:
+        return ["- none"]
+    return [f"- {item}" for item in items]
+
+
+def _json_lines(items: list[dict[str, Any]], *, label: str) -> list[str]:
+    if not items:
+        return ["- none"]
+    lines: list[str] = []
+    for item in items:
+        title = item.get("title") or item.get("task_id") or item.get("id") or label
+        status = item.get("status", "unknown")
+        path = item.get("path")
+        suffix = f" ({path})" if path else ""
+        lines.append(f"- {title} [{status}]{suffix}")
+    return lines
+
+
+def format_pickup_markdown(pack: PickupPack) -> str:
+    title = f"{pack.item.get('id', '')} {pack.item.get('title', '')}".strip()
+    heading_kind = "Task" if pack.kind == "task" else "Issue"
+    lines = [f"# {heading_kind} Pickup: {title}", ""]
+    lines.extend(["## Summary", f"- Path: {pack.item.get('path', '')}", f"- Status: {pack.item.get('status', '')}", ""])
+    lines.extend(["## Current State"])
+    scope = pack.item.get("scope") or pack.item.get("description")
+    acceptance = pack.item.get("acceptance")
+    resolution = pack.item.get("resolution")
+    lines.append(scope if scope else "none")
+    if acceptance:
+        lines.extend(["", "Acceptance:", acceptance])
+    if resolution:
+        lines.extend(["", "Resolution:", resolution])
+    lines.append("")
+    if pack.kind == "task":
+        lines.extend(["## Dependencies", "Hard:"])
+        lines.extend(_json_lines(pack.dependencies.get("hard", []), label="dependency"))
+        lines.append("")
+        lines.append("Soft:")
+        lines.extend(_json_lines(pack.dependencies.get("soft", []), label="dependency"))
+        lines.append("")
+        lines.extend(["## Deliverables"])
+        lines.extend(_list_lines(pack.deliverables.get("missing", [])))
+        lines.append("")
+        lines.extend(["## Linked Issues"])
+        lines.extend(_json_lines(pack.linked_items.get("issues", []), label="issue"))
+        lines.append("")
+    else:
+        lines.extend(["## Linked Tasks"])
+        lines.extend(_json_lines(pack.linked_items.get("tasks", []), label="task"))
+        lines.append("")
+    lines.extend(["## Recent Activity"])
+    lines.extend(pack.activity if pack.activity else ["- none"])
+    lines.append("")
+    lines.extend(["## Relevant Files"])
+    if pack.excerpts:
+        for excerpt in pack.excerpts:
+            lines.append(f"### {excerpt['path']}")
+            if excerpt.get("skipped"):
+                lines.append(f"- skipped: {excerpt.get('skip_reason')}")
+            else:
+                lines.append("```")
+                lines.append(str(excerpt.get("content", "")))
+                lines.append("```")
+    else:
+        lines.append("none")
+    lines.append("")
+    lines.extend(["## Next Actions"])
+    lines.extend(_list_lines(pack.next_actions))
+    lines.append("")
+    lines.extend(["## Warnings"])
+    lines.extend(_list_lines(pack.warnings))
+    return "\n".join(lines).rstrip() + "\n"

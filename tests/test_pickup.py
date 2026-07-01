@@ -1,13 +1,18 @@
 from pathlib import Path
 
 import pytest
+from click.testing import CliRunner
 
+from trailmind.cli import cli
+from trailmind.entity_io import read_entity, write_entity
 from trailmind.errors import TrailmindError
 from trailmind.pickup import (
     build_base_pickup_pack,
+    build_task_pickup,
     excerpt_file,
     extract_activity_entries,
     extract_markdown_section,
+    format_pickup_markdown,
     pickup_pack_to_dict,
 )
 
@@ -112,3 +117,113 @@ def test_base_pickup_pack_dict_shape():
     assert data["excerpts"] == []
     assert data["next_actions"] == []
     assert data["warnings"] == []
+
+
+def _repo_with_task(tmp_path: Path) -> Path:
+    (tmp_path / ".git").mkdir()
+    (tmp_path / "roster.yaml").write_text(
+        "developers:\n"
+        "- email: alice@example.com\n"
+        "  shortname: alice\n"
+        "  uid: '123456'\n"
+        "  name: Alice\n",
+        encoding="utf-8",
+    )
+    runner = CliRunner()
+    assert runner.invoke(
+        cli,
+        [
+            "project",
+            "init",
+            "--slug",
+            "demo_app",
+            "--title",
+            "Demo App",
+            "--goal",
+            "Build a useful demo.",
+        ],
+        obj={"cwd": tmp_path},
+    ).exit_code == 0
+    assert runner.invoke(
+        cli,
+        [
+            "epic",
+            "init",
+            "--project",
+            "demo_app",
+            "--slug",
+            "mvp",
+            "--title",
+            "MVP",
+            "--goal",
+            "First usable release",
+        ],
+        obj={"cwd": tmp_path},
+    ).exit_code == 0
+    (tmp_path / "src").mkdir()
+    (tmp_path / "src" / "app.py").write_text("print('one')\nprint('two')\n", encoding="utf-8")
+    result = runner.invoke(
+        cli,
+        [
+            "task",
+            "add",
+            "--epic",
+            "projects/demo_app/mvp",
+            "--filer",
+            "alice@example.com",
+            "--owner",
+            "alice@example.com",
+            "--title",
+            "Build parser",
+            "--code-paths",
+            "src/app.py",
+            "--deliverables",
+            "tests pass",
+        ],
+        obj={"cwd": tmp_path},
+    )
+    assert result.exit_code == 0
+    return tmp_path
+
+
+def _task_path(repo: Path) -> Path:
+    return repo / "projects" / "demo_app" / "mvp" / "tasks" / "T-123456-001-build-parser.md"
+
+
+def test_build_task_pickup_includes_task_summary_activity_and_excerpt(tmp_path: Path):
+    repo = _repo_with_task(tmp_path)
+
+    pack = build_task_pickup(repo, task_ref="T-123456-001", max_lines=1, activity_limit=10, include_excerpts=True)
+
+    assert pack.kind == "task"
+    assert pack.item["id"] == "T-123456-001"
+    assert pack.item["title"] == "Build parser"
+    assert pack.item["status"] == "created"
+    assert pack.deliverables["missing"] == ["tests pass"]
+    assert pack.excerpts[0]["path"] == "src/app.py"
+    assert pack.excerpts[0]["content"] == "print('one')"
+    assert "Task is ready to start." in pack.next_actions
+
+
+def test_format_task_pickup_markdown_uses_predictable_sections(tmp_path: Path):
+    repo = _repo_with_task(tmp_path)
+    pack = build_task_pickup(repo, task_ref="T-123456-001", max_lines=1, activity_limit=10, include_excerpts=True)
+
+    rendered = format_pickup_markdown(pack)
+
+    assert "# Task Pickup: T-123456-001 Build parser" in rendered
+    assert "## Summary" in rendered
+    assert "## Current State" in rendered
+    assert "## Deliverables" in rendered
+    assert "## Relevant Files" in rendered
+    assert "src/app.py" in rendered
+    assert "## Next Actions" in rendered
+
+
+def test_build_task_pickup_is_read_only_by_default(tmp_path: Path):
+    repo = _repo_with_task(tmp_path)
+    before = _task_path(repo).read_text(encoding="utf-8")
+
+    build_task_pickup(repo, task_ref="T-123456-001", max_lines=80, activity_limit=10, include_excerpts=True)
+
+    assert _task_path(repo).read_text(encoding="utf-8") == before
