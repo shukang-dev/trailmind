@@ -6,8 +6,9 @@ from datetime import date
 from pathlib import Path, PurePosixPath, PureWindowsPath
 from typing import Any
 
+from trailmind.entity_io import write_entity
 from trailmind.errors import TrailmindError
-from trailmind.log import read_entity_user_facing
+from trailmind.log import action_activity_entry, append_activity_entry, read_entity_user_facing
 from trailmind.resolver import resolve_entity
 from trailmind.task_rules import (
     dependency_blockers,
@@ -301,6 +302,22 @@ def build_task_pickup(
         next_actions=_task_next_actions(status, blockers, missing, open_issues),
         warnings=warnings,
     )
+
+
+def log_task_pickup(repo_root: Path, *, task_ref: str, actor: str, output_format: str) -> Path:
+    task_path = resolve_entity(repo_root, raw=task_ref, entity="T")
+    frontmatter, body = read_entity_user_facing(task_path, label="task")
+    body = append_activity_entry(
+        body,
+        action_activity_entry(
+            action="Picked up for handoff",
+            actor_label="actor",
+            actor=actor,
+            note=f"Output format: {output_format}.",
+        ),
+    )
+    write_entity(task_path, frontmatter=frontmatter, body=body)
+    return task_path
 
 
 def _list_lines(items: list[str]) -> list[str]:

@@ -1,3 +1,4 @@
+import json
 from pathlib import Path
 
 import pytest
@@ -189,6 +190,66 @@ def _repo_with_task(tmp_path: Path) -> Path:
 
 def _task_path(repo: Path) -> Path:
     return repo / "projects" / "demo_app" / "mvp" / "tasks" / "T-123456-001-build-parser.md"
+
+
+def test_task_pickup_cli_prints_markdown(tmp_path: Path):
+    repo = _repo_with_task(tmp_path)
+
+    result = CliRunner().invoke(cli, ["task", "pickup", "T-123456-001"], obj={"cwd": repo})
+
+    assert result.exit_code == 0
+    assert "# Task Pickup: T-123456-001 Build parser" in result.output
+    assert "## Next Actions" in result.output
+
+
+def test_task_pickup_cli_prints_json(tmp_path: Path):
+    repo = _repo_with_task(tmp_path)
+
+    result = CliRunner().invoke(cli, ["task", "pickup", "T-123456-001", "--json"], obj={"cwd": repo})
+
+    assert result.exit_code == 0
+    data = json.loads(result.output)
+    assert data["kind"] == "task"
+    assert data["item"]["id"] == "T-123456-001"
+    assert data["excerpts"][0]["path"] == "src/app.py"
+
+
+def test_task_pickup_no_excerpts_lists_paths_without_file_content(tmp_path: Path):
+    repo = _repo_with_task(tmp_path)
+
+    result = CliRunner().invoke(cli, ["task", "pickup", "T-123456-001", "--no-excerpts"], obj={"cwd": repo})
+
+    assert result.exit_code == 0
+    assert "src/app.py" in result.output
+    assert "skipped: excluded" in result.output
+    assert "print('one')" not in result.output
+
+
+def test_task_pickup_log_requires_actor_without_modifying_file(tmp_path: Path):
+    repo = _repo_with_task(tmp_path)
+    before = _task_path(repo).read_text(encoding="utf-8")
+
+    result = CliRunner().invoke(cli, ["task", "pickup", "T-123456-001", "--log"], obj={"cwd": repo})
+
+    assert result.exit_code == 1
+    assert "error:" in result.output
+    assert "pickup logging requires --actor" in result.output
+    assert _task_path(repo).read_text(encoding="utf-8") == before
+
+
+def test_task_pickup_log_records_one_activity_entry(tmp_path: Path):
+    repo = _repo_with_task(tmp_path)
+
+    result = CliRunner().invoke(
+        cli,
+        ["task", "pickup", "T-123456-001", "--log", "--actor", "alice"],
+        obj={"cwd": repo},
+    )
+
+    assert result.exit_code == 0
+    frontmatter, body = read_entity(_task_path(repo))
+    assert frontmatter["status"] == "created"
+    assert body.count("Picked up for handoff by alice.") == 1
 
 
 def test_build_task_pickup_includes_task_summary_activity_and_excerpt(tmp_path: Path):
