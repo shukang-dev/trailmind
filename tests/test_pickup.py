@@ -7,6 +7,7 @@ from trailmind.cli import cli
 from trailmind.entity_io import read_entity, write_entity
 from trailmind.errors import TrailmindError
 from trailmind.pickup import (
+    PickupPack,
     build_base_pickup_pack,
     build_task_pickup,
     excerpt_file,
@@ -69,7 +70,7 @@ def test_excerpt_file_truncates_text_files(tmp_path: Path):
     assert excerpt["skipped"] is False
 
 
-def test_excerpt_file_does_not_read_entire_file(tmp_path: Path, monkeypatch: pytest.MonkeyPatch):
+def test_excerpt_file_does_not_call_read_text(tmp_path: Path, monkeypatch: pytest.MonkeyPatch):
     target = tmp_path / "src" / "app.py"
     target.parent.mkdir()
     target.write_text("one\ntwo\nthree\n", encoding="utf-8")
@@ -218,6 +219,31 @@ def test_format_task_pickup_markdown_uses_predictable_sections(tmp_path: Path):
     assert "## Relevant Files" in rendered
     assert "src/app.py" in rendered
     assert "## Next Actions" in rendered
+
+
+def test_format_pickup_markdown_uses_fence_longer_than_embedded_backticks():
+    pack = PickupPack(
+        kind="task",
+        generated_at="2026-07-01",
+        item={
+            "id": "T-123456-001",
+            "title": "Design review",
+            "path": "projects/demo_app/mvp/tasks/T-123456-001-design-review.md",
+            "status": "created",
+            "scope": "Review the design doc.",
+        },
+        excerpts=[
+            {
+                "path": "docs/design.md",
+                "content": "Before\n```\ncode\n```\nAfter",
+                "skipped": False,
+            }
+        ],
+    )
+
+    rendered = format_pickup_markdown(pack)
+
+    assert "### docs/design.md\n````\nBefore\n```\ncode\n```\nAfter\n````" in rendered
 
 
 def test_build_task_pickup_is_read_only_by_default(tmp_path: Path):

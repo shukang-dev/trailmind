@@ -12,6 +12,7 @@ from trailmind.resolver import resolve_entity
 from trailmind.task_rules import (
     dependency_blockers,
     missing_deliverables,
+    resolve_linked_issue,
     soft_dependency_warnings,
     string_list_field,
 )
@@ -19,7 +20,6 @@ from trailmind.task_status import is_terminal_task_status, normalize_task_status
 
 
 SECTION_RE = re.compile(r"^##\s+(.+?)\s*$")
-ISSUE_SLUG_SUFFIX_RE = re.compile(r"^[a-z0-9]+(?:-[a-z0-9]+)*$")
 
 
 @dataclass(frozen=True)
@@ -193,56 +193,13 @@ def _task_ref_status_to_dict(item: Any, repo_root: Path) -> dict[str, Any]:
     }
 
 
-def _is_path_like_issue_ref(raw: str) -> bool:
-    windows_path = PureWindowsPath(raw)
-    return (
-        raw in {".", ".."}
-        or "/" in raw
-        or "\\" in raw
-        or raw.endswith(".md")
-        or PurePosixPath(raw).is_absolute()
-        or windows_path.is_absolute()
-        or bool(windows_path.drive)
-        or bool(windows_path.root)
-    )
-
-
-def _matches_bare_issue_id(path: Path, raw: str) -> bool:
-    stem = path.stem
-    if stem == raw:
-        return True
-    prefix = f"{raw}-"
-    if not stem.startswith(prefix):
-        return False
-    return bool(ISSUE_SLUG_SUFFIX_RE.fullmatch(stem[len(prefix) :]))
-
-
-def _resolve_known_issue(repo_root: Path, task_path: Path, ref: str) -> Path:
-    if not _is_path_like_issue_ref(ref):
-        local_issues_path = task_path.parent.parent / "issues"
-        local_matches = sorted(
-            (
-                path
-                for path in local_issues_path.glob("I-*.md")
-                if path.is_file() and _matches_bare_issue_id(path, ref)
-            ),
-            key=lambda path: _relative_to_root(repo_root, path),
-        )
-        if len(local_matches) == 1:
-            return local_matches[0]
-        if len(local_matches) > 1:
-            candidates = ", ".join(_relative_to_root(repo_root, path) for path in local_matches)
-            raise TrailmindError(f"I entity {ref!r} is ambiguous; candidates: {candidates}")
-    return resolve_entity(repo_root, raw=ref, entity="I")
-
-
 def _known_issue_summaries(repo_root: Path, task_path: Path, refs: list[str]) -> tuple[list[dict[str, Any]], list[str]]:
     issues: list[dict[str, Any]] = []
     warnings: list[str] = []
     for ref in refs:
         issue_ref = ref.strip()
         try:
-            issue_path = _resolve_known_issue(repo_root, task_path, issue_ref)
+            issue_path = resolve_linked_issue(repo_root, task_path, issue_ref)
             frontmatter, _body = read_entity_user_facing(issue_path, label="issue")
         except TrailmindError as exc:
             warnings.append(f"linked issue {issue_ref}: {exc.format_message()}")
@@ -365,6 +322,11 @@ def _json_lines(items: list[dict[str, Any]], *, label: str) -> list[str]:
     return lines
 
 
+def _markdown_code_fence(content: str) -> str:
+    longest = max((len(match.group(0)) for match in re.finditer(r"`+", content)), default=0)
+    return "`" * max(3, longest + 1)
+
+
 def format_pickup_markdown(pack: PickupPack) -> str:
     title = f"{pack.item.get('id', '')} {pack.item.get('title', '')}".strip()
     heading_kind = "Task" if pack.kind == "task" else "Issue"
@@ -407,9 +369,11 @@ def format_pickup_markdown(pack: PickupPack) -> str:
             if excerpt.get("skipped"):
                 lines.append(f"- skipped: {excerpt.get('skip_reason')}")
             else:
-                lines.append("```")
-                lines.append(str(excerpt.get("content", "")))
-                lines.append("```")
+                content = str(excerpt.get("content", ""))
+                fence = _markdown_code_fence(content)
+                lines.append(fence)
+                lines.append(content)
+                lines.append(fence)
     else:
         lines.append("none")
     lines.append("")

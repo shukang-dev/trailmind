@@ -76,7 +76,7 @@ def _relative_display(repo_root: Path, path: Path) -> str:
         return path.as_posix()
 
 
-def _resolve_linked_issue(repo_root: Path, task_path: Path, ref: str) -> Path:
+def resolve_linked_issue(repo_root: Path, task_path: Path, ref: str) -> Path:
     if _is_path_like_ref(ref):
         return resolve_entity(repo_root, raw=ref, entity="I")
 
@@ -104,7 +104,7 @@ def linked_open_issues_for_task(repo_root: Path, task_path: Path) -> list[Linked
     for ref in refs:
         issue_ref = ref.strip()
         try:
-            issue_path = _resolve_linked_issue(repo_root, task_path, issue_ref)
+            issue_path = resolve_linked_issue(repo_root, task_path, issue_ref)
         except EntityNotFoundError:
             continue
         issue_frontmatter, _issue_body = read_entity_user_facing(issue_path, label="issue")
