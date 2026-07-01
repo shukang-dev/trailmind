@@ -19,6 +19,7 @@ from trailmind.task_status import is_terminal_task_status, normalize_task_status
 
 
 SECTION_RE = re.compile(r"^##\s+(.+?)\s*$")
+ISSUE_SLUG_SUFFIX_RE = re.compile(r"^[a-z0-9]+(?:-[a-z0-9]+)*$")
 
 
 @dataclass(frozen=True)
@@ -192,15 +193,59 @@ def _task_ref_status_to_dict(item: Any, repo_root: Path) -> dict[str, Any]:
     }
 
 
-def _known_issue_summaries(repo_root: Path, refs: list[str]) -> tuple[list[dict[str, Any]], list[str]]:
+def _is_path_like_issue_ref(raw: str) -> bool:
+    windows_path = PureWindowsPath(raw)
+    return (
+        raw in {".", ".."}
+        or "/" in raw
+        or "\\" in raw
+        or raw.endswith(".md")
+        or PurePosixPath(raw).is_absolute()
+        or windows_path.is_absolute()
+        or bool(windows_path.drive)
+        or bool(windows_path.root)
+    )
+
+
+def _matches_bare_issue_id(path: Path, raw: str) -> bool:
+    stem = path.stem
+    if stem == raw:
+        return True
+    prefix = f"{raw}-"
+    if not stem.startswith(prefix):
+        return False
+    return bool(ISSUE_SLUG_SUFFIX_RE.fullmatch(stem[len(prefix) :]))
+
+
+def _resolve_known_issue(repo_root: Path, task_path: Path, ref: str) -> Path:
+    if not _is_path_like_issue_ref(ref):
+        local_issues_path = task_path.parent.parent / "issues"
+        local_matches = sorted(
+            (
+                path
+                for path in local_issues_path.glob("I-*.md")
+                if path.is_file() and _matches_bare_issue_id(path, ref)
+            ),
+            key=lambda path: _relative_to_root(repo_root, path),
+        )
+        if len(local_matches) == 1:
+            return local_matches[0]
+        if len(local_matches) > 1:
+            candidates = ", ".join(_relative_to_root(repo_root, path) for path in local_matches)
+            raise TrailmindError(f"I entity {ref!r} is ambiguous; candidates: {candidates}")
+    return resolve_entity(repo_root, raw=ref, entity="I")
+
+
+def _known_issue_summaries(repo_root: Path, task_path: Path, refs: list[str]) -> tuple[list[dict[str, Any]], list[str]]:
     issues: list[dict[str, Any]] = []
     warnings: list[str] = []
     for ref in refs:
+        issue_ref = ref.strip()
         try:
-            issue_path = resolve_entity(repo_root, raw=ref, entity="I")
+            issue_path = _resolve_known_issue(repo_root, task_path, issue_ref)
             frontmatter, _body = read_entity_user_facing(issue_path, label="issue")
         except TrailmindError as exc:
-            warnings.append(f"linked issue {ref}: {exc.format_message()}")
+            warnings.append(f"linked issue {issue_ref}: {exc.format_message()}")
             continue
         issues.append(
             {
@@ -249,7 +294,7 @@ def build_task_pickup(
     completed = string_list_field(frontmatter, "completed_deliverables", label="task")
     blockers = [_task_ref_status_to_dict(item, repo_root) for item in dependency_blockers(repo_root, frontmatter)]
     soft_warnings = [_task_ref_status_to_dict(item, repo_root) for item in soft_dependency_warnings(repo_root, frontmatter)]
-    issue_summaries, issue_warnings = _known_issue_summaries(repo_root, known_issues)
+    issue_summaries, issue_warnings = _known_issue_summaries(repo_root, task_path, known_issues)
     open_issues = [item for item in issue_summaries if item["status"] == "open"]
     missing = missing_deliverables(frontmatter)
     references = string_list_field(frontmatter, "code_paths", label="task")

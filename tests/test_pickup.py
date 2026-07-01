@@ -227,3 +227,87 @@ def test_build_task_pickup_is_read_only_by_default(tmp_path: Path):
     build_task_pickup(repo, task_ref="T-123456-001", max_lines=80, activity_limit=10, include_excerpts=True)
 
     assert _task_path(repo).read_text(encoding="utf-8") == before
+
+
+def test_build_task_pickup_prefers_local_known_issue_when_duplicate_id_exists(tmp_path: Path):
+    repo = _repo_with_task(tmp_path)
+    runner = CliRunner()
+    assert runner.invoke(
+        cli,
+        [
+            "epic",
+            "init",
+            "--project",
+            "demo_app",
+            "--slug",
+            "next",
+            "--title",
+            "Next",
+            "--goal",
+            "Follow-up release",
+        ],
+        obj={"cwd": repo},
+    ).exit_code == 0
+    assert runner.invoke(
+        cli,
+        [
+            "issue",
+            "add",
+            "--epic",
+            "projects/demo_app/mvp",
+            "--filer",
+            "alice@example.com",
+            "--title",
+            "Parser issue",
+            "--description",
+            "Parser issue details.",
+            "--severity",
+            "medium",
+        ],
+        obj={"cwd": repo},
+    ).exit_code == 0
+    assert runner.invoke(
+        cli,
+        [
+            "issue",
+            "add",
+            "--epic",
+            "projects/demo_app/next",
+            "--filer",
+            "alice@example.com",
+            "--title",
+            "Other epic issue",
+            "--description",
+            "Other epic issue details.",
+            "--severity",
+            "medium",
+        ],
+        obj={"cwd": repo},
+    ).exit_code == 0
+    link_result = runner.invoke(
+        cli,
+        [
+            "issue",
+            "link",
+            "--issue",
+            "projects/demo_app/mvp/issues/I-123456-001-parser-issue.md",
+            "--task",
+            "T-123456-001",
+        ],
+        obj={"cwd": repo},
+    )
+    assert link_result.exit_code == 0
+    task_frontmatter, _body = read_entity(_task_path(repo))
+    assert task_frontmatter["known_issues"] == ["I-123456-001"]
+
+    pack = build_task_pickup(repo, task_ref="T-123456-001", max_lines=80, activity_limit=10, include_excerpts=True)
+
+    assert pack.linked_items["issues"] == [
+        {
+            "id": "I-123456-001",
+            "title": "Parser issue",
+            "status": "open",
+            "path": "projects/demo_app/mvp/issues/I-123456-001-parser-issue.md",
+        }
+    ]
+    assert not any(warning.startswith("linked issue I-123456-001:") for warning in pack.warnings)
