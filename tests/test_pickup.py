@@ -666,6 +666,52 @@ def test_issue_pickup_warns_and_skips_linked_task_with_malformed_code_paths(tmp_
     assert data["warnings"] == ["linked task T-123456-001: task field code_paths must be a list"]
 
 
+def test_issue_pickup_warns_and_skips_unsafe_linked_task_excerpt_path(tmp_path: Path):
+    repo = _repo_with_issue(tmp_path)
+    link = CliRunner().invoke(cli, ["issue", "link", "--issue", "I-123456-001", "--task", "T-123456-001"], obj={"cwd": repo})
+    assert link.exit_code == 0
+    task_path = _task_path(repo)
+    frontmatter, body = read_entity(task_path)
+    frontmatter["code_paths"] = ["../secret.txt"]
+    write_entity(task_path, frontmatter=frontmatter, body=body)
+
+    result = CliRunner().invoke(cli, ["issue", "pickup", "I-123456-001", "--json"], obj={"cwd": repo})
+
+    assert result.exit_code == 0
+    assert "Traceback" not in result.output
+    data = json.loads(result.output)
+    assert "../secret.txt" not in [excerpt["path"] for excerpt in data["excerpts"]]
+    assert any(
+        "linked task excerpt ../secret.txt: referenced path escapes repository: ../secret.txt" in warning
+        for warning in data["warnings"]
+    )
+
+
+def test_issue_pickup_no_excerpts_warns_and_skips_unsafe_linked_task_excerpt_path(tmp_path: Path):
+    repo = _repo_with_issue(tmp_path)
+    link = CliRunner().invoke(cli, ["issue", "link", "--issue", "I-123456-001", "--task", "T-123456-001"], obj={"cwd": repo})
+    assert link.exit_code == 0
+    task_path = _task_path(repo)
+    frontmatter, body = read_entity(task_path)
+    frontmatter["code_paths"] = ["../secret.txt"]
+    write_entity(task_path, frontmatter=frontmatter, body=body)
+
+    result = CliRunner().invoke(
+        cli,
+        ["issue", "pickup", "I-123456-001", "--json", "--no-excerpts"],
+        obj={"cwd": repo},
+    )
+
+    assert result.exit_code == 0
+    assert "Traceback" not in result.output
+    data = json.loads(result.output)
+    assert "../secret.txt" not in [excerpt["path"] for excerpt in data["excerpts"]]
+    assert any(
+        "linked task excerpt ../secret.txt: referenced path escapes repository: ../secret.txt" in warning
+        for warning in data["warnings"]
+    )
+
+
 def test_issue_pickup_terminal_issue_hint(tmp_path: Path):
     repo = _repo_with_issue(tmp_path)
     issue_path = _issue_path(repo)

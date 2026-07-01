@@ -275,6 +275,27 @@ def _excerpt_warnings(excerpts: list[dict[str, Any]]) -> list[str]:
     return warnings
 
 
+def _issue_linked_task_excerpts(
+    repo_root: Path,
+    references: list[str],
+    *,
+    max_lines: int,
+    include_excerpts: bool,
+) -> tuple[list[dict[str, Any]], list[str]]:
+    excerpts: list[dict[str, Any]] = []
+    warnings: list[str] = []
+    for ref in references:
+        try:
+            if include_excerpts:
+                excerpts.append(excerpt_file(repo_root, ref, max_lines=max_lines))
+            else:
+                relative = _safe_relative_path(ref)
+                excerpts.append({"path": relative.as_posix(), "skipped": True, "skip_reason": "excluded"})
+        except TrailmindError as exc:
+            warnings.append(f"linked task excerpt {ref}: {exc.format_message()}")
+    return excerpts, warnings
+
+
 def build_task_pickup(
     repo_root: Path,
     *,
@@ -366,10 +387,11 @@ def build_issue_pickup(
     excerpt_refs: list[str] = []
     for task in linked_tasks:
         excerpt_refs.extend(str(item) for item in task.get("code_paths", []))
-    excerpts = (
-        [excerpt_file(repo_root, ref, max_lines=max_lines) for ref in excerpt_refs]
-        if include_excerpts
-        else _skipped_excerpt_refs(excerpt_refs)
+    excerpts, excerpt_warnings = _issue_linked_task_excerpts(
+        repo_root,
+        excerpt_refs,
+        max_lines=max_lines,
+        include_excerpts=include_excerpts,
     )
     item = {
         "id": _string_value(frontmatter, "id", issue_path.stem),
@@ -392,7 +414,7 @@ def build_issue_pickup(
         activity=extract_activity_entries(body, limit=activity_limit),
         excerpts=excerpts,
         next_actions=_issue_next_actions(status, linked_tasks, carried_into),
-        warnings=warnings + _excerpt_warnings(excerpts),
+        warnings=warnings + excerpt_warnings + _excerpt_warnings(excerpts),
     )
 
 
