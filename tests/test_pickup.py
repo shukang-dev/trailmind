@@ -557,6 +557,9 @@ def test_issue_pickup_cli_prints_markdown(tmp_path: Path):
     assert result.exit_code == 0
     assert "# Issue Pickup: I-123456-001 Parser bug" in result.output
     assert "## Linked Tasks" in result.output
+    assert "## Dependencies" not in result.output
+    assert "## Deliverables" not in result.output
+    assert "## Linked Issues" not in result.output
     assert "Parser fails on flags." in result.output
 
 
@@ -584,6 +587,83 @@ def test_issue_pickup_reports_linked_task(tmp_path: Path):
     assert data["linked_items"]["tasks"][0]["task_id"] == "T-123456-001"
     assert data["excerpts"][0] == {"path": "src/app.py", "skipped": True, "skip_reason": "excluded"}
     assert "Inspect linked task state before closing the issue." in data["next_actions"]
+
+
+def test_issue_pickup_prefers_local_linked_task_when_duplicate_id_exists(tmp_path: Path):
+    repo = _repo_with_issue(tmp_path)
+    runner = CliRunner()
+    link = runner.invoke(
+        cli,
+        ["issue", "link", "--issue", "I-123456-001", "--task", "T-123456-001"],
+        obj={"cwd": repo},
+    )
+    assert link.exit_code == 0
+    assert runner.invoke(
+        cli,
+        [
+            "epic",
+            "init",
+            "--project",
+            "demo_app",
+            "--slug",
+            "next",
+            "--title",
+            "Next",
+            "--goal",
+            "Follow-up release",
+        ],
+        obj={"cwd": repo},
+    ).exit_code == 0
+    assert runner.invoke(
+        cli,
+        [
+            "task",
+            "add",
+            "--epic",
+            "projects/demo_app/next",
+            "--filer",
+            "alice@example.com",
+            "--owner",
+            "alice@example.com",
+            "--title",
+            "Other parser",
+        ],
+        obj={"cwd": repo},
+    ).exit_code == 0
+
+    result = runner.invoke(cli, ["issue", "pickup", "I-123456-001", "--json", "--no-excerpts"], obj={"cwd": repo})
+
+    assert result.exit_code == 0
+    data = json.loads(result.output)
+    assert data["linked_items"]["tasks"] == [
+        {
+            "ref": "T-123456-001",
+            "task_id": "T-123456-001",
+            "title": "Build parser",
+            "status": "created",
+            "terminal": False,
+            "path": "projects/demo_app/mvp/tasks/T-123456-001-build-parser.md",
+            "code_paths": ["src/app.py"],
+        }
+    ]
+    assert not data["warnings"]
+
+
+def test_issue_pickup_warns_and_skips_linked_task_with_malformed_code_paths(tmp_path: Path):
+    repo = _repo_with_issue(tmp_path)
+    link = CliRunner().invoke(cli, ["issue", "link", "--issue", "I-123456-001", "--task", "T-123456-001"], obj={"cwd": repo})
+    assert link.exit_code == 0
+    task_path = _task_path(repo)
+    frontmatter, body = read_entity(task_path)
+    frontmatter["code_paths"] = "src/app.py"
+    write_entity(task_path, frontmatter=frontmatter, body=body)
+
+    result = CliRunner().invoke(cli, ["issue", "pickup", "I-123456-001", "--json"], obj={"cwd": repo})
+
+    assert result.exit_code == 0
+    data = json.loads(result.output)
+    assert data["linked_items"]["tasks"] == []
+    assert data["warnings"] == ["linked task T-123456-001: task field code_paths must be a list"]
 
 
 def test_issue_pickup_terminal_issue_hint(tmp_path: Path):

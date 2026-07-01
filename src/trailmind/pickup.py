@@ -14,6 +14,7 @@ from trailmind.task_rules import (
     dependency_blockers,
     missing_deliverables,
     resolve_linked_issue,
+    resolve_linked_task,
     soft_dependency_warnings,
     string_list_field,
 )
@@ -182,26 +183,28 @@ def _task_next_actions(
     return actions
 
 
-def _linked_task_summaries(repo_root: Path, refs: list[str]) -> tuple[list[dict[str, Any]], list[str]]:
+def _linked_task_summaries(repo_root: Path, issue_path: Path, refs: list[str]) -> tuple[list[dict[str, Any]], list[str]]:
     tasks: list[dict[str, Any]] = []
     warnings: list[str] = []
     for ref in refs:
+        task_ref = ref.strip()
         try:
-            task_path = resolve_entity(repo_root, raw=ref, entity="T")
+            task_path = resolve_linked_task(repo_root, issue_path, task_ref)
             frontmatter, _body = read_entity_user_facing(task_path, label="task")
             status = normalize_task_status(frontmatter.get("status", "created"))
+            code_paths = string_list_field(frontmatter, "code_paths", label="task")
         except TrailmindError as exc:
-            warnings.append(f"linked task {ref}: {exc.format_message()}")
+            warnings.append(f"linked task {task_ref}: {exc.format_message()}")
             continue
         tasks.append(
             {
-                "ref": ref,
+                "ref": task_ref,
                 "task_id": _string_value(frontmatter, "id", task_path.stem),
                 "title": _string_value(frontmatter, "title", task_path.stem),
                 "status": status,
                 "terminal": is_terminal_task_status(status),
                 "path": _relative_to_root(repo_root, task_path),
-                "code_paths": string_list_field(frontmatter, "code_paths", label="task"),
+                "code_paths": code_paths,
             }
         )
     return tasks, warnings
@@ -359,7 +362,7 @@ def build_issue_pickup(
     status = _string_value(frontmatter, "status", "open")
     linked_refs = string_list_field(frontmatter, "linked_tasks", label="issue")
     carried_into = string_list_field(frontmatter, "carried_into", label="issue")
-    linked_tasks, warnings = _linked_task_summaries(repo_root, linked_refs)
+    linked_tasks, warnings = _linked_task_summaries(repo_root, issue_path, linked_refs)
     excerpt_refs: list[str] = []
     for task in linked_tasks:
         excerpt_refs.extend(str(item) for item in task.get("code_paths", []))
