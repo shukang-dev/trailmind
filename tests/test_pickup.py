@@ -334,6 +334,26 @@ def test_build_task_pickup_is_read_only_by_default(tmp_path: Path):
     assert _task_path(repo).read_text(encoding="utf-8") == before
 
 
+def test_task_pickup_json_rejects_non_string_design_doc_without_traceback_or_mutation(tmp_path: Path):
+    repo = _repo_with_task(tmp_path)
+    task_path = _task_path(repo)
+    frontmatter, body = read_entity(task_path)
+    frontmatter["design_doc"] = True
+    write_entity(task_path, frontmatter=frontmatter, body=body)
+    before = task_path.read_text(encoding="utf-8")
+
+    result = CliRunner().invoke(
+        cli,
+        ["task", "pickup", "T-123456-001", "--json", "--log", "--actor", "alice"],
+        obj={"cwd": repo},
+    )
+
+    assert result.exit_code == 1
+    assert "Traceback" not in result.output
+    assert "task field design_doc must be a string" in result.output
+    assert task_path.read_text(encoding="utf-8") == before
+
+
 def test_build_task_pickup_prefers_local_known_issue_when_duplicate_id_exists(tmp_path: Path):
     repo = _repo_with_task(tmp_path)
     runner = CliRunner()
@@ -713,6 +733,23 @@ def test_issue_pickup_warns_and_skips_linked_task_with_malformed_code_paths(tmp_
     assert data["warnings"] == ["linked task T-123456-001: task field code_paths must be a list"]
 
 
+def test_issue_pickup_warns_and_skips_linked_task_with_yaml_date_design_doc(tmp_path: Path):
+    repo = _repo_with_issue(tmp_path)
+    link = CliRunner().invoke(cli, ["issue", "link", "--issue", "I-123456-001", "--task", "T-123456-001"], obj={"cwd": repo})
+    assert link.exit_code == 0
+    task_path = _task_path(repo)
+    text = task_path.read_text(encoding="utf-8")
+    task_path.write_text(text.replace("depends_on:", "design_doc: 2026-07-01\ndepends_on:"), encoding="utf-8")
+
+    result = CliRunner().invoke(cli, ["issue", "pickup", "I-123456-001", "--json"], obj={"cwd": repo})
+
+    assert result.exit_code == 0
+    assert "Traceback" not in result.output
+    data = json.loads(result.output)
+    assert data["linked_items"]["tasks"] == []
+    assert data["warnings"] == ["linked task T-123456-001: task field design_doc must be a string"]
+
+
 def test_issue_pickup_warns_and_skips_unsafe_linked_task_design_doc_path(tmp_path: Path):
     repo = _repo_with_issue(tmp_path)
     link = CliRunner().invoke(cli, ["issue", "link", "--issue", "I-123456-001", "--task", "T-123456-001"], obj={"cwd": repo})
@@ -723,6 +760,32 @@ def test_issue_pickup_warns_and_skips_unsafe_linked_task_design_doc_path(tmp_pat
     write_entity(task_path, frontmatter=frontmatter, body=body)
 
     result = CliRunner().invoke(cli, ["issue", "pickup", "I-123456-001", "--json"], obj={"cwd": repo})
+
+    assert result.exit_code == 0
+    assert "Traceback" not in result.output
+    data = json.loads(result.output)
+    assert "../secret.txt" not in [excerpt["path"] for excerpt in data["excerpts"]]
+    assert data["linked_items"]["tasks"][0]["design_doc"] == "../secret.txt"
+    assert any(
+        "linked task excerpt ../secret.txt: referenced path escapes repository: ../secret.txt" in warning
+        for warning in data["warnings"]
+    )
+
+
+def test_issue_pickup_no_excerpts_warns_and_skips_unsafe_linked_task_design_doc_path(tmp_path: Path):
+    repo = _repo_with_issue(tmp_path)
+    link = CliRunner().invoke(cli, ["issue", "link", "--issue", "I-123456-001", "--task", "T-123456-001"], obj={"cwd": repo})
+    assert link.exit_code == 0
+    task_path = _task_path(repo)
+    frontmatter, body = read_entity(task_path)
+    frontmatter["design_doc"] = "../secret.txt"
+    write_entity(task_path, frontmatter=frontmatter, body=body)
+
+    result = CliRunner().invoke(
+        cli,
+        ["issue", "pickup", "I-123456-001", "--json", "--no-excerpts"],
+        obj={"cwd": repo},
+    )
 
     assert result.exit_code == 0
     assert "Traceback" not in result.output

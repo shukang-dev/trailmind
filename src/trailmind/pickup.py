@@ -159,6 +159,16 @@ def _string_value(frontmatter: dict[str, Any], key: str, default: str = "") -> s
     return str(value)
 
 
+def _optional_string_field(frontmatter: dict[str, Any], key: str, *, label: str) -> str | None:
+    value = frontmatter.get(key)
+    if value is None:
+        return None
+    if not isinstance(value, str):
+        raise TrailmindError(f"{label} field {key} must be a string")
+    value = value.strip()
+    return value or None
+
+
 def _task_next_actions(
     status: str,
     blockers: list[dict[str, Any]],
@@ -193,7 +203,7 @@ def _linked_task_summaries(repo_root: Path, issue_path: Path, refs: list[str]) -
             frontmatter, _body = read_entity_user_facing(task_path, label="task")
             status = normalize_task_status(frontmatter.get("status", "created"))
             code_paths = string_list_field(frontmatter, "code_paths", label="task")
-            design_doc = frontmatter.get("design_doc")
+            design_doc = _optional_string_field(frontmatter, "design_doc", label="task")
         except TrailmindError as exc:
             warnings.append(f"linked task {task_ref}: {exc.format_message()}")
             continue
@@ -322,9 +332,9 @@ def build_task_pickup(
     open_issues = [item for item in issue_summaries if item["status"] == "open"]
     missing = missing_deliverables(frontmatter)
     references = string_list_field(frontmatter, "code_paths", label="task")
-    design_doc = frontmatter.get("design_doc")
-    if isinstance(design_doc, str) and design_doc.strip():
-        references.append(design_doc.strip())
+    design_doc = _optional_string_field(frontmatter, "design_doc", label="task")
+    if design_doc is not None:
+        references.append(design_doc)
     excerpts = (
         [excerpt_file(repo_root, ref, max_lines=max_lines) for ref in references]
         if include_excerpts
@@ -390,8 +400,8 @@ def build_issue_pickup(
     for task in linked_tasks:
         excerpt_refs.extend(str(item) for item in task.get("code_paths", []))
         design_doc = task.get("design_doc")
-        if isinstance(design_doc, str) and design_doc.strip():
-            excerpt_refs.append(design_doc.strip())
+        if design_doc is not None:
+            excerpt_refs.append(design_doc)
     excerpts, excerpt_warnings = _issue_linked_task_excerpts(
         repo_root,
         excerpt_refs,
