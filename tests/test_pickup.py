@@ -416,3 +416,106 @@ def test_build_task_pickup_prefers_local_known_issue_when_duplicate_id_exists(tm
         }
     ]
     assert not any(warning.startswith("linked issue I-123456-001:") for warning in pack.warnings)
+
+
+def test_task_pickup_reports_hard_dependency_blocker(tmp_path: Path):
+    repo = _repo_with_task(tmp_path)
+    runner = CliRunner()
+    result = runner.invoke(
+        cli,
+        [
+            "task",
+            "add",
+            "--epic",
+            "projects/demo_app/mvp",
+            "--filer",
+            "alice@example.com",
+            "--owner",
+            "alice@example.com",
+            "--title",
+            "Build UI",
+            "--depends-on",
+            "T-123456-001",
+        ],
+        obj={"cwd": repo},
+    )
+    assert result.exit_code == 0
+
+    pack = build_task_pickup(repo, task_ref="T-123456-002", max_lines=80, activity_limit=10, include_excerpts=False)
+
+    assert pack.dependencies["hard"][0]["task_id"] == "T-123456-001"
+    assert "Hard dependencies are not terminal; do not start implementation yet." in pack.next_actions
+
+
+def test_task_pickup_reports_soft_dependency_warning(tmp_path: Path):
+    repo = _repo_with_task(tmp_path)
+    runner = CliRunner()
+    result = runner.invoke(
+        cli,
+        [
+            "task",
+            "add",
+            "--epic",
+            "projects/demo_app/mvp",
+            "--filer",
+            "alice@example.com",
+            "--owner",
+            "alice@example.com",
+            "--title",
+            "Build UI",
+            "--soft-depends-on",
+            "T-123456-001",
+        ],
+        obj={"cwd": repo},
+    )
+    assert result.exit_code == 0
+
+    pack = build_task_pickup(repo, task_ref="T-123456-002", max_lines=80, activity_limit=10, include_excerpts=False)
+
+    assert pack.dependencies["soft"][0]["task_id"] == "T-123456-001"
+    assert "T-123456-001 soft dependency is created" in pack.warnings
+
+
+def test_task_pickup_reports_linked_open_issue(tmp_path: Path):
+    repo = _repo_with_task(tmp_path)
+    runner = CliRunner()
+    issue = runner.invoke(
+        cli,
+        [
+            "issue",
+            "add",
+            "--epic",
+            "projects/demo_app/mvp",
+            "--filer",
+            "alice@example.com",
+            "--title",
+            "Parser bug",
+            "--description",
+            "Parser fails on flags.",
+            "--severity",
+            "high",
+        ],
+        obj={"cwd": repo},
+    )
+    assert issue.exit_code == 0
+    link = runner.invoke(cli, ["issue", "link", "--issue", "I-123456-001", "--task", "T-123456-001"], obj={"cwd": repo})
+    assert link.exit_code == 0
+
+    pack = build_task_pickup(repo, task_ref="T-123456-001", max_lines=80, activity_limit=10, include_excerpts=False)
+
+    assert pack.linked_items["issues"][0]["id"] == "I-123456-001"
+    assert "Review linked open issues before closing the task." in pack.next_actions
+
+
+def test_task_pickup_terminal_task_hint(tmp_path: Path):
+    repo = _repo_with_task(tmp_path)
+    task_path = _task_path(repo)
+    frontmatter, body = read_entity(task_path)
+    frontmatter["status"] = "done"
+    write_entity(task_path, frontmatter=frontmatter, body=body)
+
+    pack = build_task_pickup(repo, task_ref="T-123456-001", max_lines=80, activity_limit=10, include_excerpts=False)
+
+    assert pack.next_actions == [
+        "Task is terminal (done); do not pick it up for implementation unless reopening is intentional."
+    ]
