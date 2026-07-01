@@ -143,6 +143,19 @@ trailmind inbox resolve IN-20260630-001 --resolver alice --note "Filed a follow-
 trailmind sweep --epic projects/demo_app/mvp
 ```
 
+## Agent Handoff
+
+Trailmind can produce bounded pickup context for a task or issue:
+
+```sh
+trailmind task pickup T-123456-001
+trailmind task pickup T-123456-001 --json
+trailmind issue pickup I-123456-001
+trailmind issue pickup I-123456-001 --log --actor alice
+```
+
+Pickup is read-only by default. See `docs/v0.3-agent-handoff.md` for details.
+
 ## Features
 
 - Project, Epic, Task, Issue, and Milestone records stored as Markdown.

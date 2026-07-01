@@ -59,7 +59,7 @@ def _is_path_like_ref(raw: str) -> bool:
     )
 
 
-def _matches_bare_issue_id(path: Path, raw: str) -> bool:
+def _matches_bare_entity_id(path: Path, raw: str) -> bool:
     stem = path.stem
     if stem == raw:
         return True
@@ -76,7 +76,7 @@ def _relative_display(repo_root: Path, path: Path) -> str:
         return path.as_posix()
 
 
-def _resolve_linked_issue(repo_root: Path, task_path: Path, ref: str) -> Path:
+def resolve_linked_issue(repo_root: Path, task_path: Path, ref: str) -> Path:
     if _is_path_like_ref(ref):
         return resolve_entity(repo_root, raw=ref, entity="I")
 
@@ -85,7 +85,7 @@ def _resolve_linked_issue(repo_root: Path, task_path: Path, ref: str) -> Path:
         (
             path
             for path in local_issues_path.glob("I-*.md")
-            if path.is_file() and _matches_bare_issue_id(path, ref)
+            if path.is_file() and _matches_bare_entity_id(path, ref)
         ),
         key=lambda path: _relative_display(repo_root, path),
     )
@@ -97,6 +97,27 @@ def _resolve_linked_issue(repo_root: Path, task_path: Path, ref: str) -> Path:
     return resolve_entity(repo_root, raw=ref, entity="I")
 
 
+def resolve_linked_task(repo_root: Path, issue_path: Path, ref: str) -> Path:
+    if _is_path_like_ref(ref):
+        return resolve_entity(repo_root, raw=ref, entity="T")
+
+    local_tasks_path = issue_path.parent.parent / "tasks"
+    local_matches = sorted(
+        (
+            path
+            for path in local_tasks_path.glob("T-*.md")
+            if path.is_file() and _matches_bare_entity_id(path, ref)
+        ),
+        key=lambda path: _relative_display(repo_root, path),
+    )
+    if len(local_matches) == 1:
+        return local_matches[0]
+    if len(local_matches) > 1:
+        candidates = ", ".join(_relative_display(repo_root, path) for path in local_matches)
+        raise EntityAmbiguousError(f"T entity {ref!r} is ambiguous; candidates: {candidates}")
+    return resolve_entity(repo_root, raw=ref, entity="T")
+
+
 def linked_open_issues_for_task(repo_root: Path, task_path: Path) -> list[LinkedIssueStatus]:
     frontmatter, _body = read_entity_user_facing(task_path, label="task")
     refs = string_list_field(frontmatter, "known_issues", label="task")
@@ -104,7 +125,7 @@ def linked_open_issues_for_task(repo_root: Path, task_path: Path) -> list[Linked
     for ref in refs:
         issue_ref = ref.strip()
         try:
-            issue_path = _resolve_linked_issue(repo_root, task_path, issue_ref)
+            issue_path = resolve_linked_issue(repo_root, task_path, issue_ref)
         except EntityNotFoundError:
             continue
         issue_frontmatter, _issue_body = read_entity_user_facing(issue_path, label="issue")
