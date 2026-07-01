@@ -133,6 +133,19 @@ trailmind inbox resolve IN-20260630-001 --resolver alice --note "Filed a follow-
 trailmind sweep --epic projects/demo_app/mvp
 ```
 
+## Agent 交接
+
+Trailmind 可以为 Task 或 Issue 生成有边界的 pickup 上下文：
+
+```sh
+trailmind task pickup T-123456-001
+trailmind task pickup T-123456-001 --json
+trailmind issue pickup I-123456-001
+trailmind issue pickup I-123456-001 --log --actor alice
+```
+
+Pickup 默认只读。完整说明见 `docs/v0.3-agent-handoff.md`。
+
 ## 主要功能
 
 - 用 Markdown 存储 Project、Epic、Task、Issue 和 Milestone。
