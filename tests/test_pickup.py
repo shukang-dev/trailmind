@@ -64,6 +64,22 @@ def test_excerpt_file_truncates_text_files(tmp_path: Path):
     assert excerpt["skipped"] is False
 
 
+def test_excerpt_file_does_not_read_entire_file(tmp_path: Path, monkeypatch: pytest.MonkeyPatch):
+    target = tmp_path / "src" / "app.py"
+    target.parent.mkdir()
+    target.write_text("one\ntwo\nthree\n", encoding="utf-8")
+
+    def fail_read_text(self, *args, **kwargs):
+        raise AssertionError("read_text should not be used for excerpts")
+
+    monkeypatch.setattr(type(target), "read_text", fail_read_text)
+
+    excerpt = excerpt_file(tmp_path, "src/app.py", max_lines=2)
+
+    assert excerpt["total_lines"] == 3
+    assert excerpt["content"] == "one\ntwo"
+
+
 def test_excerpt_file_reports_missing_files(tmp_path: Path):
     excerpt = excerpt_file(tmp_path, "src/missing.py", max_lines=80)
 

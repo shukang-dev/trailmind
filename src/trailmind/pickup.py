@@ -110,20 +110,24 @@ def excerpt_file(repo_root: Path, raw_path: str, *, max_lines: int) -> dict[str,
         return {"path": display_path, "skipped": True, "skip_reason": "missing"}
     if path.is_dir():
         return {"path": display_path, "skipped": True, "skip_reason": "directory"}
+    selected: list[str] = []
+    total_lines = 0
     try:
-        text = path.read_text(encoding="utf-8")
+        with path.open(encoding="utf-8") as file:
+            for line in file:
+                total_lines += 1
+                if len(selected) < max_lines:
+                    selected.append(line.rstrip("\n"))
     except UnicodeDecodeError:
         return {"path": display_path, "skipped": True, "skip_reason": "non-utf-8"}
     except OSError as exc:
         return {"path": display_path, "skipped": True, "skip_reason": str(exc)}
-    lines = text.splitlines()
-    selected = lines[:max_lines]
     return {
         "path": display_path,
-        "start_line": 1 if lines else 0,
+        "start_line": 1 if total_lines else 0,
         "end_line": len(selected),
-        "total_lines": len(lines),
-        "truncated": len(lines) > max_lines,
+        "total_lines": total_lines,
+        "truncated": total_lines > max_lines,
         "content": "\n".join(selected),
         "skipped": False,
     }
