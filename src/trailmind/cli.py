@@ -155,15 +155,28 @@ def inbox_add(
 @inbox_group.command("list")
 @click.option("--project", "project_slug", default=None)
 @click.option("--epic", "epic_ref", default=None)
+@click.option("--json", "json_output", is_flag=True, help="Print structured JSON instead of Markdown.")
 @click.pass_context
-def inbox_list(ctx: click.Context, project_slug: str | None, epic_ref: str | None) -> None:
+def inbox_list(ctx: click.Context, project_slug: str | None, epic_ref: str | None, json_output: bool) -> None:
     root = find_repo_root(_cwd_from_context(ctx))
     items = list_inbox_items(root, project=project_slug, epic=epic_ref)
-    if not items:
-        click.echo("No inbox items.")
-        return
-    for item in items:
-        click.echo(f"{item.item_id} {item.status} {item.title}")
+    if json_output:
+        data = [
+            {
+                "item_id": item.item_id,
+                "title": item.title,
+                "status": item.status,
+                "path": item.path.relative_to(root).as_posix(),
+            }
+            for item in items
+        ]
+        click.echo(json.dumps(data, ensure_ascii=False, indent=2))
+    else:
+        if not items:
+            click.echo("No inbox items.")
+            return
+        for item in items:
+            click.echo(f"{item.item_id} {item.status} {item.title}")
 
 
 @inbox_group.command("resolve")
