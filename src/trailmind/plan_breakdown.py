@@ -7,8 +7,9 @@ from pathlib import PurePosixPath, PureWindowsPath
 from trailmind.errors import TrailmindError
 
 
-TASK_HEADING_RE = re.compile(r"^###\s+Task\s+(\d+):\s+(.+?)\s*$", re.MULTILINE)
-MALFORMED_TASK_HEADING_RE = re.compile(r"^###\s+Task\b(?!\s+\d+:)", re.MULTILINE)
+TASK_HEADING_RE = re.compile(r"^###[ \t]+Task[ \t]+(\d+):[ \t]+([^ \t].*?)[ \t]*$")
+TASK_MARKER_RE = re.compile(r"^###[ \t]+Task\b")
+FENCE_RE = re.compile(r"^[ \t]{0,3}(`{3,}|~{3,})")
 FILE_ENTRY_RE = re.compile(r"^-\s+([^:]+):\s+`?([^`\n]+?)`?\s*$")
 STEP_RE = re.compile(r"^-\s+\[\s*\]\s+\*\*(Step\s+\d+:.+?)\*\*\s*$")
 COMMIT_RE = re.compile(r"git\s+commit\s+-m\s+([\"'])(.+?)\1")
@@ -26,24 +27,30 @@ class PlanTask:
     commit_message: str | None = None
 
 
+@dataclass(frozen=True)
+class _TaskHeading:
+    source_task: int
+    title: str
+    start: int
+    end: int
+
+
 def parse_plan_tasks(text: str) -> list[PlanTask]:
-    if MALFORMED_TASK_HEADING_RE.search(text):
-        raise TrailmindError("malformed task heading; expected '### Task N: Title'")
-    matches = list(TASK_HEADING_RE.finditer(text))
-    if not matches:
+    headings = _find_task_headings(text)
+    if not headings:
         raise TrailmindError("plan contains no supported task sections")
 
     tasks: list[PlanTask] = []
-    for index, match in enumerate(matches):
-        section_start = match.end()
-        section_end = matches[index + 1].start() if index + 1 < len(matches) else len(text)
+    for index, heading in enumerate(headings):
+        section_start = heading.end
+        section_end = headings[index + 1].start if index + 1 < len(headings) else len(text)
         section = text[section_start:section_end].strip()
-        source_heading = f"Task {match.group(1)}: {match.group(2).strip()}"
+        source_heading = f"Task {heading.source_task}: {heading.title}"
         tasks.append(
             PlanTask(
-                source_task=int(match.group(1)),
+                source_task=heading.source_task,
                 source_heading=source_heading,
-                title=match.group(2).strip(),
+                title=heading.title,
                 source_context=section,
                 file_entries=_extract_file_entries(section),
                 steps=_extract_steps(section),
@@ -52,6 +59,47 @@ def parse_plan_tasks(text: str) -> list[PlanTask]:
             )
         )
     return tasks
+
+
+def _find_task_headings(text: str) -> list[_TaskHeading]:
+    headings: list[_TaskHeading] = []
+    offset = 0
+    active_fence: tuple[str, int] | None = None
+    for line in text.splitlines(keepends=True):
+        line_text = line.rstrip("\r\n")
+        fence = _fence_marker(line_text)
+        if active_fence:
+            if fence and fence[0] == active_fence[0] and fence[1] >= active_fence[1]:
+                active_fence = None
+            offset += len(line)
+            continue
+        if fence:
+            active_fence = fence
+            offset += len(line)
+            continue
+
+        match = TASK_HEADING_RE.match(line_text)
+        if match:
+            headings.append(
+                _TaskHeading(
+                    source_task=int(match.group(1)),
+                    title=match.group(2).strip(),
+                    start=offset,
+                    end=offset + len(line),
+                )
+            )
+        elif TASK_MARKER_RE.match(line_text):
+            raise TrailmindError("malformed task heading; expected '### Task N: Title'")
+        offset += len(line)
+    return headings
+
+
+def _fence_marker(line: str) -> tuple[str, int] | None:
+    match = FENCE_RE.match(line)
+    if not match:
+        return None
+    marker = match.group(1)
+    return marker[0], len(marker)
 
 
 def _extract_file_entries(section: str) -> list[tuple[str, str]]:
@@ -99,10 +147,18 @@ def _extract_verification_commands(section: str) -> list[str]:
                 cursor = index + 1
                 while cursor < len(lines) and not lines[cursor].strip():
                     cursor += 1
-                if cursor + 1 < len(lines) and lines[cursor].strip().startswith("```"):
-                    command = lines[cursor + 1].strip()
-                    if command and not command.startswith("```"):
-                        commands.append(command)
+                fence = _fence_marker(lines[cursor]) if cursor < len(lines) else None
+                if fence:
+                    cursor += 1
+                    while cursor < len(lines):
+                        command = lines[cursor].strip()
+                        closing_fence = _fence_marker(lines[cursor])
+                        if closing_fence and closing_fence[0] == fence[0] and closing_fence[1] >= fence[1]:
+                            break
+                        if command:
+                            commands.append(command)
+                        cursor += 1
+                    index = cursor
         index += 1
     return commands
 

@@ -78,6 +78,59 @@ def test_parse_plan_tasks_rejects_malformed_task_heading():
         parse_plan_tasks(text)
 
 
+def test_parse_plan_tasks_ignores_task_headings_inside_fenced_code_blocks():
+    tasks = parse_plan_tasks(
+        "# Plan\n\n"
+        "### Task 1: Real Parser Task\n\n"
+        "Example:\n\n"
+        "```markdown\n"
+        "### Task 2: Fixture Only\n"
+        "```\n"
+    )
+
+    assert len(tasks) == 1
+    assert tasks[0].source_task == 1
+    assert tasks[0].title == "Real Parser Task"
+
+
+def test_parse_plan_tasks_ignores_malformed_task_headings_inside_fenced_code_blocks():
+    tasks = parse_plan_tasks(
+        "# Plan\n\n"
+        "### Task 1: Real Parser Task\n\n"
+        "Example:\n\n"
+        "```\n"
+        "### Task: Missing number\n"
+        "```\n"
+    )
+
+    assert len(tasks) == 1
+    assert tasks[0].title == "Real Parser Task"
+
+
+def test_parse_plan_tasks_rejects_task_heading_without_same_line_title():
+    text = "# Plan\n\n### Task 2:\nMissing title\n"
+
+    with pytest.raises(TrailmindError, match="malformed task heading"):
+        parse_plan_tasks(text)
+
+
+def test_parse_plan_tasks_extracts_multiple_verification_commands_from_fenced_run_block():
+    tasks = parse_plan_tasks(
+        "### Task 1: Verify Multiple Commands\n\n"
+        "Run:\n\n"
+        "```bash\n"
+        "python -m pytest tests/test_plan_breakdown.py -v\n"
+        "\n"
+        "python -m pytest -q\n"
+        "```\n"
+    )
+
+    assert tasks[0].verification_commands == [
+        "python -m pytest tests/test_plan_breakdown.py -v",
+        "python -m pytest -q",
+    ]
+
+
 def test_derive_code_paths_from_file_entries():
     tasks = parse_plan_tasks(PLAN_TEXT)
 
