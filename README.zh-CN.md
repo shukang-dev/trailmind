@@ -146,6 +146,25 @@ trailmind issue pickup I-123456-001 --log --actor alice
 
 Pickup 默认只读。完整说明见 `docs/v0.3-agent-handoff.md`。
 
+## Plan 拆解
+
+Trailmind 可以从已批准的 implementation plan 预览并创建 task 草稿：
+
+```sh
+trailmind plan breakdown docs/plans/v0.4.md \
+  --epic projects/demo_app/mvp \
+  --filer alice@example.com \
+  --owner alice@example.com
+
+trailmind plan breakdown docs/plans/v0.4.md \
+  --epic projects/demo_app/mvp \
+  --filer alice@example.com \
+  --owner alice@example.com \
+  --write
+```
+
+默认预览是只读的。完整说明见 `docs/v0.4-plan-breakdown.md`。
+
 ## 主要功能
 
 - 用 Markdown 存储 Project、Epic、Task、Issue 和 Milestone。

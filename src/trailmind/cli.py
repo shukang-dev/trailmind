@@ -29,6 +29,11 @@ from trailmind.pickup import (
     log_task_pickup,
     pickup_pack_to_dict,
 )
+from trailmind.plan_breakdown import (
+    breakdown_report_to_dict,
+    build_breakdown_report,
+    format_breakdown_markdown,
+)
 from trailmind.project import init_project
 from trailmind.roster import Roster
 from trailmind.security_scan import scan_paths
@@ -219,6 +224,46 @@ def roster_list(ctx: click.Context) -> None:
     roster = Roster.load(root / "roster.yaml")
     for developer in roster.developers:
         click.echo(f"{developer.shortname}\t{developer.email}\t{developer.uid}\t{developer.name}")
+
+
+@cli.group("plan")
+def plan_group() -> None:
+    """Manage planning artifacts."""
+
+
+@plan_group.command("breakdown")
+@click.argument("plan_path")
+@click.option("--epic", "epic_ref", required=True)
+@click.option("--filer", required=True)
+@click.option("--owner", required=True)
+@click.option("--write", "write_changes", is_flag=True, help="Create task files.")
+@click.option("--json", "json_output", is_flag=True, help="Print structured JSON instead of Markdown.")
+@click.option("--force", is_flag=True, help="Allow duplicate generated tasks for the same source section.")
+@click.pass_context
+def plan_breakdown(
+    ctx: click.Context,
+    plan_path: str,
+    epic_ref: str,
+    filer: str,
+    owner: str,
+    write_changes: bool,
+    json_output: bool,
+    force: bool,
+) -> None:
+    root = find_repo_root(_cwd_from_context(ctx))
+    report = build_breakdown_report(
+        root,
+        plan_ref=plan_path,
+        epic_ref=epic_ref,
+        filer=filer,
+        owner=owner,
+        write=write_changes,
+        force=force,
+    )
+    if json_output:
+        click.echo(json.dumps(breakdown_report_to_dict(report), ensure_ascii=False, indent=2))
+    else:
+        click.echo(format_breakdown_markdown(report), nl=False)
 
 
 @cli.group("project")
