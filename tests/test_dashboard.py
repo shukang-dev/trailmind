@@ -279,3 +279,35 @@ def test_serve_command_invokes_static_server(monkeypatch, tmp_path: Path):
 
     assert result.exit_code == 0
     assert calls == [(tmp_path, "127.0.0.1", 8888)]
+
+
+def test_epic_dashboard_shows_planning_artifacts(tmp_path: Path):
+    repo = _repo_with_dashboard_data(tmp_path)
+
+    # Add a spec
+    spec_dir = repo / "projects" / "demo_app" / "mvp" / "docs" / "specs"
+    spec_dir.mkdir(parents=True, exist_ok=True)
+    (spec_dir / "2026-07-02-test-design.md").write_text(
+        "---\ntitle: Test Design\nstatus: approved-for-spec\ncreated: '2026-07-02'\nscope: v1\n---\n\n# Test Design\n",
+        encoding="utf-8",
+    )
+
+    # Add a plan
+    plan_dir = repo / "projects" / "demo_app" / "mvp" / "docs" / "plans"
+    plan_dir.mkdir(parents=True, exist_ok=True)
+    (plan_dir / "2026-07-02-test-impl.md").write_text(
+        "---\ntitle: Test Implementation\nstatus: approved\ncreated: '2026-07-02'\nscope: v1\nlinked_spec: docs/specs/2026-07-02-test-design.md\ngenerated_tasks:\n- T-123456-001\n---\n\n# Test Implementation\n",
+        encoding="utf-8",
+    )
+
+    runner = CliRunner()
+    result = runner.invoke(cli, ["status", "--epic", "projects/demo_app/mvp"], obj={"cwd": repo})
+    assert result.exit_code == 0
+
+    epic_path = repo / "projects" / "demo_app" / "mvp" / "dashboard.html"
+    html = epic_path.read_text(encoding="utf-8")
+    assert "Planning" in html
+    assert "Test Design" in html
+    assert "Test Implementation" in html
+    assert "approved-for-spec" in html
+    assert "docs/specs/2026-07-02-test-design.md" in html
