@@ -165,3 +165,183 @@ def _title_from_body(body: str, path: str) -> str:
         if stripped.startswith("# "):
             return stripped[2:].strip()
     return Path(path).stem
+
+
+# --- Creation ---
+
+from trailmind.entity_io import write_entity
+from trailmind.ids import slugify
+from trailmind.log import action_activity_entry
+from trailmind.roster import Roster
+from trailmind.scopes import resolve_epic_dir
+
+
+def _resolve_roster_developer(roster: Roster, raw: str) -> tuple[str, str]:
+    normalized = raw.strip().lower()
+    for developer in roster.developers:
+        if developer.email == normalized or developer.shortname.lower() == normalized:
+            return developer.shortname, developer.uid
+    raise TrailmindError(f"{normalized} is not registered in roster.yaml")
+
+
+def create_spec(
+    repo_root: Path,
+    *,
+    epic_ref: str,
+    title: str,
+    author: str,
+    scope: str | None = None,
+    status: str = "draft-for-review",
+) -> Path:
+    if status not in SPEC_STATUSES:
+        raise TrailmindError(f"invalid spec status {status!r}; expected one of: {', '.join(SPEC_STATUSES)}")
+    epic_path = resolve_epic_dir(repo_root, epic_ref)
+    roster = Roster.load(repo_root / "roster.yaml")
+    author_shortname, _author_uid = _resolve_roster_developer(roster, author)
+
+    specs_dir = epic_path / "docs" / "specs"
+    _ensure_doc_dir(specs_dir, "specs")
+    today = date.today().isoformat()
+    filename = f"{today}-{slugify(title)}.md"
+    spec_path = specs_dir / filename
+
+    if spec_path.exists():
+        raise TrailmindError(f"spec already exists: {spec_path.relative_to(repo_root).as_posix()}")
+
+    write_entity(
+        spec_path,
+        frontmatter={
+            "title": title,
+            "status": status,
+            "created": today,
+            "scope": scope,
+            "project": _project_from_epic(epic_path),
+            "epic": _epic_from_path(epic_path),
+            "linked_plans": [],
+        },
+        body=_spec_body(title, author_shortname, today),
+    )
+    return spec_path
+
+
+def create_plan(
+    repo_root: Path,
+    *,
+    epic_ref: str,
+    title: str,
+    author: str,
+    spec_ref: str | None = None,
+    scope: str | None = None,
+    status: str = "draft",
+) -> Path:
+    if status not in PLAN_STATUSES:
+        raise TrailmindError(f"invalid plan status {status!r}; expected one of: {', '.join(PLAN_STATUSES)}")
+    epic_path = resolve_epic_dir(repo_root, epic_ref)
+    roster = Roster.load(repo_root / "roster.yaml")
+    author_shortname, _author_uid = _resolve_roster_developer(roster, author)
+
+    plans_dir = epic_path / "docs" / "plans"
+    _ensure_doc_dir(plans_dir, "plans")
+    today = date.today().isoformat()
+    filename = f"{today}-{slugify(title)}.md"
+    plan_path = plans_dir / filename
+
+    if plan_path.exists():
+        raise TrailmindError(f"plan already exists: {plan_path.relative_to(repo_root).as_posix()}")
+
+    # Resolve linked spec relative to epic
+    linked_spec_epic_rel = None
+    if spec_ref:
+        spec_abs = _resolve_doc_ref(repo_root, epic_path, spec_ref, "spec")
+        linked_spec_epic_rel = spec_abs.relative_to(epic_path).as_posix()
+
+    write_entity(
+        plan_path,
+        frontmatter={
+            "title": title,
+            "status": status,
+            "created": today,
+            "scope": scope,
+            "project": _project_from_epic(epic_path),
+            "epic": _epic_from_path(epic_path),
+            "linked_spec": linked_spec_epic_rel,
+            "generated_tasks": [],
+        },
+        body=_plan_body(title, author_shortname, today),
+    )
+
+    # Update spec's linked_plans if spec was provided
+    if spec_ref:
+        spec_abs = _resolve_doc_ref(repo_root, epic_path, spec_ref, "spec")
+        _append_linked_plan(repo_root, spec_abs, plan_path.relative_to(epic_path).as_posix())
+
+    return plan_path
+
+
+def _ensure_doc_dir(path: Path, label: str) -> None:
+    if path.exists() and not path.is_dir():
+        raise TrailmindError(f"{label} path {path} is not a directory")
+    path.mkdir(parents=True, exist_ok=True)
+
+
+def _project_from_epic(epic_path: Path) -> str | None:
+    parts = epic_path.parts
+    try:
+        idx = parts.index("projects")
+        if idx + 1 < len(parts):
+            return parts[idx + 1]
+    except (ValueError, IndexError):
+        pass
+    return None
+
+
+def _epic_from_path(epic_path: Path) -> str | None:
+    return epic_path.name
+
+
+def _resolve_doc_ref(repo_root: Path, epic_path: Path, ref: str, label: str) -> Path:
+    ref = ref.strip()
+    candidate = repo_root / Path(*PurePosixPath(ref).parts)
+    if candidate.exists():
+        return candidate
+    candidate = epic_path / Path(*PurePosixPath(ref).parts)
+    if candidate.exists():
+        return candidate
+    raise TrailmindError(f"{label} not found: {ref}")
+
+
+def _append_linked_plan(repo_root: Path, spec_path: Path, plan_epic_rel: str) -> None:
+    from trailmind.log import read_entity_user_facing
+
+    frontmatter, body = read_entity_user_facing(spec_path, label="spec")
+    linked_plans = frontmatter.get("linked_plans", [])
+    if not isinstance(linked_plans, list):
+        linked_plans = []
+    if plan_epic_rel not in linked_plans:
+        linked_plans.append(plan_epic_rel)
+    frontmatter["linked_plans"] = linked_plans
+    write_entity(spec_path, frontmatter=frontmatter, body=body)
+
+
+def _spec_body(title: str, author: str, today: str) -> str:
+    return (
+        f"# {title}\n\n"
+        "## Purpose\n\n\n"
+        "## Goals\n\n\n"
+        "## Non-Goals\n\n\n"
+        "## Design\n\n\n"
+        "## Open Questions\n\n\n"
+        "## Activity Log\n\n"
+        f"{action_activity_entry(action='Created', actor_label='author', actor=author)}\n"
+    )
+
+
+def _plan_body(title: str, author: str, today: str) -> str:
+    return (
+        f"# {title}\n\n"
+        "## Scope\n\n\n"
+        "## Architecture\n\n\n"
+        "## Tasks\n\n\n"
+        "## Activity Log\n\n"
+        f"{action_activity_entry(action='Created', actor_label='author', actor=author)}\n"
+    )
