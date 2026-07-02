@@ -822,3 +822,182 @@ def test_plan_breakdown_unknown_owner_is_user_facing(tmp_path: Path):
     assert "error:" in result.output
     assert "missing@example.com is not registered in roster.yaml" in result.output
     assert "Traceback" not in result.output
+
+
+def test_plan_breakdown_rejects_unsafe_plan_path_without_writing(tmp_path: Path):
+    repo = _repo_with_epic(tmp_path)
+
+    result = CliRunner().invoke(
+        cli,
+        [
+            "plan",
+            "breakdown",
+            "../outside.md",
+            "--epic",
+            "projects/demo_app/mvp",
+            "--filer",
+            "alice@example.com",
+            "--owner",
+            "alice@example.com",
+        ],
+        obj={"cwd": repo},
+    )
+
+    assert result.exit_code == 1
+    assert "path escapes repository: ../outside.md" in result.output
+    assert "Traceback" not in result.output
+
+
+def test_plan_breakdown_rejects_non_markdown_plan(tmp_path: Path):
+    repo = _repo_with_epic(tmp_path)
+    path = repo / "docs" / "plans" / "v0.4.txt"
+    path.parent.mkdir(parents=True)
+    path.write_text(PLAN_TEXT, encoding="utf-8")
+
+    result = CliRunner().invoke(
+        cli,
+        [
+            "plan",
+            "breakdown",
+            "docs/plans/v0.4.txt",
+            "--epic",
+            "projects/demo_app/mvp",
+            "--filer",
+            "alice@example.com",
+            "--owner",
+            "alice@example.com",
+        ],
+        obj={"cwd": repo},
+    )
+
+    assert result.exit_code == 1
+    assert "plan path must be a Markdown file" in result.output
+
+
+def test_plan_breakdown_rejects_non_utf8_plan(tmp_path: Path):
+    repo = _repo_with_epic(tmp_path)
+    path = repo / "docs" / "plans" / "bad.md"
+    path.parent.mkdir(parents=True)
+    path.write_bytes(b"\xff\xfe")
+
+    result = CliRunner().invoke(
+        cli,
+        [
+            "plan",
+            "breakdown",
+            "docs/plans/bad.md",
+            "--epic",
+            "projects/demo_app/mvp",
+            "--filer",
+            "alice@example.com",
+            "--owner",
+            "alice@example.com",
+        ],
+        obj={"cwd": repo},
+    )
+
+    assert result.exit_code == 1
+    assert "file is not UTF-8" in result.output
+
+
+def test_plan_breakdown_rejects_missing_epic(tmp_path: Path):
+    repo = _repo_with_epic(tmp_path)
+    _write_plan(repo)
+
+    result = CliRunner().invoke(
+        cli,
+        [
+            "plan",
+            "breakdown",
+            "docs/plans/v0.4.md",
+            "--epic",
+            "projects/demo_app/missing",
+            "--filer",
+            "alice@example.com",
+            "--owner",
+            "alice@example.com",
+        ],
+        obj={"cwd": repo},
+    )
+
+    assert result.exit_code == 1
+    assert "epic projects/demo_app/missing does not exist" in result.output
+
+
+def test_plan_breakdown_rejects_unsafe_epic_path(tmp_path: Path):
+    repo = _repo_with_epic(tmp_path)
+    _write_plan(repo)
+
+    result = CliRunner().invoke(
+        cli,
+        [
+            "plan",
+            "breakdown",
+            "docs/plans/v0.4.md",
+            "--epic",
+            "../mvp",
+            "--filer",
+            "alice@example.com",
+            "--owner",
+            "alice@example.com",
+        ],
+        obj={"cwd": repo},
+    )
+
+    assert result.exit_code == 1
+    assert "path escapes repository: ../mvp" in result.output
+
+
+def test_plan_breakdown_rejects_tasks_path_that_is_file(tmp_path: Path):
+    repo = _repo_with_epic(tmp_path)
+    _write_plan(repo)
+    tasks_path = repo / "projects" / "demo_app" / "mvp" / "tasks"
+    for child in tasks_path.iterdir():
+        child.unlink()
+    tasks_path.rmdir()
+    tasks_path.write_text("not a directory", encoding="utf-8")
+
+    result = CliRunner().invoke(
+        cli,
+        [
+            "plan",
+            "breakdown",
+            "docs/plans/v0.4.md",
+            "--epic",
+            "projects/demo_app/mvp",
+            "--filer",
+            "alice@example.com",
+            "--owner",
+            "alice@example.com",
+            "--write",
+        ],
+        obj={"cwd": repo},
+    )
+
+    assert result.exit_code == 1
+    assert "tasks path" in result.output
+    assert "is not a directory" in result.output
+
+
+def test_plan_breakdown_rejects_unknown_filer(tmp_path: Path):
+    repo = _repo_with_epic(tmp_path)
+    _write_plan(repo)
+
+    result = CliRunner().invoke(
+        cli,
+        [
+            "plan",
+            "breakdown",
+            "docs/plans/v0.4.md",
+            "--epic",
+            "projects/demo_app/mvp",
+            "--filer",
+            "missing@example.com",
+            "--owner",
+            "alice@example.com",
+        ],
+        obj={"cwd": repo},
+    )
+
+    assert result.exit_code == 1
+    assert "missing@example.com is not registered in roster.yaml" in result.output

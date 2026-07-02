@@ -156,6 +156,25 @@ trailmind issue pickup I-123456-001 --log --actor alice
 
 Pickup is read-only by default. See `docs/v0.3-agent-handoff.md` for details.
 
+## Plan Breakdown
+
+Trailmind can preview and create task drafts from an approved implementation plan:
+
+```sh
+trailmind plan breakdown docs/plans/v0.4.md \
+  --epic projects/demo_app/mvp \
+  --filer alice@example.com \
+  --owner alice@example.com
+
+trailmind plan breakdown docs/plans/v0.4.md \
+  --epic projects/demo_app/mvp \
+  --filer alice@example.com \
+  --owner alice@example.com \
+  --write
+```
+
+Preview is read-only by default. See `docs/v0.4-plan-breakdown.md` for details.
+
 ## Features
 
 - Project, Epic, Task, Issue, and Milestone records stored as Markdown.
