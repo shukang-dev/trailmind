@@ -287,9 +287,26 @@ def build_breakdown_report(
         if tasks_path.exists() and not tasks_path.is_dir():
             raise TrailmindError(f"tasks path {tasks_path} is not a directory")
         tasks_path.mkdir(parents=True, exist_ok=True)
-        written_items: list[BreakdownItem] = []
+        source_paths = dict(existing)
+        updated_items: list[BreakdownItem] = []
+        skipped = []
         for item in items:
-            if item.action == "skip":
+            source_key = (plan_display, item.source_task)
+            if not force and source_key in source_paths:
+                existing_path = source_paths[source_key]
+                skipped.append(existing_path)
+                updated_items.append(
+                    BreakdownItem(
+                        source_task=item.source_task,
+                        source_heading=item.source_heading,
+                        title=item.title,
+                        action="skip",
+                        existing_path=existing_path,
+                        code_paths=item.code_paths,
+                        deliverables=item.deliverables,
+                        plan_task=item.plan_task,
+                    )
+                )
                 continue
             path = _write_breakdown_task(
                 repo_root,
@@ -300,21 +317,22 @@ def build_breakdown_report(
                 plan_path=plan_display,
                 item=item,
             )
-            created.append(_relative_to_root(repo_root, path))
-            written_items.append(item)
-        items = [
-            BreakdownItem(
-                source_task=item.source_task,
-                source_heading=item.source_heading,
-                title=item.title,
-                action="created" if item in written_items else item.action,
-                existing_path=item.existing_path,
-                code_paths=item.code_paths,
-                deliverables=item.deliverables,
-                plan_task=item.plan_task,
+            created_path = _relative_to_root(repo_root, path)
+            created.append(created_path)
+            source_paths[source_key] = created_path
+            updated_items.append(
+                BreakdownItem(
+                    source_task=item.source_task,
+                    source_heading=item.source_heading,
+                    title=item.title,
+                    action="created",
+                    existing_path=item.existing_path,
+                    code_paths=item.code_paths,
+                    deliverables=item.deliverables,
+                    plan_task=item.plan_task,
+                )
             )
-            for item in items
-        ]
+        items = updated_items
     return BreakdownReport(
         plan_path=plan_display,
         epic_path=epic_display,
@@ -507,6 +525,8 @@ def _breakdown_task_body(item: BreakdownItem, *, plan_path: str, filer_shortname
     steps = item.plan_task.steps or ["Review the source plan section and implement the described task."]
     step_lines = "\n".join(f"- [ ] {step}" for step in steps)
     source_context = item.plan_task.source_context.strip() or "No additional source context."
+    source_fence = _markdown_code_fence(source_context)
+    quoted_source_context = _quote_source_context(source_context)
     return (
         f"# {item.title}\n\n"
         "## Scope\n\n"
@@ -515,13 +535,24 @@ def _breakdown_task_body(item: BreakdownItem, *, plan_path: str, filer_shortname
         "## Plan Steps\n\n"
         f"{step_lines}\n\n"
         "## Source Context\n\n"
-        f"{source_context}\n\n"
+        f"{source_fence}\n"
+        f"{quoted_source_context}\n"
+        f"{source_fence}\n\n"
         "## Acceptance\n\n"
         "- Generated task is implemented.\n"
         "- Relevant tests pass.\n\n"
         "## Activity Log\n\n"
         f"- {today}: Created task by {filer_shortname}.\n"
     )
+
+
+def _quote_source_context(content: str) -> str:
+    return "\n".join(f"> {line}" if line else ">" for line in content.splitlines())
+
+
+def _markdown_code_fence(content: str) -> str:
+    longest = max((len(match.group(0)) for match in re.finditer(r"`+", content)), default=0)
+    return "`" * max(3, longest + 1)
 
 
 def _relative_to_root(repo_root: Path, path: Path) -> str:
