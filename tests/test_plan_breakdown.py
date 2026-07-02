@@ -660,3 +660,165 @@ def test_breakdown_write_force_allows_duplicate_source_task_number_in_same_plan(
     ]
     assert report.skipped == []
     assert [item.action for item in report.tasks] == ["created", "created"]
+
+
+def test_plan_breakdown_cli_preview_prints_markdown_without_writing(tmp_path: Path):
+    repo = _repo_with_epic(tmp_path)
+    _write_plan(repo)
+
+    result = CliRunner().invoke(
+        cli,
+        [
+            "plan",
+            "breakdown",
+            "docs/plans/v0.4.md",
+            "--epic",
+            "projects/demo_app/mvp",
+            "--filer",
+            "alice@example.com",
+            "--owner",
+            "alice@example.com",
+        ],
+        obj={"cwd": repo},
+    )
+
+    assert result.exit_code == 0
+    assert "# Plan Breakdown Preview" in result.output
+    assert "Task 1: Parser Model [create]" in result.output
+    assert not list((repo / "projects" / "demo_app" / "mvp" / "tasks").glob("T-*.md"))
+
+
+def test_plan_breakdown_cli_preview_prints_json(tmp_path: Path):
+    repo = _repo_with_epic(tmp_path)
+    _write_plan(repo)
+
+    result = CliRunner().invoke(
+        cli,
+        [
+            "plan",
+            "breakdown",
+            "docs/plans/v0.4.md",
+            "--epic",
+            "projects/demo_app/mvp",
+            "--filer",
+            "alice",
+            "--owner",
+            "alice",
+            "--json",
+        ],
+        obj={"cwd": repo},
+    )
+
+    assert result.exit_code == 0
+    data = json.loads(result.output)
+    assert data["write"] is False
+    assert data["tasks"][0]["source_heading"] == "Task 1: Parser Model"
+
+
+def test_plan_breakdown_cli_write_creates_tasks(tmp_path: Path):
+    repo = _repo_with_epic(tmp_path)
+    _write_plan(repo)
+
+    result = CliRunner().invoke(
+        cli,
+        [
+            "plan",
+            "breakdown",
+            "docs/plans/v0.4.md",
+            "--epic",
+            "projects/demo_app/mvp",
+            "--filer",
+            "alice@example.com",
+            "--owner",
+            "alice@example.com",
+            "--write",
+        ],
+        obj={"cwd": repo},
+    )
+
+    assert result.exit_code == 0
+    assert "# Plan Breakdown Write" in result.output
+    assert "projects/demo_app/mvp/tasks/T-123456-001-parser-model.md" in result.output
+    assert (repo / "projects" / "demo_app" / "mvp" / "tasks" / "T-123456-001-parser-model.md").exists()
+
+
+def test_plan_breakdown_cli_json_write_lists_created_paths(tmp_path: Path):
+    repo = _repo_with_epic(tmp_path)
+    _write_plan(repo)
+
+    result = CliRunner().invoke(
+        cli,
+        [
+            "plan",
+            "breakdown",
+            "docs/plans/v0.4.md",
+            "--epic",
+            "projects/demo_app/mvp",
+            "--filer",
+            "alice@example.com",
+            "--owner",
+            "alice@example.com",
+            "--write",
+            "--json",
+        ],
+        obj={"cwd": repo},
+    )
+
+    assert result.exit_code == 0
+    data = json.loads(result.output)
+    assert data["write"] is True
+    assert data["created"] == [
+        "projects/demo_app/mvp/tasks/T-123456-001-parser-model.md",
+        "projects/demo_app/mvp/tasks/T-123456-002-cli-wiring.md",
+    ]
+
+
+def test_plan_breakdown_missing_plan_is_user_facing(tmp_path: Path):
+    repo = _repo_with_epic(tmp_path)
+
+    result = CliRunner().invoke(
+        cli,
+        [
+            "plan",
+            "breakdown",
+            "docs/plans/missing.md",
+            "--epic",
+            "projects/demo_app/mvp",
+            "--filer",
+            "alice@example.com",
+            "--owner",
+            "alice@example.com",
+        ],
+        obj={"cwd": repo},
+    )
+
+    assert result.exit_code == 1
+    assert "error:" in result.output
+    assert "plan path 'docs/plans/missing.md' not found" in result.output
+    assert "Traceback" not in result.output
+
+
+def test_plan_breakdown_unknown_owner_is_user_facing(tmp_path: Path):
+    repo = _repo_with_epic(tmp_path)
+    _write_plan(repo)
+
+    result = CliRunner().invoke(
+        cli,
+        [
+            "plan",
+            "breakdown",
+            "docs/plans/v0.4.md",
+            "--epic",
+            "projects/demo_app/mvp",
+            "--filer",
+            "alice@example.com",
+            "--owner",
+            "missing@example.com",
+        ],
+        obj={"cwd": repo},
+    )
+
+    assert result.exit_code == 1
+    assert "error:" in result.output
+    assert "missing@example.com is not registered in roster.yaml" in result.output
+    assert "Traceback" not in result.output
