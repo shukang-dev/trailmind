@@ -175,6 +175,8 @@ trailmind plan breakdown docs/plans/v0.4.md \
 
 Preview is read-only by default. See `docs/v0.4-plan-breakdown.md` for details.
 
+See `docs/planning-workflow.md` for a complete walkthrough of the spec → plan → tasks workflow.
+
 ## Features
 
 - Project, Epic, Task, Issue, and Milestone records stored as Markdown.

@@ -165,6 +165,8 @@ trailmind plan breakdown docs/plans/v0.4.md \
 
 默认预览是只读的。完整说明见 `docs/v0.4-plan-breakdown.md`。
 
+完整的 spec → plan → tasks 工作流示例见 `docs/planning-workflow.md`。
+
 ## 主要功能
 
 - 用 Markdown 存储 Project、Epic、Task、Issue 和 Milestone。
