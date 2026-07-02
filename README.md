@@ -175,6 +175,20 @@ trailmind plan breakdown docs/plans/v0.4.md \
 
 Preview is read-only by default. See `docs/v0.4-plan-breakdown.md` for details.
 
+## Example Project
+
+A complete demo project is available at
+[`examples/demo_project/`](examples/demo_project/README.md) with projects,
+epics, tasks, issues, milestones, inbox items, and planning artifacts.
+
+```sh
+cd examples/demo_project
+trailmind status --overview
+trailmind sweep --project taskflow
+trailmind task pickup projects/taskflow/mvp/tasks/T-123456-001-build-task-list-view.md
+trailmind serve --port 8888
+```
+
 ## Features
 
 - Project, Epic, Task, Issue, and Milestone records stored as Markdown.
