@@ -490,3 +490,159 @@ def _find_epic_for_doc(doc_path: Path) -> Path | None:
             return current
         current = current.parent
     return None
+
+
+# --- Planning Status View ---
+
+from dataclasses import dataclass as _dataclass
+
+
+@_dataclass(frozen=True)
+class PlanTaskSummary:
+    task_id: str
+    status: str
+
+
+@_dataclass(frozen=True)
+class PlanningStatus:
+    epic: str
+    specs: list[SpecInfo]
+    plans: list[PlanInfo]
+    plan_task_counts: dict[str, PlanTaskSummary]
+    gaps: list[dict[str, str]]
+
+
+def build_planning_status(repo_root: Path, *, epic_ref: str) -> PlanningStatus:
+    epic_path = resolve_epic_dir(repo_root, epic_ref)
+    epic_display = epic_path.relative_to(repo_root).as_posix()
+
+    specs = list_specs(repo_root, epic_ref=epic_display)
+    plans = list_plans(repo_root, epic_ref=epic_display)
+
+    # Build plan task summaries
+    plan_task_counts: dict[str, PlanTaskSummary] = {}
+    tasks_dir = epic_path / "tasks"
+    if tasks_dir.is_dir():
+        for plan in plans:
+            for task_id in plan.generated_tasks:
+                if task_id in plan_task_counts:
+                    continue
+                # Find the task file
+                for task_file in tasks_dir.glob(f"{task_id}-*.md"):
+                    try:
+                        from trailmind.log import read_entity_user_facing
+                        fm, _ = read_entity_user_facing(task_file, label="task")
+                        task_status = fm.get("status", "unknown")
+                        plan_task_counts[task_id] = PlanTaskSummary(
+                            task_id=task_id,
+                            status=str(task_status),
+                        )
+                    except (TrailmindError, EntityFormatError):
+                        pass
+                    break
+
+    # Build gaps
+    gaps: list[dict[str, str]] = []
+    for spec in specs:
+        if not spec.linked_plans:
+            gaps.append({"type": "spec_without_plan", "spec": spec.title})
+    for plan in plans:
+        if not plan.linked_spec:
+            gaps.append({"type": "plan_without_spec", "plan": plan.title})
+
+    return PlanningStatus(
+        epic=epic_display,
+        specs=specs,
+        plans=plans,
+        plan_task_counts=plan_task_counts,
+        gaps=gaps,
+    )
+
+
+def format_planning_status_markdown(status: PlanningStatus) -> str:
+    lines = [f"# Planning Status: {Path(status.epic).name}", ""]
+
+    # Specs section
+    lines.append(f"## Specs ({len(status.specs)})")
+    if not status.specs:
+        lines.append("- none")
+    for spec in status.specs:
+        scope_str = f" [{spec.scope}]" if spec.scope else ""
+        lines.append(f"- {spec.status:30s} {spec.title}{scope_str}")
+        plan_count = len(spec.linked_plans)
+        if plan_count:
+            for p in spec.linked_plans:
+                lines.append(f"  → {p}")
+        else:
+            lines.append(f"  → {plan_count} plans")
+
+    # Plans section
+    lines.extend(["", f"## Plans ({len(status.plans)})"])
+    if not status.plans:
+        lines.append("- none")
+    for plan in status.plans:
+        scope_str = f" [{plan.scope}]" if plan.scope else ""
+        lines.append(f"- {plan.status:15s} {plan.title}{scope_str}")
+        if plan.linked_spec:
+            lines.append(f"  ← {plan.linked_spec}")
+        else:
+            lines.append(f"  ← (no spec)")
+        task_ids = plan.generated_tasks
+        if task_ids:
+            done = sum(
+                1 for tid in task_ids
+                if tid in status.plan_task_counts
+                and status.plan_task_counts[tid].status == "done"
+            )
+            total = len(task_ids)
+            lines.append(f"  → {total} tasks ({done} done, {total - done} open)")
+        else:
+            lines.append(f"  → 0 tasks")
+
+    # Gaps section
+    lines.extend(["", "## Gaps"])
+    if not status.gaps:
+        lines.append("- none")
+    for gap in status.gaps:
+        if gap["type"] == "spec_without_plan":
+            lines.append(f"- Spec \"{gap['spec']}\" has no implementation plan")
+        elif gap["type"] == "plan_without_spec":
+            lines.append(f"- Plan \"{gap['plan']}\" has no linked spec")
+
+    return "\n".join(lines) + "\n"
+
+
+def planning_status_to_dict(status: PlanningStatus) -> dict[str, Any]:
+    return {
+        "epic": status.epic,
+        "specs": [
+            {
+                "path": s.path,
+                "title": s.title,
+                "status": s.status,
+                "created": s.created,
+                "scope": s.scope,
+                "linked_plans": s.linked_plans,
+            }
+            for s in status.specs
+        ],
+        "plans": [
+            {
+                "path": p.path,
+                "title": p.title,
+                "status": p.status,
+                "created": p.created,
+                "scope": p.scope,
+                "linked_spec": p.linked_spec,
+                "generated_tasks": p.generated_tasks,
+                "tasks_done": sum(
+                    1 for tid in p.generated_tasks
+                    if tid in status.plan_task_counts
+                    and status.plan_task_counts[tid].status == "done"
+                ),
+                "tasks_total": len(p.generated_tasks),
+            }
+            for p in status.plans
+        ],
+        "gaps": status.gaps,
+    }

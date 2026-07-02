@@ -580,3 +580,126 @@ def test_parse_spec_info_handles_missing_optional_fields():
     assert info.scope is None
     assert info.project is None
     assert info.linked_plans == []
+
+
+# --- Task 7: Planning Status View ---
+
+from trailmind.plan_artifact import (
+    build_planning_status,
+    format_planning_status_markdown,
+    planning_status_to_dict,
+)
+
+
+def test_build_planning_status_returns_specs_and_plans(tmp_path: Path):
+    repo = _repo_with_epic(tmp_path)
+    create_spec(repo, epic_ref="projects/demo_app/mvp", title="Design Spec", author="alice")
+    create_plan(repo, epic_ref="projects/demo_app/mvp", title="Impl Plan", author="alice")
+
+    status = build_planning_status(repo, epic_ref="projects/demo_app/mvp")
+
+    assert status.epic == "projects/demo_app/mvp"
+    assert len(status.specs) == 1
+    assert status.specs[0].title == "Design Spec"
+    assert len(status.plans) == 1
+    assert status.plans[0].title == "Impl Plan"
+
+
+def test_planning_status_detects_spec_without_plan(tmp_path: Path):
+    repo = _repo_with_epic(tmp_path)
+    create_spec(repo, epic_ref="projects/demo_app/mvp", title="Orphan Spec", author="alice")
+
+    status = build_planning_status(repo, epic_ref="projects/demo_app/mvp")
+
+    assert len(status.gaps) == 1
+    assert status.gaps[0]["type"] == "spec_without_plan"
+    assert status.gaps[0]["spec"] == "Orphan Spec"
+
+
+def test_planning_status_detects_plan_without_spec(tmp_path: Path):
+    repo = _repo_with_epic(tmp_path)
+    create_plan(repo, epic_ref="projects/demo_app/mvp", title="Orphan Plan", author="alice")
+
+    status = build_planning_status(repo, epic_ref="projects/demo_app/mvp")
+
+    assert len(status.gaps) == 1
+    assert status.gaps[0]["type"] == "plan_without_spec"
+
+
+def test_format_planning_status_markdown_includes_sections(tmp_path: Path):
+    repo = _repo_with_epic(tmp_path)
+    create_spec(repo, epic_ref="projects/demo_app/mvp", title="My Spec", author="alice", scope="v1")
+    create_plan(repo, epic_ref="projects/demo_app/mvp", title="My Plan", author="alice", scope="v1")
+
+    status = build_planning_status(repo, epic_ref="projects/demo_app/mvp")
+    rendered = format_planning_status_markdown(status)
+
+    assert "# Planning Status" in rendered
+    assert "## Specs (1)" in rendered
+    assert "My Spec" in rendered
+    assert "## Plans (1)" in rendered
+    assert "My Plan" in rendered
+    assert "## Gaps" in rendered
+
+
+def test_planning_status_to_dict_shape(tmp_path: Path):
+    repo = _repo_with_epic(tmp_path)
+    create_spec(repo, epic_ref="projects/demo_app/mvp", title="S", author="alice")
+    create_plan(repo, epic_ref="projects/demo_app/mvp", title="P", author="alice")
+
+    status = build_planning_status(repo, epic_ref="projects/demo_app/mvp")
+    data = planning_status_to_dict(status)
+
+    assert data["epic"] == "projects/demo_app/mvp"
+    assert len(data["specs"]) == 1
+    assert data["specs"][0]["title"] == "S"
+    assert len(data["plans"]) == 1
+    assert data["plans"][0]["title"] == "P"
+    assert "gaps" in data
+
+
+def test_plan_status_cli(tmp_path: Path):
+    repo = _repo_with_epic(tmp_path)
+    create_spec(repo, epic_ref="projects/demo_app/mvp", title="CLI Spec", author="alice")
+    create_plan(repo, epic_ref="projects/demo_app/mvp", title="CLI Plan", author="alice")
+
+    result = CliRunner().invoke(
+        cli,
+        ["plan", "status", "--epic", "projects/demo_app/mvp"],
+        obj={"cwd": repo},
+    )
+
+    assert result.exit_code == 0
+    assert "Planning Status" in result.output
+    assert "CLI Spec" in result.output
+    assert "CLI Plan" in result.output
+
+
+def test_plan_status_cli_json(tmp_path: Path):
+    repo = _repo_with_epic(tmp_path)
+    create_spec(repo, epic_ref="projects/demo_app/mvp", title="JSON Spec", author="alice")
+
+    result = CliRunner().invoke(
+        cli,
+        ["plan", "status", "--epic", "projects/demo_app/mvp", "--json"],
+        obj={"cwd": repo},
+    )
+
+    assert result.exit_code == 0
+    data = json.loads(result.output)
+    assert data["epic"] == "projects/demo_app/mvp"
+    assert len(data["specs"]) == 1
+
+
+def test_plan_status_cli_missing_epic(tmp_path: Path):
+    repo = _repo_with_epic(tmp_path)
+
+    result = CliRunner().invoke(
+        cli,
+        ["plan", "status", "--epic", "projects/demo_app/missing"],
+        obj={"cwd": repo},
+    )
+
+    assert result.exit_code == 1
+    assert "error:" in result.output
+    assert "Traceback" not in result.output

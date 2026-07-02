@@ -38,13 +38,16 @@ from trailmind.plan_artifact import (
     PLAN_STATUSES,
     SPEC_STATUSES,
     _resolve_any_doc,
+    build_planning_status,
     create_plan,
     create_spec,
+    format_planning_status_markdown,
     link_plan_spec,
     list_plans,
     list_specs,
     parse_plan_info,
     parse_spec_info,
+    planning_status_to_dict,
     set_plan_status,
     set_spec_status,
 )
@@ -484,6 +487,19 @@ def plan_link_spec_cmd(ctx: click.Context, plan_ref: str, spec_ref: str) -> None
     root = find_repo_root(_cwd_from_context(ctx))
     touched = link_plan_spec(root, plan_ref=plan_ref, spec_ref=spec_ref)
     _echo_touched(root, touched)
+
+
+@plan_group.command("status")
+@click.option("--epic", "epic_ref", required=True)
+@click.option("--json", "json_output", is_flag=True)
+@click.pass_context
+def plan_status_cmd(ctx: click.Context, epic_ref: str, json_output: bool) -> None:
+    root = find_repo_root(_cwd_from_context(ctx))
+    status = build_planning_status(root, epic_ref=epic_ref)
+    if json_output:
+        click.echo(json.dumps(planning_status_to_dict(status), ensure_ascii=False, indent=2))
+    else:
+        click.echo(format_planning_status_markdown(status), nl=False)
 
 
 @cli.group("project")
