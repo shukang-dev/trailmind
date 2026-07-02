@@ -2,9 +2,12 @@ from __future__ import annotations
 
 import re
 from dataclasses import dataclass, field
-from pathlib import PurePosixPath, PureWindowsPath
+from pathlib import Path, PurePosixPath, PureWindowsPath
+from typing import Any
 
 from trailmind.errors import TrailmindError
+from trailmind.log import read_entity_user_facing
+from trailmind.roster import Roster
 
 
 TASK_HEADING_RE = re.compile(r"^###[ \t]+Task[ \t]+(\d+):[ \t]+([^ \t].*?)[ \t]*$")
@@ -208,3 +211,222 @@ def _is_supported_code_path(raw: str) -> bool:
     if ".." in posix.parts or ".." in windows.parts:
         return False
     return raw.startswith(("src/", "tests/", "docs/")) and "." in posix.name
+
+
+@dataclass(frozen=True)
+class BreakdownItem:
+    source_task: int
+    source_heading: str
+    title: str
+    action: str
+    existing_path: str | None
+    code_paths: list[str]
+    deliverables: list[str]
+    plan_task: PlanTask
+
+
+@dataclass(frozen=True)
+class BreakdownReport:
+    plan_path: str
+    epic_path: str
+    write: bool
+    force: bool
+    tasks: list[BreakdownItem]
+    created: list[str]
+    skipped: list[str]
+
+
+def build_breakdown_report(
+    repo_root: Path,
+    *,
+    plan_ref: str,
+    epic_ref: str,
+    filer: str,
+    owner: str,
+    write: bool,
+    force: bool,
+) -> BreakdownReport:
+    plan_path = _resolve_plan_path(repo_root, plan_ref)
+    epic_path = _resolve_epic_path(repo_root, epic_ref)
+    roster = Roster.load(repo_root / "roster.yaml")
+    filer_shortname, filer_uid = _resolve_roster_developer(roster, filer)
+    owner_shortname, _owner_uid = _resolve_roster_developer(roster, owner)
+    _ = (filer_shortname, filer_uid, owner_shortname)
+    plan_text = _read_plan_text(plan_path)
+    plan_tasks = parse_plan_tasks(plan_text)
+    existing = _existing_source_tasks(repo_root, epic_path)
+    plan_display = _relative_to_root(repo_root, plan_path)
+    epic_display = _relative_to_root(repo_root, epic_path)
+    items: list[BreakdownItem] = []
+    skipped: list[str] = []
+    for plan_task in plan_tasks:
+        existing_path = existing.get((plan_display, plan_task.source_task))
+        action = "create"
+        if existing_path and not force:
+            action = "skip"
+            skipped.append(existing_path)
+        elif existing_path and force:
+            action = "duplicate allowed by --force"
+        items.append(
+            BreakdownItem(
+                source_task=plan_task.source_task,
+                source_heading=plan_task.source_heading,
+                title=plan_task.title,
+                action=action,
+                existing_path=existing_path,
+                code_paths=derive_code_paths(plan_task),
+                deliverables=derive_deliverables(plan_task),
+                plan_task=plan_task,
+            )
+        )
+    if write:
+        raise TrailmindError("write mode unavailable in preview-only implementation")
+    return BreakdownReport(
+        plan_path=plan_display,
+        epic_path=epic_display,
+        write=write,
+        force=force,
+        tasks=items,
+        created=[],
+        skipped=skipped,
+    )
+
+
+def breakdown_report_to_dict(report: BreakdownReport) -> dict[str, Any]:
+    return {
+        "plan_path": report.plan_path,
+        "epic_path": report.epic_path,
+        "write": report.write,
+        "force": report.force,
+        "tasks": [
+            {
+                "source_task": item.source_task,
+                "source_heading": item.source_heading,
+                "title": item.title,
+                "action": item.action,
+                "existing_path": item.existing_path,
+                "code_paths": item.code_paths,
+                "deliverables": item.deliverables,
+            }
+            for item in report.tasks
+        ],
+        "created": report.created,
+        "skipped": report.skipped,
+    }
+
+
+def format_breakdown_markdown(report: BreakdownReport) -> str:
+    heading = "# Plan Breakdown Write" if report.write else "# Plan Breakdown Preview"
+    lines = [
+        heading,
+        "",
+        f"- Plan: {report.plan_path}",
+        f"- Epic: {report.epic_path}",
+        f"- Tasks parsed: {len(report.tasks)}",
+        f"- Created: {len(report.created)}",
+        f"- Skipped: {len(report.skipped)}",
+        "",
+        "## Tasks",
+    ]
+    if not report.tasks:
+        lines.append("- none")
+    for item in report.tasks:
+        existing = f" existing={item.existing_path}" if item.existing_path else ""
+        lines.append(f"- Task {item.source_task}: {item.title} [{item.action}]{existing}")
+        lines.append(f"  - Source: {item.source_heading}")
+        paths = ", ".join(item.code_paths) if item.code_paths else "none"
+        deliverables = ", ".join(item.deliverables) if item.deliverables else "none"
+        lines.append(f"  - Code paths: {paths}")
+        lines.append(f"  - Deliverables: {deliverables}")
+    if report.created:
+        lines.extend(["", "## Created Paths"])
+        lines.extend(f"- {path}" for path in report.created)
+    if report.skipped:
+        lines.extend(["", "## Skipped Paths"])
+        lines.extend(f"- {path}" for path in report.skipped)
+    return "\n".join(lines).rstrip() + "\n"
+
+
+def _resolve_plan_path(repo_root: Path, raw: str) -> Path:
+    relative = _safe_relative_path(raw)
+    path = repo_root / relative
+    try:
+        path.resolve(strict=False).relative_to(repo_root.resolve(strict=False))
+    except (OSError, RuntimeError, ValueError) as exc:
+        raise TrailmindError(f"plan path {raw!r} not found") from exc
+    if path.suffix != ".md":
+        raise TrailmindError("plan path must be a Markdown file")
+    if not path.is_file():
+        raise TrailmindError(f"plan path {raw!r} not found")
+    return path
+
+
+def _resolve_epic_path(repo_root: Path, raw: str) -> Path:
+    relative = _safe_relative_path(raw)
+    path = repo_root / relative
+    try:
+        path.resolve(strict=False).relative_to(repo_root.resolve(strict=False))
+    except (OSError, RuntimeError, ValueError) as exc:
+        raise TrailmindError(f"epic {raw} does not exist") from exc
+    if not (path / "EPIC.md").is_file():
+        raise TrailmindError(f"epic {raw} does not exist")
+    return path
+
+
+def _safe_relative_path(raw: str) -> Path:
+    posix = PurePosixPath(raw)
+    windows = PureWindowsPath(raw)
+    if (
+        not raw.strip()
+        or posix.is_absolute()
+        or windows.is_absolute()
+        or windows.drive
+        or windows.root
+        or ".." in posix.parts
+        or ".." in windows.parts
+    ):
+        raise TrailmindError(f"path escapes repository: {raw}")
+    return Path(*posix.parts)
+
+
+def _read_plan_text(path: Path) -> str:
+    try:
+        return path.read_text(encoding="utf-8")
+    except UnicodeDecodeError as exc:
+        raise TrailmindError(f"could not read plan file {path}: file is not UTF-8") from exc
+    except OSError as exc:
+        raise TrailmindError(f"could not read plan file {path}: {exc}") from exc
+
+
+def _resolve_roster_developer(roster: Roster, raw: str) -> tuple[str, str]:
+    normalized = raw.strip().lower()
+    for developer in roster.developers:
+        if developer.email == normalized or developer.shortname.lower() == normalized:
+            return developer.shortname, developer.uid
+    raise TrailmindError(f"{normalized} is not registered in roster.yaml")
+
+
+def _existing_source_tasks(repo_root: Path, epic_path: Path) -> dict[tuple[str, int], str]:
+    tasks_path = epic_path / "tasks"
+    if tasks_path.exists() and not tasks_path.is_dir():
+        raise TrailmindError(f"tasks path {tasks_path} is not a directory")
+    existing: dict[tuple[str, int], str] = {}
+    if not tasks_path.exists():
+        return existing
+    for path in sorted(tasks_path.glob("T-*.md")):
+        try:
+            frontmatter, _body = read_entity_user_facing(path, label="task")
+        except TrailmindError:
+            continue
+        source_plan = frontmatter.get("source_plan")
+        source_task = frontmatter.get("source_task")
+        if isinstance(source_plan, str) and isinstance(source_task, int):
+            existing[(source_plan, source_task)] = _relative_to_root(repo_root, path)
+    return existing
+
+
+def _relative_to_root(repo_root: Path, path: Path) -> str:
+    try:
+        return path.relative_to(repo_root).as_posix()
+    except ValueError:
+        return path.as_posix()
