@@ -525,3 +525,58 @@ def test_plan_spec_init_unknown_author_is_user_facing(tmp_path: Path):
     assert "error:" in result.output
     assert "not registered" in result.output
     assert "Traceback" not in result.output
+
+
+# --- Task 6: Edge Cases ---
+
+def test_create_spec_rejects_unsafe_epic_path(tmp_path: Path):
+    repo = _repo_with_epic(tmp_path)
+
+    result = CliRunner().invoke(
+        cli,
+        ["plan", "spec", "init", "--epic", "../outside", "--title", "X", "--author", "alice"],
+        obj={"cwd": repo},
+    )
+
+    assert result.exit_code == 1
+    assert "error:" in result.output
+    assert "Traceback" not in result.output
+
+
+def test_create_spec_rejects_duplicate_title(tmp_path: Path):
+    repo = _repo_with_epic(tmp_path)
+    create_spec(repo, epic_ref="projects/demo_app/mvp", title="Duplicate", author="alice")
+
+    with pytest.raises(TrailmindError, match="already exists"):
+        create_spec(repo, epic_ref="projects/demo_app/mvp", title="Duplicate", author="alice")
+
+
+def test_plan_spec_set_status_rejects_unknown_actor(tmp_path: Path):
+    repo = _repo_with_epic(tmp_path)
+    path = create_spec(repo, epic_ref="projects/demo_app/mvp", title="Actor Test", author="alice")
+
+    result = CliRunner().invoke(
+        cli,
+        ["plan", "spec", "set-status", str(path.relative_to(repo)),
+         "--status", "approved-for-spec", "--actor", "nobody@example.com"],
+        obj={"cwd": repo},
+    )
+
+    assert result.exit_code == 1
+    assert "not registered" in result.output
+    assert "Traceback" not in result.output
+
+
+def test_list_specs_when_no_specs_exist(tmp_path: Path):
+    repo = _repo_with_epic(tmp_path)
+    specs = list_specs(repo, epic_ref="projects/demo_app/mvp")
+    assert specs == []
+
+
+def test_parse_spec_info_handles_missing_optional_fields():
+    text = "---\ntitle: Minimal\nstatus: draft-for-review\ncreated: '2026-07-02'\n---\n# Minimal\n"
+    info = parse_spec_info(text, path="x.md")
+    assert info.title == "Minimal"
+    assert info.scope is None
+    assert info.project is None
+    assert info.linked_plans == []

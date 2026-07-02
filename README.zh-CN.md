@@ -165,6 +165,19 @@ trailmind plan breakdown docs/plans/v0.4.md \
 
 默认预览是只读的。完整说明见 `docs/v0.4-plan-breakdown.md`。
 
+## 规划制品管理
+
+Trailmind 可以管理 spec 和 plan 制品，拥有正式的 frontmatter 和 CLI 命令：
+
+```sh
+trailmind plan spec init --epic projects/demo_app/mvp --title "Parser Redesign" --author alice@example.com
+trailmind plan init --epic projects/demo_app/mvp --title "Implementation" --author alice@example.com --spec docs/specs/2026-07-02-parser-redesign.md
+trailmind plan spec list --epic projects/demo_app/mvp
+trailmind plan list --epic projects/demo_app/mvp
+```
+
+详见 `docs/v0.4-planning-artifacts.md`。
+
 ## 主要功能
 
 - 用 Markdown 存储 Project、Epic、Task、Issue 和 Milestone。
