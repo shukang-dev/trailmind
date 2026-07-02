@@ -8,7 +8,7 @@ from typing import Any
 
 from trailmind.entity_io import write_entity
 from trailmind.errors import TrailmindError
-from trailmind.ids import next_entity_id, slugify
+from trailmind.ids import format_entity_id, next_entity_id, parse_entity_id, slugify
 from trailmind.log import read_entity_user_facing
 from trailmind.roster import Roster
 
@@ -256,37 +256,22 @@ def build_breakdown_report(
     owner_shortname, _owner_uid = _resolve_roster_developer(roster, owner)
     plan_text = _read_plan_text(plan_path)
     plan_tasks = parse_plan_tasks(plan_text)
-    existing = _existing_source_tasks(repo_root, epic_path)
+    tasks_path = epic_path / "tasks"
+    existing = _existing_source_tasks(repo_root, tasks_path)
     plan_display = _relative_to_root(repo_root, plan_path)
     epic_display = _relative_to_root(repo_root, epic_path)
-    items: list[BreakdownItem] = []
-    skipped: list[str] = []
-    for plan_task in plan_tasks:
-        existing_path = existing.get((plan_display, plan_task.source_task))
-        action = "create"
-        if existing_path and not force:
-            action = "skip"
-            skipped.append(existing_path)
-        elif existing_path and force:
-            action = "duplicate allowed by --force"
-        items.append(
-            BreakdownItem(
-                source_task=plan_task.source_task,
-                source_heading=plan_task.source_heading,
-                title=plan_task.title,
-                action=action,
-                existing_path=existing_path,
-                code_paths=derive_code_paths(plan_task),
-                deliverables=derive_deliverables(plan_task),
-                plan_task=plan_task,
-            )
-        )
+    items, skipped = _preview_breakdown_items(
+        repo_root,
+        tasks_path=tasks_path,
+        plan_path=plan_display,
+        plan_tasks=plan_tasks,
+        existing=existing,
+        filer_uid=filer_uid,
+        force=force,
+    )
     created: list[str] = []
     if write:
-        tasks_path = epic_path / "tasks"
-        if tasks_path.exists() and not tasks_path.is_dir():
-            raise TrailmindError(f"tasks path {tasks_path} is not a directory")
-        tasks_path.mkdir(parents=True, exist_ok=True)
+        _ensure_tasks_directory(repo_root, tasks_path)
         source_paths = dict(existing)
         updated_items: list[BreakdownItem] = []
         skipped = []
@@ -415,6 +400,8 @@ def _resolve_plan_path(repo_root: Path, raw: str) -> Path:
 
 def _resolve_epic_path(repo_root: Path, raw: str) -> Path:
     relative = _safe_relative_path(raw)
+    if len(relative.parts) != 3 or relative.parts[0] != "projects":
+        raise TrailmindError(f"epic {raw} does not exist")
     path = repo_root / relative
     try:
         path.resolve(strict=False).relative_to(repo_root.resolve(strict=False))
@@ -423,6 +410,52 @@ def _resolve_epic_path(repo_root: Path, raw: str) -> Path:
     if not (path / "EPIC.md").is_file():
         raise TrailmindError(f"epic {raw} does not exist")
     return path
+
+
+def _preview_breakdown_items(
+    repo_root: Path,
+    *,
+    tasks_path: Path,
+    plan_path: str,
+    plan_tasks: list[PlanTask],
+    existing: dict[tuple[str, int], str],
+    filer_uid: str,
+    force: bool,
+) -> tuple[list[BreakdownItem], list[str]]:
+    source_paths = dict(existing)
+    next_task_number = parse_entity_id(next_entity_id(tasks_path, entity="T", uid=filer_uid)).number
+    items: list[BreakdownItem] = []
+    skipped: list[str] = []
+    for plan_task in plan_tasks:
+        source_key = (plan_path, plan_task.source_task)
+        existing_path = source_paths.get(source_key)
+        action = "create"
+        if existing_path and not force:
+            action = "skip"
+            skipped.append(existing_path)
+        elif existing_path and force:
+            action = "duplicate allowed by --force"
+            next_task_number += 1
+        else:
+            task_id = format_entity_id("T", next_task_number, filer_uid)
+            source_paths[source_key] = _relative_to_root(
+                repo_root,
+                _breakdown_task_path(tasks_path, task_id=task_id, title=plan_task.title),
+            )
+            next_task_number += 1
+        items.append(
+            BreakdownItem(
+                source_task=plan_task.source_task,
+                source_heading=plan_task.source_heading,
+                title=plan_task.title,
+                action=action,
+                existing_path=existing_path,
+                code_paths=derive_code_paths(plan_task),
+                deliverables=derive_deliverables(plan_task),
+                plan_task=plan_task,
+            )
+        )
+    return items, skipped
 
 
 def _safe_relative_path(raw: str) -> Path:
@@ -458,10 +491,8 @@ def _resolve_roster_developer(roster: Roster, raw: str) -> tuple[str, str]:
     raise TrailmindError(f"{normalized} is not registered in roster.yaml")
 
 
-def _existing_source_tasks(repo_root: Path, epic_path: Path) -> dict[tuple[str, int], str]:
-    tasks_path = epic_path / "tasks"
-    if tasks_path.exists() and not tasks_path.is_dir():
-        raise TrailmindError(f"tasks path {tasks_path} is not a directory")
+def _existing_source_tasks(repo_root: Path, tasks_path: Path) -> dict[tuple[str, int], str]:
+    _validate_tasks_path(repo_root, tasks_path)
     existing: dict[tuple[str, int], str] = {}
     if not tasks_path.exists():
         return existing
@@ -479,6 +510,24 @@ def _existing_source_tasks(repo_root: Path, epic_path: Path) -> dict[tuple[str, 
     return existing
 
 
+def _validate_tasks_path(repo_root: Path, tasks_path: Path) -> None:
+    try:
+        tasks_path.resolve(strict=False).relative_to(repo_root.resolve(strict=False))
+    except (OSError, RuntimeError, ValueError) as exc:
+        raise TrailmindError(f"tasks path {tasks_path} escapes repository") from exc
+    if tasks_path.exists() and not tasks_path.is_dir():
+        raise TrailmindError(f"tasks path {tasks_path} is not a directory")
+
+
+def _ensure_tasks_directory(repo_root: Path, tasks_path: Path) -> None:
+    _validate_tasks_path(repo_root, tasks_path)
+    tasks_path.mkdir(parents=True, exist_ok=True)
+
+
+def _breakdown_task_path(tasks_path: Path, *, task_id: str, title: str) -> Path:
+    return tasks_path / f"{task_id}-{slugify(title)}.md"
+
+
 def _write_breakdown_task(
     repo_root: Path,
     *,
@@ -490,7 +539,7 @@ def _write_breakdown_task(
     item: BreakdownItem,
 ) -> Path:
     task_id = next_entity_id(tasks_path, entity="T", uid=filer_uid)
-    task_path = tasks_path / f"{task_id}-{slugify(item.title)}.md"
+    task_path = _breakdown_task_path(tasks_path, task_id=task_id, title=item.title)
     today = date.today().isoformat()
     write_entity(
         task_path,

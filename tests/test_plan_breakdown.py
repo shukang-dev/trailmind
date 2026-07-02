@@ -626,6 +626,44 @@ def test_breakdown_write_skips_duplicate_source_task_number_in_same_plan(tmp_pat
     assert len(list((repo / "projects" / "demo_app" / "mvp" / "tasks").glob("T-*.md"))) == 1
 
 
+def test_breakdown_preview_skips_duplicate_source_task_number_in_same_plan_without_writing(tmp_path: Path):
+    repo = _repo_with_epic(tmp_path)
+    _write_plan(
+        repo,
+        """# Demo Implementation Plan
+
+### Task 1: Parser Model
+
+**Files:**
+- Modify: `src/trailmind/plan_breakdown.py`
+
+### Task 1: Parser Followup
+
+**Files:**
+- Modify: `tests/test_plan_breakdown.py`
+""",
+    )
+    tasks_path = repo / "projects" / "demo_app" / "mvp" / "tasks"
+
+    report = build_breakdown_report(
+        repo,
+        plan_ref="docs/plans/v0.4.md",
+        epic_ref="projects/demo_app/mvp",
+        filer="alice@example.com",
+        owner="alice@example.com",
+        write=False,
+        force=False,
+    )
+
+    first_would_be_path = "projects/demo_app/mvp/tasks/T-123456-001-parser-model.md"
+    assert report.created == []
+    assert report.skipped == [first_would_be_path]
+    assert [item.action for item in report.tasks] == ["create", "skip"]
+    assert report.tasks[0].existing_path is None
+    assert report.tasks[1].existing_path == first_would_be_path
+    assert not list(tasks_path.glob("T-*.md"))
+
+
 def test_breakdown_write_force_allows_duplicate_source_task_number_in_same_plan(tmp_path: Path):
     repo = _repo_with_epic(tmp_path)
     _write_plan(
@@ -924,6 +962,25 @@ def test_plan_breakdown_rejects_missing_epic(tmp_path: Path):
     assert "epic projects/demo_app/missing does not exist" in result.output
 
 
+def test_plan_breakdown_rejects_non_standard_in_repo_epic_path(tmp_path: Path):
+    repo = _repo_with_epic(tmp_path)
+    _write_plan(repo)
+    scratch_epic = repo / "scratch" / "demo" / "mvp"
+    scratch_epic.mkdir(parents=True)
+    (scratch_epic / "EPIC.md").write_text("# Scratch MVP\n", encoding="utf-8")
+
+    with pytest.raises(TrailmindError, match="epic scratch/demo/mvp does not exist"):
+        build_breakdown_report(
+            repo,
+            plan_ref="docs/plans/v0.4.md",
+            epic_ref="scratch/demo/mvp",
+            filer="alice@example.com",
+            owner="alice@example.com",
+            write=False,
+            force=False,
+        )
+
+
 def test_plan_breakdown_rejects_unsafe_epic_path(tmp_path: Path):
     repo = _repo_with_epic(tmp_path)
     _write_plan(repo)
@@ -977,6 +1034,38 @@ def test_plan_breakdown_rejects_tasks_path_that_is_file(tmp_path: Path):
     assert result.exit_code == 1
     assert "tasks path" in result.output
     assert "is not a directory" in result.output
+
+
+def test_plan_breakdown_write_rejects_symlinked_tasks_path_that_escapes_repo(tmp_path: Path):
+    repo = _repo_with_epic(tmp_path)
+    _write_plan(repo)
+    tasks_path = repo / "projects" / "demo_app" / "mvp" / "tasks"
+    outside_tasks = tmp_path.parent / f"{tmp_path.name}_outside_tasks"
+    outside_tasks.mkdir()
+    tasks_path.rmdir()
+    tasks_path.symlink_to(outside_tasks, target_is_directory=True)
+
+    result = CliRunner().invoke(
+        cli,
+        [
+            "plan",
+            "breakdown",
+            "docs/plans/v0.4.md",
+            "--epic",
+            "projects/demo_app/mvp",
+            "--filer",
+            "alice@example.com",
+            "--owner",
+            "alice@example.com",
+            "--write",
+        ],
+        obj={"cwd": repo},
+    )
+
+    assert result.exit_code == 1
+    assert "tasks path" in result.output
+    assert "escapes repository" in result.output
+    assert not list(outside_tasks.glob("T-*.md"))
 
 
 def test_plan_breakdown_rejects_unknown_filer(tmp_path: Path):
