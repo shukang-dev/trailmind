@@ -247,3 +247,108 @@ def test_create_spec_rejects_unknown_author(tmp_path: Path):
     repo = _repo_with_epic(tmp_path)
     with pytest.raises(TrailmindError, match="not registered"):
         create_spec(repo, epic_ref="projects/demo_app/mvp", title="X", author="unknown@example.com")
+
+
+# --- Task 3: List, Show, Status, Link ---
+
+from trailmind.plan_artifact import (
+    link_plan_spec,
+    list_plans,
+    list_specs,
+    set_plan_status,
+    set_spec_status,
+)
+
+
+def test_list_specs_returns_specs_in_epic(tmp_path: Path):
+    repo = _repo_with_epic(tmp_path)
+    create_spec(repo, epic_ref="projects/demo_app/mvp", title="Spec One", author="alice")
+    create_spec(repo, epic_ref="projects/demo_app/mvp", title="Spec Two", author="bob")
+
+    specs = list_specs(repo, epic_ref="projects/demo_app/mvp")
+
+    assert len(specs) == 2
+    titles = {s.title for s in specs}
+    assert "Spec One" in titles
+    assert "Spec Two" in titles
+
+
+def test_list_specs_all_repo_when_no_epic(tmp_path: Path):
+    repo = _repo_with_epic(tmp_path)
+    create_spec(repo, epic_ref="projects/demo_app/mvp", title="Only Spec", author="alice")
+
+    specs = list_specs(repo)
+
+    assert len(specs) == 1
+    assert specs[0].title == "Only Spec"
+
+
+def test_list_plans_returns_plans_in_epic(tmp_path: Path):
+    repo = _repo_with_epic(tmp_path)
+    create_plan(repo, epic_ref="projects/demo_app/mvp", title="Plan One", author="alice")
+    create_plan(repo, epic_ref="projects/demo_app/mvp", title="Plan Two", author="bob")
+
+    plans = list_plans(repo, epic_ref="projects/demo_app/mvp")
+
+    assert len(plans) == 2
+
+
+def test_set_spec_status_updates_frontmatter_and_log(tmp_path: Path):
+    repo = _repo_with_epic(tmp_path)
+    path = create_spec(repo, epic_ref="projects/demo_app/mvp", title="Status Test", author="alice")
+
+    set_spec_status(repo, spec_ref=str(path.relative_to(repo)), status="approved-for-spec", actor="alice")
+
+    frontmatter, body = read_entity(path)
+    assert frontmatter["status"] == "approved-for-spec"
+    assert "approved-for-spec" in body or "Approved" in body
+
+
+def test_set_spec_status_rejects_invalid_status(tmp_path: Path):
+    repo = _repo_with_epic(tmp_path)
+    path = create_spec(repo, epic_ref="projects/demo_app/mvp", title="Bad Status", author="alice")
+
+    with pytest.raises(TrailmindError, match="invalid spec status"):
+        set_spec_status(repo, spec_ref=str(path.relative_to(repo)), status="bogus", actor="alice")
+
+
+def test_set_plan_status_updates_frontmatter(tmp_path: Path):
+    repo = _repo_with_epic(tmp_path)
+    path = create_plan(repo, epic_ref="projects/demo_app/mvp", title="Plan Status", author="alice")
+
+    set_plan_status(repo, plan_ref=str(path.relative_to(repo)), status="approved", actor="alice")
+
+    frontmatter, body = read_entity(path)
+    assert frontmatter["status"] == "approved"
+
+
+def test_link_plan_spec_adds_bidirectional_refs(tmp_path: Path):
+    repo = _repo_with_epic(tmp_path)
+    spec_path = create_spec(repo, epic_ref="projects/demo_app/mvp", title="Link Spec", author="alice")
+    plan_path = create_plan(repo, epic_ref="projects/demo_app/mvp", title="Link Plan", author="alice")
+
+    link_plan_spec(
+        repo,
+        plan_ref=str(plan_path.relative_to(repo)),
+        spec_ref=str(spec_path.relative_to(repo)),
+    )
+
+    plan_fm, _ = read_entity(plan_path)
+    assert plan_fm["linked_spec"] is not None
+
+    spec_fm, _ = read_entity(spec_path)
+    assert len(spec_fm["linked_plans"]) >= 1
+
+
+def test_link_plan_spec_is_idempotent(tmp_path: Path):
+    repo = _repo_with_epic(tmp_path)
+    spec_path = create_spec(repo, epic_ref="projects/demo_app/mvp", title="Idem Spec", author="alice")
+    plan_path = create_plan(repo, epic_ref="projects/demo_app/mvp", title="Idem Plan", author="alice")
+    ref = str(plan_path.relative_to(repo))
+    sref = str(spec_path.relative_to(repo))
+
+    link_plan_spec(repo, plan_ref=ref, spec_ref=sref)
+    link_plan_spec(repo, plan_ref=ref, spec_ref=sref)
+
+    spec_fm, _ = read_entity(spec_path)
+    assert len(spec_fm["linked_plans"]) == 1

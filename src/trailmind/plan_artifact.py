@@ -345,3 +345,148 @@ def _plan_body(title: str, author: str, today: str) -> str:
         "## Activity Log\n\n"
         f"{action_activity_entry(action='Created', actor_label='author', actor=author)}\n"
     )
+
+
+# --- Listing, Status, Linking ---
+
+from trailmind.log import append_activity_entry, read_entity_user_facing
+
+
+def list_specs(repo_root: Path, *, epic_ref: str | None = None) -> list[SpecInfo]:
+    if epic_ref:
+        epic_path = resolve_epic_dir(repo_root, epic_ref)
+        return _list_docs_in_dir(epic_path / "docs" / "specs", repo_root, parse_spec_info, "spec")
+    specs: list[SpecInfo] = []
+    projects_dir = repo_root / "projects"
+    if not projects_dir.is_dir():
+        return specs
+    for project_dir in sorted(projects_dir.iterdir()):
+        if not project_dir.is_dir():
+            continue
+        for epic_dir in sorted(project_dir.iterdir()):
+            if not epic_dir.is_dir():
+                continue
+            specs.extend(_list_docs_in_dir(epic_dir / "docs" / "specs", repo_root, parse_spec_info, "spec"))
+    return specs
+
+
+def list_plans(repo_root: Path, *, epic_ref: str | None = None) -> list[PlanInfo]:
+    if epic_ref:
+        epic_path = resolve_epic_dir(repo_root, epic_ref)
+        return _list_docs_in_dir(epic_path / "docs" / "plans", repo_root, parse_plan_info, "plan")
+    plans: list[PlanInfo] = []
+    projects_dir = repo_root / "projects"
+    if not projects_dir.is_dir():
+        return plans
+    for project_dir in sorted(projects_dir.iterdir()):
+        if not project_dir.is_dir():
+            continue
+        for epic_dir in sorted(project_dir.iterdir()):
+            if not epic_dir.is_dir():
+                continue
+            plans.extend(_list_docs_in_dir(epic_dir / "docs" / "plans", repo_root, parse_plan_info, "plan"))
+    return plans
+
+
+def _list_docs_in_dir(directory: Path, repo_root: Path, parser, label: str):
+    results = []
+    if not directory.is_dir():
+        return results
+    for md_file in sorted(directory.glob("*.md")):
+        try:
+            text = md_file.read_text(encoding="utf-8")
+            rel = md_file.relative_to(repo_root).as_posix()
+            results.append(parser(text, path=rel))
+        except (TrailmindError, UnicodeDecodeError):
+            continue
+    return results
+
+
+def set_spec_status(repo_root: Path, *, spec_ref: str, status: str, actor: str) -> Path:
+    if status not in SPEC_STATUSES:
+        raise TrailmindError(f"invalid spec status {status!r}; expected one of: {', '.join(SPEC_STATUSES)}")
+    path = _resolve_any_doc(repo_root, spec_ref, "spec")
+    roster = Roster.load(repo_root / "roster.yaml")
+    actor_shortname, _ = _resolve_roster_developer(roster, actor)
+    frontmatter, body = read_entity_user_facing(path, label="spec")
+    frontmatter["status"] = status
+    body = append_activity_entry(
+        body,
+        action_activity_entry(action=f"Status set to {status}", actor_label="actor", actor=actor_shortname),
+    )
+    write_entity(path, frontmatter=frontmatter, body=body)
+    return path
+
+
+def set_plan_status(repo_root: Path, *, plan_ref: str, status: str, actor: str) -> Path:
+    if status not in PLAN_STATUSES:
+        raise TrailmindError(f"invalid plan status {status!r}; expected one of: {', '.join(PLAN_STATUSES)}")
+    path = _resolve_any_doc(repo_root, plan_ref, "plan")
+    roster = Roster.load(repo_root / "roster.yaml")
+    actor_shortname, _ = _resolve_roster_developer(roster, actor)
+    frontmatter, body = read_entity_user_facing(path, label="plan")
+    frontmatter["status"] = status
+    body = append_activity_entry(
+        body,
+        action_activity_entry(action=f"Status set to {status}", actor_label="actor", actor=actor_shortname),
+    )
+    write_entity(path, frontmatter=frontmatter, body=body)
+    return path
+
+
+def link_plan_spec(repo_root: Path, *, plan_ref: str, spec_ref: str) -> list[Path]:
+    plan_path = _resolve_any_doc(repo_root, plan_ref, "plan")
+    spec_path = _resolve_any_doc(repo_root, spec_ref, "spec")
+
+    epic_path = _find_epic_for_doc(plan_path)
+    if epic_path:
+        spec_epic_rel = spec_path.relative_to(epic_path).as_posix()
+    else:
+        spec_epic_rel = spec_path.relative_to(repo_root).as_posix()
+
+    # Update plan's linked_spec
+    plan_fm, plan_body = read_entity_user_facing(plan_path, label="plan")
+    current_linked = plan_fm.get("linked_spec")
+    if current_linked != spec_epic_rel:
+        plan_fm["linked_spec"] = spec_epic_rel
+        write_entity(plan_path, frontmatter=plan_fm, body=plan_body)
+
+    # Update spec's linked_plans (idempotent)
+    if epic_path:
+        plan_epic_rel = plan_path.relative_to(epic_path).as_posix()
+    else:
+        plan_epic_rel = plan_path.relative_to(repo_root).as_posix()
+    _append_linked_plan(repo_root, spec_path, plan_epic_rel)
+
+    return [plan_path, spec_path]
+
+
+def _resolve_any_doc(repo_root: Path, ref: str, label: str) -> Path:
+    ref = ref.strip()
+    # Try repo-relative
+    candidate = repo_root / Path(*PurePosixPath(ref).parts)
+    if candidate.exists() and candidate.is_file():
+        return candidate
+    # Try bare filename in any epic
+    projects_dir = repo_root / "projects"
+    if projects_dir.is_dir():
+        for project_dir in sorted(projects_dir.iterdir()):
+            if not project_dir.is_dir():
+                continue
+            for epic_dir in sorted(project_dir.iterdir()):
+                if not epic_dir.is_dir():
+                    continue
+                for subdir in ("specs", "plans"):
+                    candidate = epic_dir / "docs" / subdir / ref
+                    if candidate.exists() and candidate.is_file():
+                        return candidate
+    raise TrailmindError(f"{label} not found: {ref}")
+
+
+def _find_epic_for_doc(doc_path: Path) -> Path | None:
+    current = doc_path.parent
+    while current != current.parent:
+        if (current / "EPIC.md").is_file():
+            return current
+        current = current.parent
+    return None
