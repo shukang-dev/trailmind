@@ -352,3 +352,176 @@ def test_link_plan_spec_is_idempotent(tmp_path: Path):
 
     spec_fm, _ = read_entity(spec_path)
     assert len(spec_fm["linked_plans"]) == 1
+
+
+# --- Task 4: CLI Wiring ---
+
+import json
+
+
+def test_plan_spec_init_cli_creates_file(tmp_path: Path):
+    repo = _repo_with_epic(tmp_path)
+
+    result = CliRunner().invoke(
+        cli,
+        [
+            "plan", "spec", "init",
+            "--epic", "projects/demo_app/mvp",
+            "--title", "CLI Spec",
+            "--author", "alice@example.com",
+            "--scope", "v0.5",
+        ],
+        obj={"cwd": repo},
+    )
+
+    assert result.exit_code == 0
+    assert "docs/specs/" in result.output
+    specs_dir = repo / "projects" / "demo_app" / "mvp" / "docs" / "specs"
+    assert any(specs_dir.glob("*.md"))
+
+
+def test_plan_spec_list_cli_shows_specs(tmp_path: Path):
+    repo = _repo_with_epic(tmp_path)
+    CliRunner().invoke(cli, ["plan", "spec", "init", "--epic", "projects/demo_app/mvp",
+                            "--title", "Listed Spec", "--author", "alice"], obj={"cwd": repo})
+
+    result = CliRunner().invoke(
+        cli,
+        ["plan", "spec", "list", "--epic", "projects/demo_app/mvp"],
+        obj={"cwd": repo},
+    )
+
+    assert result.exit_code == 0
+    assert "Listed Spec" in result.output
+
+
+def test_plan_spec_list_cli_json(tmp_path: Path):
+    repo = _repo_with_epic(tmp_path)
+    CliRunner().invoke(cli, ["plan", "spec", "init", "--epic", "projects/demo_app/mvp",
+                            "--title", "JSON Spec", "--author", "alice"], obj={"cwd": repo})
+
+    result = CliRunner().invoke(
+        cli,
+        ["plan", "spec", "list", "--epic", "projects/demo_app/mvp", "--json"],
+        obj={"cwd": repo},
+    )
+
+    assert result.exit_code == 0
+    data = json.loads(result.output)
+    assert isinstance(data, list)
+    assert data[0]["title"] == "JSON Spec"
+
+
+def test_plan_init_cli_creates_file(tmp_path: Path):
+    repo = _repo_with_epic(tmp_path)
+
+    result = CliRunner().invoke(
+        cli,
+        [
+            "plan", "init",
+            "--epic", "projects/demo_app/mvp",
+            "--title", "CLI Plan",
+            "--author", "alice",
+        ],
+        obj={"cwd": repo},
+    )
+
+    assert result.exit_code == 0
+    plans_dir = repo / "projects" / "demo_app" / "mvp" / "docs" / "plans"
+    assert any(plans_dir.glob("*.md"))
+
+
+def test_plan_list_cli_shows_plans(tmp_path: Path):
+    repo = _repo_with_epic(tmp_path)
+    CliRunner().invoke(cli, ["plan", "init", "--epic", "projects/demo_app/mvp",
+                            "--title", "Listed Plan", "--author", "alice"], obj={"cwd": repo})
+
+    result = CliRunner().invoke(
+        cli,
+        ["plan", "list", "--epic", "projects/demo_app/mvp"],
+        obj={"cwd": repo},
+    )
+
+    assert result.exit_code == 0
+    assert "Listed Plan" in result.output
+
+
+def test_plan_spec_set_status_cli(tmp_path: Path):
+    repo = _repo_with_epic(tmp_path)
+    spec_path = create_spec(repo, epic_ref="projects/demo_app/mvp", title="Status CLI", author="alice")
+    spec_ref = str(spec_path.relative_to(repo))
+
+    result = CliRunner().invoke(
+        cli,
+        ["plan", "spec", "set-status", spec_ref, "--status", "approved-for-spec", "--actor", "alice"],
+        obj={"cwd": repo},
+    )
+
+    assert result.exit_code == 0
+    fm, _ = read_entity(spec_path)
+    assert fm["status"] == "approved-for-spec"
+
+
+def test_plan_set_status_cli(tmp_path: Path):
+    repo = _repo_with_epic(tmp_path)
+    plan_path = create_plan(repo, epic_ref="projects/demo_app/mvp", title="Plan Status CLI", author="alice")
+    plan_ref = str(plan_path.relative_to(repo))
+
+    result = CliRunner().invoke(
+        cli,
+        ["plan", "set-status", plan_ref, "--status", "approved", "--actor", "alice"],
+        obj={"cwd": repo},
+    )
+
+    assert result.exit_code == 0
+    fm, _ = read_entity(plan_path)
+    assert fm["status"] == "approved"
+
+
+def test_plan_link_spec_cli(tmp_path: Path):
+    repo = _repo_with_epic(tmp_path)
+    spec_path = create_spec(repo, epic_ref="projects/demo_app/mvp", title="Link CLI Spec", author="alice")
+    plan_path = create_plan(repo, epic_ref="projects/demo_app/mvp", title="Link CLI Plan", author="alice")
+
+    result = CliRunner().invoke(
+        cli,
+        [
+            "plan", "link-spec",
+            "--plan", str(plan_path.relative_to(repo)),
+            "--spec", str(spec_path.relative_to(repo)),
+        ],
+        obj={"cwd": repo},
+    )
+
+    assert result.exit_code == 0
+    plan_fm, _ = read_entity(plan_path)
+    assert plan_fm["linked_spec"] is not None
+
+
+def test_plan_spec_init_missing_epic_is_user_facing(tmp_path: Path):
+    repo = _repo_with_epic(tmp_path)
+
+    result = CliRunner().invoke(
+        cli,
+        ["plan", "spec", "init", "--epic", "projects/demo_app/missing", "--title", "X", "--author", "alice"],
+        obj={"cwd": repo},
+    )
+
+    assert result.exit_code == 1
+    assert "error:" in result.output
+    assert "Traceback" not in result.output
+
+
+def test_plan_spec_init_unknown_author_is_user_facing(tmp_path: Path):
+    repo = _repo_with_epic(tmp_path)
+
+    result = CliRunner().invoke(
+        cli,
+        ["plan", "spec", "init", "--epic", "projects/demo_app/mvp", "--title", "X", "--author", "unknown@example.com"],
+        obj={"cwd": repo},
+    )
+
+    assert result.exit_code == 1
+    assert "error:" in result.output
+    assert "not registered" in result.output
+    assert "Traceback" not in result.output
