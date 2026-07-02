@@ -311,6 +311,54 @@ def test_duplicate_detection_skips_existing_source_task(tmp_path: Path):
     assert report.skipped == ["projects/demo_app/mvp/tasks/T-123456-001-parser-model.md"]
 
 
+def test_duplicate_detection_skips_existing_source_task_stored_as_string(tmp_path: Path):
+    repo = _repo_with_epic(tmp_path)
+    _write_plan(repo)
+    existing = repo / "projects" / "demo_app" / "mvp" / "tasks" / "T-123456-001-parser-model.md"
+    write_entity(
+        existing,
+        frontmatter={
+            "id": "T-123456-001",
+            "title": "Parser Model",
+            "filer": "alice",
+            "owner": "alice",
+            "status": "created",
+            "created": "2026-07-02",
+            "start": None,
+            "due": None,
+            "branches": {},
+            "verify": {},
+            "code_paths": [],
+            "design_doc": None,
+            "depends_on": [],
+            "soft_depends_on": [],
+            "known_issues": [],
+            "deliverables": [],
+            "completed_deliverables": [],
+            "source_plan": "docs/plans/v0.4.md",
+            "source_task": "1",
+            "source_heading": "Task 1: Parser Model",
+        },
+        body="# Parser Model\n\n## Scope\n\nExisting.\n",
+    )
+    frontmatter, _body = read_entity(existing)
+    assert frontmatter["source_task"] == "1"
+
+    report = build_breakdown_report(
+        repo,
+        plan_ref="docs/plans/v0.4.md",
+        epic_ref="projects/demo_app/mvp",
+        filer="alice",
+        owner="alice",
+        write=False,
+        force=False,
+    )
+
+    assert report.tasks[0].action == "skip"
+    assert report.tasks[0].existing_path == "projects/demo_app/mvp/tasks/T-123456-001-parser-model.md"
+    assert report.skipped == ["projects/demo_app/mvp/tasks/T-123456-001-parser-model.md"]
+
+
 def test_force_marks_duplicate_for_creation(tmp_path: Path):
     repo = _repo_with_epic(tmp_path)
     _write_plan(repo)

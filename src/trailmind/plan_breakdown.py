@@ -420,6 +420,8 @@ def _existing_source_tasks(repo_root: Path, epic_path: Path) -> dict[tuple[str, 
             continue
         source_plan = frontmatter.get("source_plan")
         source_task = frontmatter.get("source_task")
+        if isinstance(source_task, str) and source_task.isdigit():
+            source_task = int(source_task)
         if isinstance(source_plan, str) and isinstance(source_task, int):
             existing[(source_plan, source_task)] = _relative_to_root(repo_root, path)
     return existing
