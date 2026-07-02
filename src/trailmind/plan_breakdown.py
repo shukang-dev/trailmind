@@ -6,7 +6,7 @@ from datetime import date
 from pathlib import Path, PurePosixPath, PureWindowsPath
 from typing import Any
 
-from trailmind.entity_io import write_entity
+from trailmind.entity_io import EntityFormatError, write_entity
 from trailmind.errors import TrailmindError
 from trailmind.ids import format_entity_id, next_entity_id, parse_entity_id, slugify
 from trailmind.log import read_entity_user_facing
@@ -318,6 +318,8 @@ def build_breakdown_report(
                 )
             )
         items = updated_items
+        if created:
+            _update_plan_generated_tasks(repo_root, plan_path, created)
     return BreakdownReport(
         plan_path=plan_display,
         epic_path=epic_display,
@@ -593,6 +595,49 @@ def _breakdown_task_body(item: BreakdownItem, *, plan_path: str, filer_shortname
         "## Activity Log\n\n"
         f"- {today}: Created task by {filer_shortname}.\n"
     )
+
+
+def _update_plan_generated_tasks(repo_root: Path, plan_path: Path, created_paths: list[str]) -> None:
+    """Append created task IDs to the source plan's generated_tasks frontmatter."""
+    task_ids: list[str] = []
+    for created in created_paths:
+        path = repo_root / Path(*PurePosixPath(created).parts)
+        filename = path.name
+        m = re.match(r"(T-\d+-\d+)", filename)
+        if m:
+            task_ids.append(m.group(1))
+
+    if not task_ids:
+        return
+
+    try:
+        frontmatter, body = read_entity_user_facing(plan_path, label="plan")
+    except (TrailmindError, EntityFormatError):
+        frontmatter = {}
+        body = plan_path.read_text(encoding="utf-8") if plan_path.exists() else ""
+
+    existing = frontmatter.get("generated_tasks", [])
+    if not isinstance(existing, list):
+        existing = []
+    for tid in task_ids:
+        if tid not in existing:
+            existing.append(tid)
+    frontmatter["generated_tasks"] = existing
+
+    if "title" not in frontmatter:
+        for line in body.splitlines():
+            stripped = line.strip()
+            if stripped.startswith("# "):
+                frontmatter["title"] = stripped[2:].strip()
+                break
+        if "title" not in frontmatter:
+            frontmatter["title"] = plan_path.stem
+    if "status" not in frontmatter:
+        frontmatter["status"] = "completed" if existing else "draft"
+    if "created" not in frontmatter:
+        frontmatter["created"] = date.today().isoformat()
+
+    write_entity(plan_path, frontmatter=frontmatter, body=body)
 
 
 def _quote_source_context(content: str) -> str:
