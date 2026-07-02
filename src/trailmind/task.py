@@ -136,6 +136,36 @@ def normalize_task_statuses(repo_root: Path, *, write: bool) -> list[StatusNorma
     return normalizations
 
 
+def list_tasks(repo_root: Path, *, epic_ref: str | None = None) -> list[dict[str, Any]]:
+    """List tasks in an epic or across the repo."""
+    from trailmind.scopes import resolve_epic_dir
+
+    if epic_ref:
+        epic_path = resolve_epic_dir(repo_root, epic_ref)
+        task_paths = sorted(epic_path.glob("tasks/T-*.md"))
+    else:
+        task_paths = _iter_task_files(repo_root)
+
+    tasks = []
+    for path in task_paths:
+        if not path.is_file():
+            continue
+        try:
+            frontmatter, _body = read_entity_user_facing(path, label="task")
+            tasks.append({
+                "id": str(frontmatter.get("id") or path.stem),
+                "title": str(frontmatter.get("title") or path.stem),
+                "status": str(frontmatter.get("status") or "created"),
+                "owner": str(frontmatter.get("owner") or ""),
+                "filer": str(frontmatter.get("filer") or ""),
+                "created": str(frontmatter.get("created") or ""),
+                "path": path.relative_to(repo_root).as_posix(),
+            })
+        except TrailmindError:
+            continue
+    return tasks
+
+
 def add_task(
     repo_root: Path,
     *,
