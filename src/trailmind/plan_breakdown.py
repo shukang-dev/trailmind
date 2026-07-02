@@ -2,10 +2,13 @@ from __future__ import annotations
 
 import re
 from dataclasses import dataclass, field
+from datetime import date
 from pathlib import Path, PurePosixPath, PureWindowsPath
 from typing import Any
 
+from trailmind.entity_io import write_entity
 from trailmind.errors import TrailmindError
+from trailmind.ids import next_entity_id, slugify
 from trailmind.log import read_entity_user_facing
 from trailmind.roster import Roster
 
@@ -251,7 +254,6 @@ def build_breakdown_report(
     roster = Roster.load(repo_root / "roster.yaml")
     filer_shortname, filer_uid = _resolve_roster_developer(roster, filer)
     owner_shortname, _owner_uid = _resolve_roster_developer(roster, owner)
-    _ = (filer_shortname, filer_uid, owner_shortname)
     plan_text = _read_plan_text(plan_path)
     plan_tasks = parse_plan_tasks(plan_text)
     existing = _existing_source_tasks(repo_root, epic_path)
@@ -279,15 +281,47 @@ def build_breakdown_report(
                 plan_task=plan_task,
             )
         )
+    created: list[str] = []
     if write:
-        raise TrailmindError("write mode unavailable in preview-only implementation")
+        tasks_path = epic_path / "tasks"
+        if tasks_path.exists() and not tasks_path.is_dir():
+            raise TrailmindError(f"tasks path {tasks_path} is not a directory")
+        tasks_path.mkdir(parents=True, exist_ok=True)
+        written_items: list[BreakdownItem] = []
+        for item in items:
+            if item.action == "skip":
+                continue
+            path = _write_breakdown_task(
+                repo_root,
+                tasks_path=tasks_path,
+                filer_shortname=filer_shortname,
+                filer_uid=filer_uid,
+                owner_shortname=owner_shortname,
+                plan_path=plan_display,
+                item=item,
+            )
+            created.append(_relative_to_root(repo_root, path))
+            written_items.append(item)
+        items = [
+            BreakdownItem(
+                source_task=item.source_task,
+                source_heading=item.source_heading,
+                title=item.title,
+                action="created" if item in written_items else item.action,
+                existing_path=item.existing_path,
+                code_paths=item.code_paths,
+                deliverables=item.deliverables,
+                plan_task=item.plan_task,
+            )
+            for item in items
+        ]
     return BreakdownReport(
         plan_path=plan_display,
         epic_path=epic_display,
         write=write,
         force=force,
         tasks=items,
-        created=[],
+        created=created,
         skipped=skipped,
     )
 
@@ -425,6 +459,69 @@ def _existing_source_tasks(repo_root: Path, epic_path: Path) -> dict[tuple[str, 
         if isinstance(source_plan, str) and isinstance(source_task, int):
             existing[(source_plan, source_task)] = _relative_to_root(repo_root, path)
     return existing
+
+
+def _write_breakdown_task(
+    repo_root: Path,
+    *,
+    tasks_path: Path,
+    filer_shortname: str,
+    filer_uid: str,
+    owner_shortname: str,
+    plan_path: str,
+    item: BreakdownItem,
+) -> Path:
+    task_id = next_entity_id(tasks_path, entity="T", uid=filer_uid)
+    task_path = tasks_path / f"{task_id}-{slugify(item.title)}.md"
+    today = date.today().isoformat()
+    write_entity(
+        task_path,
+        frontmatter={
+            "id": task_id,
+            "title": item.title,
+            "filer": filer_shortname,
+            "owner": owner_shortname,
+            "status": "created",
+            "created": today,
+            "start": None,
+            "due": None,
+            "branches": {},
+            "verify": {},
+            "code_paths": item.code_paths,
+            "design_doc": None,
+            "depends_on": [],
+            "soft_depends_on": [],
+            "known_issues": [],
+            "deliverables": item.deliverables,
+            "completed_deliverables": [],
+            "source_plan": plan_path,
+            "source_task": item.source_task,
+            "source_heading": item.source_heading,
+        },
+        body=_breakdown_task_body(item, plan_path=plan_path, filer_shortname=filer_shortname, today=today),
+    )
+    return task_path
+
+
+def _breakdown_task_body(item: BreakdownItem, *, plan_path: str, filer_shortname: str, today: str) -> str:
+    steps = item.plan_task.steps or ["Review the source plan section and implement the described task."]
+    step_lines = "\n".join(f"- [ ] {step}" for step in steps)
+    source_context = item.plan_task.source_context.strip() or "No additional source context."
+    return (
+        f"# {item.title}\n\n"
+        "## Scope\n\n"
+        f"Implement Task {item.source_task} from `{plan_path}`.\n\n"
+        f"Source heading: {item.source_heading}\n\n"
+        "## Plan Steps\n\n"
+        f"{step_lines}\n\n"
+        "## Source Context\n\n"
+        f"{source_context}\n\n"
+        "## Acceptance\n\n"
+        "- Generated task is implemented.\n"
+        "- Relevant tests pass.\n\n"
+        "## Activity Log\n\n"
+        f"- {today}: Created task by {filer_shortname}.\n"
+    )
 
 
 def _relative_to_root(repo_root: Path, path: Path) -> str:

@@ -7,6 +7,7 @@ from click.testing import CliRunner
 from trailmind.cli import cli
 from trailmind.entity_io import read_entity, write_entity
 from trailmind.errors import TrailmindError
+from trailmind.pickup import build_task_pickup
 from trailmind.plan_breakdown import (
     breakdown_report_to_dict,
     build_breakdown_report,
@@ -402,3 +403,133 @@ def test_force_marks_duplicate_for_creation(tmp_path: Path):
 
     assert report.tasks[0].action == "duplicate allowed by --force"
     assert report.tasks[0].existing_path == "projects/demo_app/mvp/tasks/T-123456-001-parser-model.md"
+
+
+def test_breakdown_write_creates_tasks_with_source_traceability(tmp_path: Path):
+    repo = _repo_with_epic(tmp_path)
+    _write_plan(repo)
+
+    report = build_breakdown_report(
+        repo,
+        plan_ref="docs/plans/v0.4.md",
+        epic_ref="projects/demo_app/mvp",
+        filer="alice@example.com",
+        owner="alice@example.com",
+        write=True,
+        force=False,
+    )
+
+    assert report.write is True
+    assert report.created == [
+        "projects/demo_app/mvp/tasks/T-123456-001-parser-model.md",
+        "projects/demo_app/mvp/tasks/T-123456-002-cli-wiring.md",
+    ]
+    first_path = repo / report.created[0]
+    frontmatter, body = read_entity(first_path)
+    assert frontmatter["id"] == "T-123456-001"
+    assert frontmatter["title"] == "Parser Model"
+    assert frontmatter["filer"] == "alice"
+    assert frontmatter["owner"] == "alice"
+    assert frontmatter["status"] == "created"
+    assert frontmatter["source_plan"] == "docs/plans/v0.4.md"
+    assert frontmatter["source_task"] == 1
+    assert frontmatter["source_heading"] == "Task 1: Parser Model"
+    assert frontmatter["code_paths"] == [
+        "src/trailmind/plan_breakdown.py",
+        "src/trailmind/cli.py",
+        "tests/test_plan_breakdown.py",
+    ]
+    assert frontmatter["deliverables"] == ["tests pass", "plan task implemented"]
+    assert "## Scope" in body
+    assert "Implement Task 1 from `docs/plans/v0.4.md`." in body
+    assert "Source heading: Task 1: Parser Model" in body
+    assert "## Plan Steps" in body
+    assert "- [ ] Step 1: Write the failing test" in body
+    assert "## Source Context" in body
+    assert "Expected: FAIL." in body
+    assert "## Acceptance" in body
+    assert "- Generated task is implemented." in body
+    assert "## Activity Log" in body
+    assert "Created task by alice." in body
+
+
+def test_breakdown_write_skips_existing_source_task_by_default(tmp_path: Path):
+    repo = _repo_with_epic(tmp_path)
+    _write_plan(repo)
+
+    first = build_breakdown_report(
+        repo,
+        plan_ref="docs/plans/v0.4.md",
+        epic_ref="projects/demo_app/mvp",
+        filer="alice@example.com",
+        owner="alice@example.com",
+        write=True,
+        force=False,
+    )
+    second = build_breakdown_report(
+        repo,
+        plan_ref="docs/plans/v0.4.md",
+        epic_ref="projects/demo_app/mvp",
+        filer="alice@example.com",
+        owner="alice@example.com",
+        write=True,
+        force=False,
+    )
+
+    assert len(first.created) == 2
+    assert second.created == []
+    assert second.skipped == first.created
+    assert len(list((repo / "projects" / "demo_app" / "mvp" / "tasks").glob("T-*.md"))) == 2
+
+
+def test_breakdown_write_force_creates_duplicate_source_task(tmp_path: Path):
+    repo = _repo_with_epic(tmp_path)
+    _write_plan(repo)
+    build_breakdown_report(
+        repo,
+        plan_ref="docs/plans/v0.4.md",
+        epic_ref="projects/demo_app/mvp",
+        filer="alice@example.com",
+        owner="alice@example.com",
+        write=True,
+        force=False,
+    )
+
+    forced = build_breakdown_report(
+        repo,
+        plan_ref="docs/plans/v0.4.md",
+        epic_ref="projects/demo_app/mvp",
+        filer="alice@example.com",
+        owner="alice@example.com",
+        write=True,
+        force=True,
+    )
+
+    assert forced.created == [
+        "projects/demo_app/mvp/tasks/T-123456-003-parser-model.md",
+        "projects/demo_app/mvp/tasks/T-123456-004-cli-wiring.md",
+    ]
+
+
+def test_generated_tasks_can_be_used_by_task_pickup(tmp_path: Path):
+    repo = _repo_with_epic(tmp_path)
+    _write_plan(repo)
+    report = build_breakdown_report(
+        repo,
+        plan_ref="docs/plans/v0.4.md",
+        epic_ref="projects/demo_app/mvp",
+        filer="alice@example.com",
+        owner="alice@example.com",
+        write=True,
+        force=False,
+    )
+
+    pack = build_task_pickup(repo, task_ref=report.created[0], max_lines=10, activity_limit=5, include_excerpts=False)
+
+    assert pack.item["id"] == "T-123456-001"
+    assert pack.item["frontmatter"]["code_paths"] == [
+        "src/trailmind/plan_breakdown.py",
+        "src/trailmind/cli.py",
+        "tests/test_plan_breakdown.py",
+    ]
+    assert "Task is ready to start." in pack.next_actions
