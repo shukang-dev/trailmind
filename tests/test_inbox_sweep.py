@@ -1,3 +1,4 @@
+import json
 from datetime import date
 from pathlib import Path
 
@@ -773,3 +774,26 @@ def test_sweep_is_read_only(tmp_path: Path):
 
     assert result.exit_code == 0
     assert _file_snapshot(repo) == before
+
+
+def test_sweep_json_output_includes_counts_and_sections(tmp_path: Path):
+    repo = _repo_with_project_and_epic(tmp_path)
+    runner = CliRunner()
+
+    result = runner.invoke(
+        cli,
+        ["sweep", "--epic", "projects/demo_app/mvp", "--json"],
+        obj={"cwd": repo},
+    )
+
+    assert result.exit_code == 0
+    data = json.loads(result.output)
+    assert "ready" in data
+    assert "blocked" in data
+    assert "stale" in data
+    assert "missing_deliverables" in data
+    assert "open_inbox" in data
+    assert "counts" in data
+    assert isinstance(data["counts"]["ready"], int)
+    assert isinstance(data["ready"], list)
+    assert isinstance(data["open_inbox"], list)

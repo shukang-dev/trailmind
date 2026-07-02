@@ -116,6 +116,44 @@ def format_sweep_report(report: SweepReport) -> str:
     return "\n".join(lines) + "\n"
 
 
+def sweep_report_to_dict(report: SweepReport) -> dict[str, object]:
+    return {
+        "ready": [_sweep_task_to_dict(t, report.repo_root) for t in report.ready],
+        "blocked": [_sweep_task_to_dict(t, report.repo_root) for t in report.blocked],
+        "stale": [_sweep_task_to_dict(t, report.repo_root) for t in report.stale],
+        "missing_deliverables": [_sweep_task_to_dict(t, report.repo_root) for t in report.missing_deliverables],
+        "open_inbox": [
+            {
+                "item_id": item.item_id,
+                "title": item.title,
+                "path": _relative_to_root(report.repo_root, item.path),
+                "scope": item.scope,
+                "status": item.status,
+            }
+            for item in report.open_inbox
+        ],
+        "counts": {
+            "ready": len(report.ready),
+            "blocked": len(report.blocked),
+            "stale": len(report.stale),
+            "missing_deliverables": len(report.missing_deliverables),
+            "open_inbox": len(report.open_inbox),
+        },
+    }
+
+
+def _sweep_task_to_dict(task: SweepTask, repo_root: Path) -> dict[str, object]:
+    return {
+        "task_id": task.task_id,
+        "title": task.title,
+        "status": task.status,
+        "path": _relative_to_root(repo_root, task.path),
+        "blockers": [{"task_id": b.task_id, "status": b.status} for b in task.blockers],
+        "soft_warnings": [{"task_id": s.task_id, "status": s.status} for s in task.soft_warnings],
+        "missing_deliverables": task.missing_deliverables,
+    }
+
+
 def _append_task_section(lines: list[str], title: str, tasks: list[SweepTask], *, repo_root: Path) -> None:
     lines.append("")
     lines.append(title)

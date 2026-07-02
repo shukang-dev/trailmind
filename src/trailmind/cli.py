@@ -38,7 +38,7 @@ from trailmind.project import init_project
 from trailmind.roster import Roster
 from trailmind.security_scan import scan_paths
 from trailmind.serve import serve_repo
-from trailmind.sweep import build_sweep_report, format_sweep_report
+from trailmind.sweep import build_sweep_report, format_sweep_report, sweep_report_to_dict
 from trailmind.task import (
     add_task,
     add_task_deliverable,
@@ -90,14 +90,18 @@ def status_command(ctx: click.Context, overview: bool, project_slug: str | None,
 @click.option("--project", "project_slug", default=None)
 @click.option("--epic", "epic_ref", default=None)
 @click.option("--stale-days", default=7, show_default=True, type=click.IntRange(min=1))
+@click.option("--json", "json_output", is_flag=True, help="Print structured JSON instead of Markdown.")
 @click.pass_context
-def sweep_command(ctx: click.Context, project_slug: str | None, epic_ref: str | None, stale_days: int) -> None:
+def sweep_command(ctx: click.Context, project_slug: str | None, epic_ref: str | None, stale_days: int, json_output: bool) -> None:
     root = find_repo_root(_cwd_from_context(ctx))
     selected = sum(1 for item in [project_slug, epic_ref] if item)
     if selected > 1:
         raise TrailmindError("sweep accepts only one scope flag")
     report = build_sweep_report(root, project=project_slug, epic=epic_ref, stale_days=stale_days)
-    click.echo(format_sweep_report(report), nl=False)
+    if json_output:
+        click.echo(json.dumps(sweep_report_to_dict(report), ensure_ascii=False, indent=2))
+    else:
+        click.echo(format_sweep_report(report), nl=False)
 
 
 @cli.command("serve")
