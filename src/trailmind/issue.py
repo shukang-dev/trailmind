@@ -95,6 +95,39 @@ def _validate_close_status(status: str) -> str:
     return status
 
 
+def list_issues(repo_root: Path, *, epic_ref: str | None = None) -> list[dict[str, str]]:
+    """List issues in an epic or across the repo."""
+    from trailmind.scopes import resolve_epic_dir
+
+    if epic_ref:
+        epic_path = resolve_epic_dir(repo_root, epic_ref)
+        issue_paths = sorted(epic_path.glob("issues/I-*.md"))
+    else:
+        projects_path = repo_root / "projects"
+        if not projects_path.exists() or not projects_path.is_dir():
+            return []
+        issue_paths = sorted(projects_path.glob("*/*/issues/I-*.md"))
+
+    issues = []
+    for path in issue_paths:
+        if not path.is_file():
+            continue
+        try:
+            frontmatter, _body = read_entity_user_facing(path, label="issue")
+            issues.append({
+                "id": str(frontmatter.get("id") or path.stem),
+                "title": str(frontmatter.get("title") or path.stem),
+                "status": str(frontmatter.get("status") or "open"),
+                "severity": str(frontmatter.get("severity") or ""),
+                "filer": str(frontmatter.get("filer") or ""),
+                "created": str(frontmatter.get("created") or ""),
+                "path": path.relative_to(repo_root).as_posix(),
+            })
+        except TrailmindError:
+            continue
+    return issues
+
+
 def add_issue(
     repo_root: Path,
     *,
