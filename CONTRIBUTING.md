@@ -170,7 +170,7 @@ Before tagging a release:
 - [ ] Example project updated if schema changed
 - [ ] Version bumped in `src/trailmind/__init__.py`
 - [ ] Migration notes added if breaking changes exist
-- [ ] Branch metadata uses `shukang-dev@users.noreply.github.com`
+- [ ] Branch metadata uses `you@example.com`
 
 ## Questions?
 
