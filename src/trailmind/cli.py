@@ -48,6 +48,7 @@ from trailmind.task import (
     complete_task_deliverable,
     list_tasks,
     normalize_task_statuses,
+    set_task_due,
     set_task_priority,
     set_task_status,
     split_csv,
@@ -557,6 +558,32 @@ def task_set_priority(
 ) -> None:
     root = find_repo_root(_cwd_from_context(ctx))
     touched = set_task_priority(root, task_ref=task_ref, priority=priority, actor=actor, note=note)
+    _echo_touched(root, [touched])
+
+
+@task_group.command("due")
+@click.argument("task_ref")
+@click.argument("due_date", required=False, default=None)
+@click.option("--actor", required=True)
+@click.option("--note", default=None)
+@click.option("--clear", is_flag=True, help="Clear the due date.")
+@click.pass_context
+def task_due(
+    ctx: click.Context,
+    task_ref: str,
+    due_date: str | None,
+    actor: str,
+    note: str | None,
+    clear: bool,
+) -> None:
+    """Set or clear a task due date (YYYY-MM-DD)."""
+    root = find_repo_root(_cwd_from_context(ctx))
+    if clear:
+        touched = set_task_due(root, task_ref=task_ref, due_date=None, actor=actor, note=note)
+    else:
+        if due_date is None:
+            raise TrailmindError("due date is required (or use --clear)")
+        touched = set_task_due(root, task_ref=task_ref, due_date=due_date, actor=actor, note=note)
     _echo_touched(root, [touched])
 
 
