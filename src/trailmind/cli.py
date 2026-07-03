@@ -47,6 +47,7 @@ from trailmind.task import (
     add_task_deliverable,
     assign_task,
     close_task,
+    complete_task,
     complete_task_deliverable,
     list_tasks,
     normalize_task_statuses,
@@ -54,6 +55,7 @@ from trailmind.task import (
     set_task_priority,
     set_task_status,
     split_csv,
+    start_task,
     update_task_status,
 )
 from trailmind.task_rules import linked_open_issues_for_task
@@ -672,6 +674,44 @@ def task_show(ctx: click.Context, task_ref: str, json_output: bool) -> None:
         click.echo(json.dumps(data, ensure_ascii=False, indent=2, default=str))
     else:
         click.echo(format_entity_show(data, entity_label="Task"), nl=False)
+
+
+@task_group.command("start")
+@click.argument("task_ref")
+@click.option("--actor", required=True)
+@click.option("--note", default=None)
+@click.pass_context
+def task_start(
+    ctx: click.Context,
+    task_ref: str,
+    actor: str,
+    note: str | None,
+) -> None:
+    """Mark a task as in_progress."""
+    root = find_repo_root(_cwd_from_context(ctx))
+    touched, warning = start_task(root, task_ref=task_ref, actor=actor, note=note)
+    _echo_touched(root, [touched])
+    if warning:
+        click.echo(warning)
+
+
+@task_group.command("done")
+@click.argument("task_ref")
+@click.option("--actor", required=True)
+@click.option("--note", default=None)
+@click.pass_context
+def task_done(
+    ctx: click.Context,
+    task_ref: str,
+    actor: str,
+    note: str | None,
+) -> None:
+    """Mark a task as done."""
+    root = find_repo_root(_cwd_from_context(ctx))
+    touched, warning = complete_task(root, task_ref=task_ref, actor=actor, note=note)
+    _echo_touched(root, [touched])
+    if warning:
+        click.echo(warning)
 
 
 @task_group.command("normalize-statuses")
