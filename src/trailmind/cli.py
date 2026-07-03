@@ -58,6 +58,197 @@ def cli() -> None:
     """Trailmind: Markdown-backed project tracking and AI agent handoff."""
 
 
+@cli.command("init")
+@click.option("--with-ci/--no-ci", default=True, help="Create GitHub Actions CI workflow.")
+@click.option("--with-templates/--no-templates", default=True, help="Create PR and issue templates.")
+@click.pass_context
+def init_command(ctx: click.Context, with_ci: bool, with_templates: bool) -> None:
+    """Initialize a Trailmind repository with recommended files."""
+    root = find_repo_root(_cwd_from_context(ctx))
+    created: list[Path] = []
+
+    # roster.yaml
+    roster_path = root / "roster.yaml"
+    if not roster_path.exists():
+        roster_path.write_text("developers: []\n", encoding="utf-8")
+        created.append(roster_path)
+        click.echo(f"Created {roster_path.relative_to(root).as_posix()}")
+    else:
+        click.echo(f"roster.yaml already exists, skipping.")
+
+    # projects/ directory
+    projects_dir = root / "projects"
+    if not projects_dir.exists():
+        projects_dir.mkdir(parents=True, exist_ok=True)
+        click.echo("Created projects/")
+
+    if with_ci:
+        ci_dir = root / ".github" / "workflows"
+        ci_dir.mkdir(parents=True, exist_ok=True)
+        ci_path = ci_dir / "ci.yml"
+        if not ci_path.exists():
+            ci_path.write_text(_CI_WORKFLOW, encoding="utf-8")
+            created.append(ci_path)
+            click.echo(f"Created {ci_path.relative_to(root).as_posix()}")
+        else:
+            click.echo(".github/workflows/ci.yml already exists, skipping.")
+
+    if with_templates:
+        gh_dir = root / ".github"
+        gh_dir.mkdir(parents=True, exist_ok=True)
+
+        pr_path = gh_dir / "PULL_REQUEST_TEMPLATE.md"
+        if not pr_path.exists():
+            pr_path.write_text(_PR_TEMPLATE, encoding="utf-8")
+            created.append(pr_path)
+            click.echo(f"Created {pr_path.relative_to(root).as_posix()}")
+
+        issue_dir = gh_dir / "ISSUE_TEMPLATE"
+        issue_dir.mkdir(parents=True, exist_ok=True)
+        bug_path = issue_dir / "bug_report.md"
+        if not bug_path.exists():
+            bug_path.write_text(_BUG_REPORT_TEMPLATE, encoding="utf-8")
+            created.append(bug_path)
+            click.echo(f"Created {bug_path.relative_to(root).as_posix()}")
+        feat_path = issue_dir / "feature_request.md"
+        if not feat_path.exists():
+            feat_path.write_text(_FEATURE_REQUEST_TEMPLATE, encoding="utf-8")
+            created.append(feat_path)
+            click.echo(f"Created {feat_path.relative_to(root).as_posix()}")
+
+    if not created:
+        click.echo("Nothing to create — already initialized.")
+    else:
+        click.echo(f"\nInitialized Trailmind repo with {len(created)} file(s).")
+        click.echo("Next: add a developer to the roster:")
+        click.echo("  trailmind roster add --email you@example.com --shortname you --name \"Your Name\"")
+
+
+_CI_WORKFLOW = """name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    strategy:
+      matrix:
+        python-version: ["3.11", "3.12"]
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Python ${{ matrix.python-version }}
+        uses: actions/setup-python@v5
+        with:
+          python-version: ${{ matrix.python-version }}
+          cache: pip
+
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          python -m pip install -e ".[dev]"
+
+      - name: Run tests
+        run: python -m pytest -v
+
+      - name: Run security scan
+        run: PYTHONPATH=src python -m trailmind scan
+"""
+
+_PR_TEMPLATE = """## Summary
+
+Brief description of what this PR does.
+
+## Changes
+
+-
+-
+
+## Testing
+
+```sh
+python -m pytest -v
+PYTHONPATH=src python -m trailmind scan
+```
+
+- [ ] All tests pass
+- [ ] Security scan passes
+- [ ] Public docs updated if needed
+- [ ] No private data in examples (use `example.com` identities)
+
+## Related Issues
+
+<!-- Link to related issues or specs -->
+"""
+
+_BUG_REPORT_TEMPLATE = """---
+name: Bug Report
+about: Report a bug in Trailmind
+title: "[Bug] "
+labels: bug
+---
+
+## Description
+
+Brief description of the bug.
+
+## Steps to Reproduce
+
+1.
+2.
+3.
+
+## Expected Behavior
+
+What did you expect to happen?
+
+## Actual Behavior
+
+What actually happened?
+
+## Environment
+
+- OS:
+- Python version:
+- Trailmind version:
+
+## Logs / Error Messages
+
+```
+Paste error output here
+```
+"""
+
+_FEATURE_REQUEST_TEMPLATE = """---
+name: Feature Request
+about: Suggest a feature for Trailmind
+title: "[Feature] "
+labels: enhancement
+---
+
+## Description
+
+Brief description of the feature.
+
+## Use Case
+
+Why do you need this? What problem does it solve?
+
+## Proposed Solution
+
+How should this work?
+
+## Alternatives Considered
+
+Any other approaches you considered?
+"""
+
+
 @cli.command("status")
 @click.option("--overview", is_flag=True, help="Render the repository overview dashboard.")
 @click.option("--project", "project_slug", default=None, help="Render a project dashboard.")
