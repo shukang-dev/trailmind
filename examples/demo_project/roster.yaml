@@ -1,0 +1,9 @@
+developers:
+- email: alice@example.com
+  shortname: alice
+  uid: '123456'
+  name: Alice Example
+- email: bob@example.com
+  shortname: bob
+  uid: '654321'
+  name: Bob Example

@@ -171,6 +171,18 @@ GitHub CI、PR 和项目看板集成指南见 `docs/github-workflow.md`。
 
 版本升级说明见 `docs/migration-guide.md`，更新日志见 `CHANGELOG.md`。
 
+## 示例项目
+
+完整演示项目位于 [`examples/demo_project/`](examples/demo_project/README.md)，
+包含项目、epic、任务、issue、里程碑、inbox 和规划制品。
+
+```sh
+cd examples/demo_project
+trailmind status --overview
+trailmind sweep --project taskflow
+trailmind serve --port 8888
+```
+
 ## 主要功能
 
 - 用 Markdown 存储 Project、Epic、Task、Issue 和 Milestone。

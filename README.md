@@ -181,6 +181,20 @@ See `docs/github-workflow.md` for a guide to using Trailmind with GitHub CI, PRs
 
 See `docs/migration-guide.md` for upgrade instructions between versions. See `CHANGELOG.md` for release notes.
 
+## Example Project
+
+A complete demo project is available at
+[`examples/demo_project/`](examples/demo_project/README.md) with projects,
+epics, tasks, issues, milestones, inbox items, and planning artifacts.
+
+```sh
+cd examples/demo_project
+trailmind status --overview
+trailmind sweep --project taskflow
+trailmind task pickup projects/taskflow/mvp/tasks/T-123456-001-build-task-list-view.md
+trailmind serve --port 8888
+```
+
 ## Features
 
 - Project, Epic, Task, Issue, and Milestone records stored as Markdown.
