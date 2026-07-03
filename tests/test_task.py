@@ -490,3 +490,30 @@ def test_task_normalize_statuses_write_does_not_partially_update_when_later_task
 )
 def test_split_csv_trims_and_drops_empty_entries(value: str, expected: list[str]):
     assert split_csv(value) == expected
+
+
+def test_task_list_cli(tmp_path: Path):
+    from click.testing import CliRunner
+    from trailmind.cli import cli
+
+    (tmp_path / ".git").mkdir()
+    (tmp_path / "roster.yaml").write_text(
+        "developers:\n- email: alice@example.com\n  shortname: alice\n  uid: '123456'\n  name: Alice\n",
+        encoding="utf-8",
+    )
+    runner = CliRunner()
+    runner.invoke(cli, ["project", "init", "--slug", "demo", "--title", "Demo", "--goal", "Test."], obj={"cwd": tmp_path})
+    runner.invoke(cli, ["epic", "init", "--project", "demo", "--slug", "test", "--title", "Test", "--goal", "Testing", "--roster", "alice", "--repos", "demo"], obj={"cwd": tmp_path})
+    runner.invoke(cli, ["task", "add", "--epic", "projects/demo/test", "--filer", "alice@example.com", "--owner", "alice@example.com", "--title", "Test Task"], obj={"cwd": tmp_path})
+
+    result = runner.invoke(cli, ["task", "list", "--epic", "projects/demo/test"], obj={"cwd": tmp_path})
+    assert result.exit_code == 0
+    assert "Test Task" in result.output
+
+    json_result = runner.invoke(cli, ["task", "list", "--epic", "projects/demo/test", "--json"], obj={"cwd": tmp_path})
+    assert json_result.exit_code == 0
+    import json
+    data = json.loads(json_result.output)
+    assert len(data) == 1
+    assert data[0]["title"] == "Test Task"
+    assert data[0]["status"] == "created"

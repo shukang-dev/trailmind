@@ -44,6 +44,7 @@ from trailmind.task import (
     add_task_deliverable,
     close_task,
     complete_task_deliverable,
+    list_tasks,
     normalize_task_statuses,
     set_task_status,
     split_csv,
@@ -358,6 +359,24 @@ def epic_init(
 @cli.group("task")
 def task_group() -> None:
     """Manage tasks."""
+
+
+@task_group.command("list")
+@click.option("--epic", "epic_ref", default=None)
+@click.option("--json", "json_output", is_flag=True, help="Print structured JSON instead of tabular output.")
+@click.pass_context
+def task_list_cmd(ctx: click.Context, epic_ref: str | None, json_output: bool) -> None:
+    root = find_repo_root(_cwd_from_context(ctx))
+    tasks = list_tasks(root, epic_ref=epic_ref)
+    if json_output:
+        click.echo(json.dumps(tasks, ensure_ascii=False, indent=2))
+    else:
+        if not tasks:
+            click.echo("No tasks.")
+            return
+        for t in tasks:
+            click.echo(f"{t['id']:16s} {t['status']:14s} {t['owner']:12s} {t['title']}")
+            click.echo(f"{'':16s} {'':14s} {'':12s} {t['path']}")
 
 
 @task_group.command("add")
