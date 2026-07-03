@@ -38,6 +38,7 @@ from trailmind.project import init_project
 from trailmind.roster import Roster
 from trailmind.security_scan import scan_paths
 from trailmind.serve import serve_repo
+from trailmind.show import format_entity_show, show_entity
 from trailmind.sweep import build_sweep_report, format_sweep_report
 from trailmind.task import (
     add_task,
@@ -171,6 +172,20 @@ def inbox_resolve(ctx: click.Context, item_ref: str, resolver: str, note: str) -
     root = find_repo_root(_cwd_from_context(ctx))
     touched = resolve_inbox_item(root, item_ref=item_ref, resolver=resolver, note=note)
     _echo_touched(root, [touched])
+
+
+@inbox_group.command("show")
+@click.argument("item_ref")
+@click.option("--json", "json_output", is_flag=True, help="Print structured JSON.")
+@click.pass_context
+def inbox_show(ctx: click.Context, item_ref: str, json_output: bool) -> None:
+    """Show details of a single inbox item."""
+    root = find_repo_root(_cwd_from_context(ctx))
+    data = show_entity(root, item_ref, "IN")
+    if json_output:
+        click.echo(json.dumps(data, ensure_ascii=False, indent=2, default=str))
+    else:
+        click.echo(format_entity_show(data, entity_label="Inbox"), nl=False)
 
 
 def _cwd_from_context(ctx: click.Context) -> Path:
@@ -402,6 +417,20 @@ def task_set_status(
         click.echo(warning)
 
 
+@task_group.command("show")
+@click.argument("task_ref")
+@click.option("--json", "json_output", is_flag=True, help="Print structured JSON.")
+@click.pass_context
+def task_show(ctx: click.Context, task_ref: str, json_output: bool) -> None:
+    """Show details of a single task."""
+    root = find_repo_root(_cwd_from_context(ctx))
+    data = show_entity(root, task_ref, "T")
+    if json_output:
+        click.echo(json.dumps(data, ensure_ascii=False, indent=2, default=str))
+    else:
+        click.echo(format_entity_show(data, entity_label="Task"), nl=False)
+
+
 @task_group.command("normalize-statuses")
 @click.option("--write", "write_changes", is_flag=True, help="Rewrite legacy statuses in task files.")
 @click.pass_context
@@ -558,6 +587,20 @@ def issue_carry(ctx: click.Context, issue_ref: str, to_epic: str) -> None:
     _echo_touched(root, touched)
 
 
+@issue_group.command("show")
+@click.argument("issue_ref")
+@click.option("--json", "json_output", is_flag=True, help="Print structured JSON.")
+@click.pass_context
+def issue_show(ctx: click.Context, issue_ref: str, json_output: bool) -> None:
+    """Show details of a single issue."""
+    root = find_repo_root(_cwd_from_context(ctx))
+    data = show_entity(root, issue_ref, "I")
+    if json_output:
+        click.echo(json.dumps(data, ensure_ascii=False, indent=2, default=str))
+    else:
+        click.echo(format_entity_show(data, entity_label="Issue"), nl=False)
+
+
 @issue_group.command("pickup")
 @click.argument("issue_ref")
 @click.option("--json", "json_output", is_flag=True, help="Print structured JSON instead of Markdown.")
@@ -611,6 +654,20 @@ def milestone_add(ctx: click.Context, epic: str, title: str, milestone_date: str
     root = find_repo_root(_cwd_from_context(ctx))
     touched = add_milestone(root, epic=epic, title=title, milestone_date=milestone_date)
     _echo_touched(root, [touched])
+
+
+@milestone_group.command("show")
+@click.argument("milestone_ref")
+@click.option("--json", "json_output", is_flag=True, help="Print structured JSON.")
+@click.pass_context
+def milestone_show(ctx: click.Context, milestone_ref: str, json_output: bool) -> None:
+    """Show details of a single milestone."""
+    root = find_repo_root(_cwd_from_context(ctx))
+    data = show_entity(root, milestone_ref, "M")
+    if json_output:
+        click.echo(json.dumps(data, ensure_ascii=False, indent=2, default=str))
+    else:
+        click.echo(format_entity_show(data, entity_label="Milestone"), nl=False)
 
 
 @cli.command("log")
