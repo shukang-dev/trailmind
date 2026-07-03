@@ -16,6 +16,7 @@ from trailmind.dashboard import (
 )
 from trailmind.epic import init_epic
 from trailmind.errors import TrailmindError
+from trailmind.export import export_repo, format_export
 from trailmind.inbox import add_inbox_item, list_inbox_items, resolve_inbox_item
 from trailmind.issue import add_issue, carry_issue, close_issue, link_issue
 from trailmind.log import log_activity
@@ -121,6 +122,23 @@ def scan_command(ctx: click.Context) -> None:
         noun = "finding" if count == 1 else "findings"
         raise TrailmindError(f"security scan found {count} {noun}")
     click.echo("scan passed")
+
+
+@cli.command("export")
+@click.option("--output", "-o", default=None, help="Write to file instead of stdout.")
+@click.pass_context
+def export_command(ctx: click.Context, output: str | None) -> None:
+    """Export all project data as JSON."""
+    root = find_repo_root(_cwd_from_context(ctx))
+    data = export_repo(root)
+    rendered = format_export(data)
+    if output:
+        output_path = root / output
+        output_path.parent.mkdir(parents=True, exist_ok=True)
+        output_path.write_text(rendered + "\n", encoding="utf-8")
+        click.echo(output_path.relative_to(root).as_posix())
+    else:
+        click.echo(rendered)
 
 
 @cli.group("inbox")
