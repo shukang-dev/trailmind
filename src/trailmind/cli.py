@@ -14,7 +14,7 @@ from trailmind.dashboard import (
     render_project_dashboard,
     render_project_dashboard_at,
 )
-from trailmind.epic import init_epic
+from trailmind.epic import EPIC_STATES, init_epic, set_epic_status, validate_epic_state
 from trailmind.errors import TrailmindError
 from trailmind.inbox import add_inbox_item, list_inbox_items, resolve_inbox_item
 from trailmind.issue import add_issue, carry_issue, close_issue, link_issue, list_issues
@@ -34,7 +34,7 @@ from trailmind.plan_breakdown import (
     build_breakdown_report,
     format_breakdown_markdown,
 )
-from trailmind.project import init_project
+from trailmind.project import PROJECT_STATES, init_project, set_project_status, validate_project_state
 from trailmind.roster import Roster
 from trailmind.security_scan import scan_paths
 from trailmind.serve import serve_repo
@@ -370,6 +370,25 @@ def project_init(ctx: click.Context, slug: str, title: str, goal: str, owners: s
     _echo_touched(root, touched)
 
 
+@project_group.command("set-status")
+@click.argument("project_slug")
+@click.argument("state", type=click.Choice(PROJECT_STATES, case_sensitive=False))
+@click.option("--actor", required=True)
+@click.option("--note", default=None)
+@click.pass_context
+def project_set_status(
+    ctx: click.Context,
+    project_slug: str,
+    state: str,
+    actor: str,
+    note: str | None,
+) -> None:
+    """Change a project's state."""
+    root = find_repo_root(_cwd_from_context(ctx))
+    touched = set_project_status(root, project_slug=project_slug, state=state, actor=actor, note=note)
+    _echo_touched(root, [touched])
+
+
 @cli.group("epic")
 def epic_group() -> None:
     """Manage epics."""
@@ -457,6 +476,25 @@ def epic_init(
         repos=_csv(repos),
     )
     _echo_touched(root, touched)
+
+
+@epic_group.command("set-status")
+@click.argument("epic_ref")
+@click.argument("state", type=click.Choice(EPIC_STATES, case_sensitive=False))
+@click.option("--actor", required=True)
+@click.option("--note", default=None)
+@click.pass_context
+def epic_set_status(
+    ctx: click.Context,
+    epic_ref: str,
+    state: str,
+    actor: str,
+    note: str | None,
+) -> None:
+    """Change an epic's state."""
+    root = find_repo_root(_cwd_from_context(ctx))
+    touched = set_epic_status(root, epic_ref=epic_ref, state=state, actor=actor, note=note)
+    _echo_touched(root, [touched])
 
 
 @cli.group("task")
