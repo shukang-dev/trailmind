@@ -221,6 +221,64 @@ def update_task_status(repo_root: Path, *, task_ref: str, status: str) -> Path:
     return path
 
 
+def start_task(
+    repo_root: Path,
+    *,
+    task_ref: str,
+    actor: str,
+    note: str | None = None,
+) -> tuple[Path, str | None]:
+    """Mark a task as in_progress and set the start date to today."""
+    task_path = resolve_entity(repo_root, raw=task_ref, entity="T")
+    frontmatter, body = read_entity_user_facing(task_path, label="task")
+
+    # Set start date if not already set
+    if not frontmatter.get("start"):
+        frontmatter["start"] = date.today().isoformat()
+
+    path, warning = set_task_status(
+        repo_root,
+        task_ref=task_ref,
+        status="in_progress",
+        actor=actor,
+        note=note,
+    )
+    # Re-read to get the updated frontmatter, then write start date
+    fm2, body2 = read_entity_user_facing(path, label="task")
+    if not fm2.get("start"):
+        fm2["start"] = date.today().isoformat()
+        write_entity(path, frontmatter=fm2, body=body2)
+    return path, warning
+
+
+def complete_task(
+    repo_root: Path,
+    *,
+    task_ref: str,
+    actor: str,
+    note: str | None = None,
+) -> tuple[Path, str | None]:
+    """Mark a task as done.
+
+    If the task is in 'created' status, transitions to 'ready' first since
+    'created' → 'done' is not a valid direct transition.
+    """
+    task_path = resolve_entity(repo_root, raw=task_ref, entity="T")
+    frontmatter, _body = read_entity_user_facing(task_path, label="task")
+    current = str(frontmatter.get("status", "created"))
+
+    if current == "created":
+        set_task_status(repo_root, task_ref=task_ref, status="ready", actor=actor, note=None)
+
+    return set_task_status(
+        repo_root,
+        task_ref=task_ref,
+        status="done",
+        actor=actor,
+        note=note,
+    )
+
+
 def add_task_deliverable(repo_root: Path, *, task_ref: str, item: str, actor: str) -> Path:
     task_path = resolve_entity(repo_root, raw=task_ref, entity="T")
     frontmatter, body = read_entity_user_facing(task_path, label="task")

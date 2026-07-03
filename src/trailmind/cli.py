@@ -43,10 +43,12 @@ from trailmind.task import (
     add_task,
     add_task_deliverable,
     close_task,
+    complete_task,
     complete_task_deliverable,
     normalize_task_statuses,
     set_task_status,
     split_csv,
+    start_task,
     update_task_status,
 )
 from trailmind.task_rules import linked_open_issues_for_task
@@ -397,6 +399,44 @@ def task_set_status(
 ) -> None:
     root = find_repo_root(_cwd_from_context(ctx))
     touched, warning = set_task_status(root, task_ref=task_ref, status=status, actor=actor, note=note)
+    _echo_touched(root, [touched])
+    if warning:
+        click.echo(warning)
+
+
+@task_group.command("start")
+@click.argument("task_ref")
+@click.option("--actor", required=True)
+@click.option("--note", default=None)
+@click.pass_context
+def task_start(
+    ctx: click.Context,
+    task_ref: str,
+    actor: str,
+    note: str | None,
+) -> None:
+    """Mark a task as in_progress."""
+    root = find_repo_root(_cwd_from_context(ctx))
+    touched, warning = start_task(root, task_ref=task_ref, actor=actor, note=note)
+    _echo_touched(root, [touched])
+    if warning:
+        click.echo(warning)
+
+
+@task_group.command("done")
+@click.argument("task_ref")
+@click.option("--actor", required=True)
+@click.option("--note", default=None)
+@click.pass_context
+def task_done(
+    ctx: click.Context,
+    task_ref: str,
+    actor: str,
+    note: str | None,
+) -> None:
+    """Mark a task as done."""
+    root = find_repo_root(_cwd_from_context(ctx))
+    touched, warning = complete_task(root, task_ref=task_ref, actor=actor, note=note)
     _echo_touched(root, [touched])
     if warning:
         click.echo(warning)
