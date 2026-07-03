@@ -285,6 +285,41 @@ def project_group() -> None:
     """Manage projects."""
 
 
+@project_group.command("list")
+@click.option("--json", "json_output", is_flag=True, help="Print structured JSON.")
+@click.pass_context
+def project_list_cmd(ctx: click.Context, json_output: bool) -> None:
+    root = find_repo_root(_cwd_from_context(ctx))
+    projects_path = root / "projects"
+    if not projects_path.exists() or not projects_path.is_dir():
+        if json_output:
+            click.echo("[]")
+        else:
+            click.echo("No projects.")
+        return
+    from trailmind.log import read_entity_user_facing
+
+    projects = []
+    for project_path in sorted(p for p in projects_path.iterdir() if (p / "PROJECT.md").is_file()):
+        try:
+            fm, _body = read_entity_user_facing(project_path / "PROJECT.md", label="project")
+            projects.append({
+                "slug": str(fm.get("slug") or project_path.name),
+                "title": str(fm.get("title") or project_path.name),
+                "goal": str(fm.get("goal") or ""),
+                "state": str(fm.get("state") or "unknown"),
+                "path": project_path.relative_to(root).as_posix(),
+            })
+        except TrailmindError:
+            continue
+    if json_output:
+        click.echo(json.dumps(projects, ensure_ascii=False, indent=2))
+    else:
+        for p in projects:
+            click.echo(f"{p['slug']:20s} {p['state']:12s} {p['title']}")
+            click.echo(f"{'':20s} {'':12s} {p['path']}")
+
+
 @project_group.command("init")
 @click.option("--slug", required=True)
 @click.option("--title", required=True)
@@ -301,6 +336,54 @@ def project_init(ctx: click.Context, slug: str, title: str, goal: str, owners: s
 @cli.group("epic")
 def epic_group() -> None:
     """Manage epics."""
+
+
+@epic_group.command("list")
+@click.option("--project", "project_slug", default=None)
+@click.option("--json", "json_output", is_flag=True, help="Print structured JSON.")
+@click.pass_context
+def epic_list_cmd(ctx: click.Context, project_slug: str | None, json_output: bool) -> None:
+    root = find_repo_root(_cwd_from_context(ctx))
+    from trailmind.log import read_entity_user_facing
+
+    epics = []
+    projects_path = root / "projects"
+    if not projects_path.exists() or not projects_path.is_dir():
+        if json_output:
+            click.echo("[]")
+        else:
+            click.echo("No epics.")
+        return
+
+    project_dirs = []
+    if project_slug:
+        candidate = projects_path / project_slug
+        if (candidate / "PROJECT.md").is_file():
+            project_dirs = [candidate]
+    else:
+        project_dirs = sorted(p for p in projects_path.iterdir() if (p / "PROJECT.md").is_file())
+
+    for project_dir in project_dirs:
+        for epic_dir in sorted(e for e in project_dir.iterdir() if (e / "EPIC.md").is_file()):
+            try:
+                fm, _body = read_entity_user_facing(epic_dir / "EPIC.md", label="epic")
+                epics.append({
+                    "project": project_dir.name,
+                    "slug": str(fm.get("slug") or epic_dir.name),
+                    "title": str(fm.get("title") or epic_dir.name),
+                    "goal": str(fm.get("goal") or ""),
+                    "state": str(fm.get("state") or "unknown"),
+                    "target": str(fm.get("target") or ""),
+                    "path": epic_dir.relative_to(root).as_posix(),
+                })
+            except TrailmindError:
+                continue
+    if json_output:
+        click.echo(json.dumps(epics, ensure_ascii=False, indent=2))
+    else:
+        for e in epics:
+            click.echo(f"{e['project'] + '/' + e['slug']:30s} {e['state']:12s} {e['title']}")
+            click.echo(f"{'':30s} {'':12s} {e['path']}")
 
 
 @epic_group.command("init")
