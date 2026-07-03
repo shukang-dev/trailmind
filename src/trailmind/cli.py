@@ -17,6 +17,7 @@ from trailmind.dashboard import (
 from trailmind.epic import init_epic
 from trailmind.errors import TrailmindError
 from trailmind.export import export_repo, format_export
+from trailmind.importer import import_repo, load_export_file
 from trailmind.inbox import add_inbox_item, list_inbox_items, resolve_inbox_item
 from trailmind.issue import add_issue, carry_issue, close_issue, link_issue
 from trailmind.log import log_activity
@@ -139,6 +140,23 @@ def export_command(ctx: click.Context, output: str | None) -> None:
         click.echo(output_path.relative_to(root).as_posix())
     else:
         click.echo(rendered)
+
+
+@cli.command("import")
+@click.argument("input_file", type=click.Path(exists=True, path_type=Path))
+@click.option("--force", is_flag=True, help="Overwrite existing files.")
+@click.pass_context
+def import_command(ctx: click.Context, input_file: Path, force: bool) -> None:
+    """Import project data from a JSON export file."""
+    root = find_repo_root(_cwd_from_context(ctx))
+    data = load_export_file(input_file)
+    created = import_repo(root, data, force=force)
+    if not created:
+        click.echo("Nothing to import — all entities already exist (use --force to overwrite).")
+    else:
+        for path in created:
+            click.echo(path.relative_to(root).as_posix())
+        click.echo(f"\nImported {len(created)} file(s).")
 
 
 @cli.group("inbox")
