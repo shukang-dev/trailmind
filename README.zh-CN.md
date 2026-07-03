@@ -167,6 +167,8 @@ trailmind plan breakdown docs/plans/v0.4.md \
 
 完整的 spec → plan → tasks 工作流示例见 `docs/planning-workflow.md`。
 
+GitHub CI、PR 和项目看板集成指南见 `docs/github-workflow.md`。
+
 ## 主要功能
 
 - 用 Markdown 存储 Project、Epic、Task、Issue 和 Milestone。

@@ -177,6 +177,8 @@ Preview is read-only by default. See `docs/v0.4-plan-breakdown.md` for details.
 
 See `docs/planning-workflow.md` for a complete walkthrough of the spec → plan → tasks workflow.
 
+See `docs/github-workflow.md` for a guide to using Trailmind with GitHub CI, PRs, and project boards.
+
 ## Features
 
 - Project, Epic, Task, Issue, and Milestone records stored as Markdown.
