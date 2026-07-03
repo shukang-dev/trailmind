@@ -624,3 +624,31 @@ def test_task_close_reports_same_epic_linked_issue_when_duplicate_id_exists_else
     assert result.exit_code == 0
     assert "linked open issues remain: I-123456-001 Login Fails" in result.output
     assert "Next Epic Login Fails" not in result.output
+
+
+def test_issue_list_cli(tmp_path: Path):
+    from click.testing import CliRunner
+    from trailmind.cli import cli
+
+    (tmp_path / ".git").mkdir()
+    (tmp_path / "roster.yaml").write_text(
+        "developers:\n- email: alice@example.com\n  shortname: alice\n  uid: '123456'\n  name: Alice\n",
+        encoding="utf-8",
+    )
+    runner = CliRunner()
+    runner.invoke(cli, ["project", "init", "--slug", "demo", "--title", "Demo", "--goal", "Test."], obj={"cwd": tmp_path})
+    runner.invoke(cli, ["epic", "init", "--project", "demo", "--slug", "test", "--title", "Test", "--goal", "Testing", "--roster", "alice", "--repos", "demo"], obj={"cwd": tmp_path})
+    runner.invoke(cli, ["issue", "add", "--epic", "projects/demo/test", "--filer", "alice@example.com", "--title", "Test Issue", "--description", "Testing", "--severity", "high"], obj={"cwd": tmp_path})
+
+    result = runner.invoke(cli, ["issue", "list", "--epic", "projects/demo/test"], obj={"cwd": tmp_path})
+    assert result.exit_code == 0
+    assert "Test Issue" in result.output
+    assert "[high]" in result.output
+
+    json_result = runner.invoke(cli, ["issue", "list", "--epic", "projects/demo/test", "--json"], obj={"cwd": tmp_path})
+    assert json_result.exit_code == 0
+    import json
+    data = json.loads(json_result.output)
+    assert len(data) == 1
+    assert data[0]["title"] == "Test Issue"
+    assert data[0]["severity"] == "high"

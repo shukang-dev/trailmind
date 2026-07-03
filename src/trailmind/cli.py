@@ -17,7 +17,7 @@ from trailmind.dashboard import (
 from trailmind.epic import init_epic
 from trailmind.errors import TrailmindError
 from trailmind.inbox import add_inbox_item, list_inbox_items, resolve_inbox_item
-from trailmind.issue import add_issue, carry_issue, close_issue, link_issue
+from trailmind.issue import add_issue, carry_issue, close_issue, link_issue, list_issues
 from trailmind.log import log_activity
 from trailmind.milestone import add_milestone
 from trailmind.paths import find_repo_root
@@ -553,6 +553,25 @@ def task_deliverable_complete(ctx: click.Context, task_ref: str, item: str, acto
 @cli.group("issue")
 def issue_group() -> None:
     """Manage issues."""
+
+
+@issue_group.command("list")
+@click.option("--epic", "epic_ref", default=None)
+@click.option("--json", "json_output", is_flag=True, help="Print structured JSON instead of tabular output.")
+@click.pass_context
+def issue_list_cmd(ctx: click.Context, epic_ref: str | None, json_output: bool) -> None:
+    root = find_repo_root(_cwd_from_context(ctx))
+    issues = list_issues(root, epic_ref=epic_ref)
+    if json_output:
+        click.echo(json.dumps(issues, ensure_ascii=False, indent=2))
+    else:
+        if not issues:
+            click.echo("No issues.")
+            return
+        for i in issues:
+            sev = f" [{i['severity']}]" if i['severity'] else ""
+            click.echo(f"{i['id']:16s} {i['status']:10s}{sev} {i['title']}")
+            click.echo(f"{'':16s} {'':10s}  {i['path']}")
 
 
 @issue_group.command("add")
