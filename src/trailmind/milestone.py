@@ -6,6 +6,7 @@ from pathlib import Path, PurePosixPath, PureWindowsPath
 from trailmind.entity_io import write_entity
 from trailmind.errors import TrailmindError
 from trailmind.ids import next_entity_id, slugify
+from trailmind.log import read_entity_user_facing
 
 
 def _missing_epic(raw: str) -> TrailmindError:
@@ -54,6 +55,36 @@ def _validate_date(raw: str) -> str:
 
 def _initial_body(title: str, milestone_date: str) -> str:
     return f"# {title}\n\nDate: {milestone_date}\n"
+
+
+def list_milestones(repo_root: Path, *, epic_ref: str | None = None) -> list[dict[str, str]]:
+    """List milestones in an epic or across the repo."""
+    if epic_ref:
+        epic_path = _resolve_epic(repo_root, epic_ref)
+        milestone_paths = sorted(epic_path.glob("milestones/M-*.md"))
+    else:
+        projects_path = repo_root / "projects"
+        if not projects_path.exists() or not projects_path.is_dir():
+            return []
+        milestone_paths = sorted(projects_path.glob("*/*/milestones/M-*.md"))
+
+    milestones = []
+    for path in milestone_paths:
+        if not path.is_file():
+            continue
+        try:
+            frontmatter, _body = read_entity_user_facing(path, label="milestone")
+            milestones.append({
+                "id": str(frontmatter.get("id") or path.stem),
+                "title": str(frontmatter.get("title") or path.stem),
+                "status": str(frontmatter.get("status") or "created"),
+                "date": str(frontmatter.get("date") or ""),
+                "created": str(frontmatter.get("created") or ""),
+                "path": path.relative_to(repo_root).as_posix(),
+            })
+        except TrailmindError:
+            continue
+    return milestones
 
 
 def add_milestone(repo_root: Path, *, epic: str, title: str, milestone_date: str) -> Path:

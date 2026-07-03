@@ -652,3 +652,31 @@ def test_issue_list_cli(tmp_path: Path):
     assert len(data) == 1
     assert data[0]["title"] == "Test Issue"
     assert data[0]["severity"] == "high"
+
+
+def test_milestone_list_cli(tmp_path: Path):
+    from click.testing import CliRunner
+    from trailmind.cli import cli
+
+    (tmp_path / ".git").mkdir()
+    (tmp_path / "roster.yaml").write_text(
+        "developers:\n- email: alice@example.com\n  shortname: alice\n  uid: '123456'\n  name: Alice\n",
+        encoding="utf-8",
+    )
+    runner = CliRunner()
+    runner.invoke(cli, ["project", "init", "--slug", "demo", "--title", "Demo", "--goal", "Test."], obj={"cwd": tmp_path})
+    runner.invoke(cli, ["epic", "init", "--project", "demo", "--slug", "test", "--title", "Test", "--goal", "Testing", "--roster", "alice", "--repos", "demo"], obj={"cwd": tmp_path})
+    runner.invoke(cli, ["milestone", "add", "--epic", "projects/demo/test", "--title", "Test Milestone", "--date", "2026-07-15"], obj={"cwd": tmp_path})
+
+    result = runner.invoke(cli, ["milestone", "list", "--epic", "projects/demo/test"], obj={"cwd": tmp_path})
+    assert result.exit_code == 0
+    assert "Test Milestone" in result.output
+    assert "2026-07-15" in result.output
+
+    json_result = runner.invoke(cli, ["milestone", "list", "--epic", "projects/demo/test", "--json"], obj={"cwd": tmp_path})
+    assert json_result.exit_code == 0
+    import json
+    data = json.loads(json_result.output)
+    assert len(data) == 1
+    assert data[0]["title"] == "Test Milestone"
+    assert data[0]["date"] == "2026-07-15"
