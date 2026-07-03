@@ -179,6 +179,8 @@ See `docs/planning-workflow.md` for a complete walkthrough of the spec → plan 
 
 See `docs/github-workflow.md` for a guide to using Trailmind with GitHub CI, PRs, and project boards.
 
+See `docs/migration-guide.md` for upgrade instructions between versions. See `CHANGELOG.md` for release notes.
+
 ## Features
 
 - Project, Epic, Task, Issue, and Milestone records stored as Markdown.

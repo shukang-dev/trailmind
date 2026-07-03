@@ -169,6 +169,8 @@ trailmind plan breakdown docs/plans/v0.4.md \
 
 GitHub CI、PR 和项目看板集成指南见 `docs/github-workflow.md`。
 
+版本升级说明见 `docs/migration-guide.md`，更新日志见 `CHANGELOG.md`。
+
 ## 主要功能
 
 - 用 Markdown 存储 Project、Epic、Task、Issue 和 Milestone。
