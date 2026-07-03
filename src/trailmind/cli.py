@@ -235,12 +235,25 @@ def roster_add(ctx: click.Context, email: str, shortname: str, name: str, uid: s
 
 
 @roster_group.command("list")
+@click.option("--json", "json_output", is_flag=True, help="Print structured JSON instead of tab-separated text.")
 @click.pass_context
-def roster_list(ctx: click.Context) -> None:
+def roster_list(ctx: click.Context, json_output: bool) -> None:
     root = find_repo_root(_cwd_from_context(ctx))
     roster = Roster.load(root / "roster.yaml")
-    for developer in roster.developers:
-        click.echo(f"{developer.shortname}\t{developer.email}\t{developer.uid}\t{developer.name}")
+    if json_output:
+        data = [
+            {
+                "shortname": d.shortname,
+                "email": d.email,
+                "uid": d.uid,
+                "name": d.name,
+            }
+            for d in roster.developers
+        ]
+        click.echo(json.dumps(data, ensure_ascii=False, indent=2))
+    else:
+        for developer in roster.developers:
+            click.echo(f"{developer.shortname}\t{developer.email}\t{developer.uid}\t{developer.name}")
 
 
 @cli.group("plan")

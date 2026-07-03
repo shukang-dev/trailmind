@@ -240,3 +240,27 @@ def test_roster_cli_add_bad_file_is_user_facing(tmp_path: Path):
     assert result.exit_code == 1
     assert "error: invalid roster.yaml" in result.output
     assert "Traceback" not in result.output
+
+
+def test_roster_cli_list_json(tmp_path: Path):
+    (tmp_path / ".git").mkdir()
+    CliRunner().invoke(
+        cli,
+        ["roster", "add", "--email", "alice@example.com", "--shortname", "alice", "--name", "Alice", "--uid", "123456"],
+        obj={"cwd": tmp_path},
+    )
+    CliRunner().invoke(
+        cli,
+        ["roster", "add", "--email", "bob@example.com", "--shortname", "bob", "--name", "Bob", "--uid", "654321"],
+        obj={"cwd": tmp_path},
+    )
+
+    result = CliRunner().invoke(cli, ["roster", "list", "--json"], obj={"cwd": tmp_path})
+    assert result.exit_code == 0
+    import json
+    data = json.loads(result.output)
+    assert len(data) == 2
+    assert data[0]["email"] == "alice@example.com"
+    assert data[0]["shortname"] == "alice"
+    assert data[0]["uid"] == "123456"
+    assert data[0]["name"] == "Alice"
