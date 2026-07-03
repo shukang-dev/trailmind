@@ -14,6 +14,7 @@ from trailmind.dashboard import (
     render_project_dashboard,
     render_project_dashboard_at,
 )
+from trailmind.doctor import format_doctor_report, run_doctor
 from trailmind.epic import EPIC_STATES, init_epic, set_epic_status, validate_epic_state
 from trailmind.errors import TrailmindError
 from trailmind.inbox import add_inbox_item, list_inbox_items, resolve_inbox_item
@@ -325,6 +326,26 @@ def scan_command(ctx: click.Context) -> None:
         noun = "finding" if count == 1 else "findings"
         raise TrailmindError(f"security scan found {count} {noun}")
     click.echo("scan passed")
+
+
+@cli.command("doctor")
+@click.option("--json", "json_output", is_flag=True, help="Print structured JSON instead of text report.")
+@click.pass_context
+def doctor_command(ctx: click.Context, json_output: bool) -> None:
+    """Diagnose common issues in a Trailmind repo."""
+    root = find_repo_root(_cwd_from_context(ctx))
+    findings = run_doctor(root)
+    if json_output:
+        data = [
+            {"severity": f.severity, "message": f.message, "path": f.path}
+            for f in findings
+        ]
+        click.echo(json.dumps(data, ensure_ascii=False, indent=2))
+    else:
+        click.echo(format_doctor_report(findings), nl=False)
+        errors = sum(1 for f in findings if f.severity == "error")
+        if errors:
+            raise TrailmindError(f"doctor found {errors} error(s)")
 
 
 @cli.group("inbox")
