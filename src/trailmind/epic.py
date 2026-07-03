@@ -6,7 +6,47 @@ from pathlib import Path
 from trailmind.agents import render_epic_agents
 from trailmind.entity_io import write_entity
 from trailmind.errors import TrailmindError
+from trailmind.log import action_activity_entry, append_activity_entry, read_entity_user_facing
 from trailmind.paths import epic_dir, project_dir
+from trailmind.scopes import resolve_epic_dir
+
+
+EPIC_STATES = ("planning", "active", "paused", "completed", "archived", "cancelled")
+DEFAULT_EPIC_STATE = "active"
+
+
+def validate_epic_state(state: str) -> str:
+    normalized = state.strip().lower()
+    if normalized not in EPIC_STATES:
+        expected = ", ".join(EPIC_STATES)
+        raise TrailmindError(f"invalid epic state {state!r}; expected one of: {expected}")
+    return normalized
+
+
+def set_epic_status(
+    repo_root: Path,
+    *,
+    epic_ref: str,
+    state: str,
+    actor: str,
+    note: str | None = None,
+) -> Path:
+    validated = validate_epic_state(state)
+    epic_path = resolve_epic_dir(repo_root, epic_ref)
+    frontmatter, body = read_entity_user_facing(epic_path / "EPIC.md", label="epic")
+    old_state = str(frontmatter.get("state", DEFAULT_EPIC_STATE))
+    frontmatter["state"] = validated
+    body = append_activity_entry(
+        body,
+        action_activity_entry(
+            action=f"State changed from {old_state} to {validated}",
+            actor_label="actor",
+            actor=actor,
+            note=note,
+        ),
+    )
+    write_entity(epic_path / "EPIC.md", frontmatter=frontmatter, body=body)
+    return epic_path / "EPIC.md"
 
 
 def init_epic(
@@ -49,7 +89,7 @@ def init_epic(
             "title": title,
             "project": project,
             "goal": goal,
-            "state": "active",
+            "state": DEFAULT_EPIC_STATE,
             "start": start,
             "target": target,
             "roster": roster,
