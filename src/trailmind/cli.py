@@ -19,7 +19,7 @@ from trailmind.errors import TrailmindError
 from trailmind.inbox import add_inbox_item, list_inbox_items, resolve_inbox_item
 from trailmind.issue import add_issue, carry_issue, close_issue, link_issue, list_issues
 from trailmind.log import log_activity
-from trailmind.milestone import add_milestone
+from trailmind.milestone import add_milestone, list_milestones
 from trailmind.paths import find_repo_root
 from trailmind.pickup import (
     build_issue_pickup,
@@ -668,6 +668,24 @@ def issue_pickup(
 @cli.group("milestone")
 def milestone_group() -> None:
     """Manage milestones."""
+
+
+@milestone_group.command("list")
+@click.option("--epic", "epic_ref", default=None)
+@click.option("--json", "json_output", is_flag=True, help="Print structured JSON instead of tabular output.")
+@click.pass_context
+def milestone_list_cmd(ctx: click.Context, epic_ref: str | None, json_output: bool) -> None:
+    root = find_repo_root(_cwd_from_context(ctx))
+    milestones = list_milestones(root, epic_ref=epic_ref)
+    if json_output:
+        click.echo(json.dumps(milestones, ensure_ascii=False, indent=2))
+    else:
+        if not milestones:
+            click.echo("No milestones.")
+            return
+        for m in milestones:
+            click.echo(f"{m['id']:12s} {m['status']:10s} {m['date']:12s} {m['title']}")
+            click.echo(f"{'':12s} {'':10s} {'':12s} {m['path']}")
 
 
 @milestone_group.command("add")
