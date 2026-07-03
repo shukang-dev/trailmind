@@ -44,6 +44,7 @@ from trailmind.task import (
     TASK_PRIORITIES,
     add_task,
     add_task_deliverable,
+    assign_task,
     close_task,
     complete_task_deliverable,
     list_tasks,
@@ -584,6 +585,25 @@ def task_due(
         if due_date is None:
             raise TrailmindError("due date is required (or use --clear)")
         touched = set_task_due(root, task_ref=task_ref, due_date=due_date, actor=actor, note=note)
+    _echo_touched(root, [touched])
+
+
+@task_group.command("assign")
+@click.argument("task_ref")
+@click.argument("owner")
+@click.option("--actor", required=True)
+@click.option("--note", default=None)
+@click.pass_context
+def task_assign(
+    ctx: click.Context,
+    task_ref: str,
+    owner: str,
+    actor: str,
+    note: str | None,
+) -> None:
+    """Reassign a task to a different owner."""
+    root = find_repo_root(_cwd_from_context(ctx))
+    touched = assign_task(root, task_ref=task_ref, owner=owner, actor=actor, note=note)
     _echo_touched(root, [touched])
 
 

@@ -127,6 +127,17 @@ class Roster:
                 return developer.shortname
         raise TrailmindError(f"{normalized} is not registered in roster.yaml")
 
+    def resolve_shortname(self, ref: str) -> str:
+        """Resolve a reference (email or shortname) to a shortname."""
+        normalized = ref.strip().lower()
+        for developer in self.developers:
+            if developer.email == normalized:
+                return developer.shortname
+        for developer in self.developers:
+            if developer.shortname == normalized:
+                return developer.shortname
+        raise TrailmindError(f"{ref} is not registered in roster.yaml")
+
     def require_uid(self, email: str) -> str:
         normalized = email.strip().lower()
         for developer in self.developers:
