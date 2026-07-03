@@ -40,12 +40,15 @@ from trailmind.security_scan import scan_paths
 from trailmind.serve import serve_repo
 from trailmind.sweep import build_sweep_report, format_sweep_report, sweep_report_to_dict
 from trailmind.task import (
+    DEFAULT_PRIORITY,
+    TASK_PRIORITIES,
     add_task,
     add_task_deliverable,
     close_task,
     complete_task_deliverable,
     list_tasks,
     normalize_task_statuses,
+    set_task_priority,
     set_task_status,
     split_csv,
     update_task_status,
@@ -473,6 +476,9 @@ def task_list_cmd(ctx: click.Context, epic_ref: str | None, json_output: bool) -
 @click.option("--soft-depends-on", default="")
 @click.option("--known-issues", default="")
 @click.option("--deliverables", default="")
+@click.option("--priority", default=DEFAULT_PRIORITY, show_default=True,
+              type=click.Choice(TASK_PRIORITIES, case_sensitive=False),
+              help="Task priority level.")
 @click.pass_context
 def task_add(
     ctx: click.Context,
@@ -486,6 +492,7 @@ def task_add(
     soft_depends_on: str,
     known_issues: str,
     deliverables: str,
+    priority: str,
 ) -> None:
     root = find_repo_root(_cwd_from_context(ctx))
     touched = add_task(
@@ -500,6 +507,7 @@ def task_add(
         soft_depends_on=split_csv(soft_depends_on),
         known_issues=split_csv(known_issues),
         deliverables=split_csv(deliverables),
+        priority=priority,
     )
     _echo_touched(root, [touched])
 
@@ -532,6 +540,24 @@ def task_set_status(
     _echo_touched(root, [touched])
     if warning:
         click.echo(warning)
+
+
+@task_group.command("set-priority")
+@click.argument("task_ref")
+@click.argument("priority", type=click.Choice(TASK_PRIORITIES, case_sensitive=False))
+@click.option("--actor", required=True)
+@click.option("--note", default=None)
+@click.pass_context
+def task_set_priority(
+    ctx: click.Context,
+    task_ref: str,
+    priority: str,
+    actor: str,
+    note: str | None,
+) -> None:
+    root = find_repo_root(_cwd_from_context(ctx))
+    touched = set_task_priority(root, task_ref=task_ref, priority=priority, actor=actor, note=note)
+    _echo_touched(root, [touched])
 
 
 @task_group.command("normalize-statuses")

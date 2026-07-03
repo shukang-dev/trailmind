@@ -36,6 +36,18 @@ def _normalize_deliverable_items(items: list[str]) -> list[str]:
     return [item for item in (normalize_deliverable_item(item) for item in items) if item]
 
 
+TASK_PRIORITIES = ("low", "medium", "high", "critical")
+DEFAULT_PRIORITY = "medium"
+
+
+def validate_task_priority(priority: str) -> str:
+    normalized = priority.strip().lower()
+    if normalized not in TASK_PRIORITIES:
+        expected = ", ".join(TASK_PRIORITIES)
+        raise TrailmindError(f"invalid task priority {priority!r}; expected one of: {expected}")
+    return normalized
+
+
 def _missing_epic(raw: str) -> TrailmindError:
     return TrailmindError(f"epic {raw} does not exist")
 
@@ -179,6 +191,7 @@ def add_task(
     soft_depends_on: list[str],
     known_issues: list[str],
     deliverables: list[str],
+    priority: str = DEFAULT_PRIORITY,
 ) -> Path:
     epic_path = _resolve_epic(repo_root, epic)
     roster = Roster.load(repo_root / "roster.yaml")
@@ -186,6 +199,7 @@ def add_task(
     filer_uid = roster.require_uid(filer)
     owner_shortname = roster.require_shortname(owner)
     normalized_deliverables = _normalize_deliverable_items(deliverables)
+    validated_priority = validate_task_priority(priority)
 
     tasks_path = epic_path / "tasks"
     _ensure_tasks_directory(tasks_path)
@@ -199,6 +213,7 @@ def add_task(
             "filer": filer_shortname,
             "owner": owner_shortname,
             "status": "created",
+            "priority": validated_priority,
             "created": date.today().isoformat(),
             "start": None,
             "due": None,
@@ -249,6 +264,32 @@ def update_task_status(repo_root: Path, *, task_ref: str, status: str) -> Path:
     status = validate_task_status(status)
     path, _warning = set_task_status(repo_root, task_ref=task_ref, status=status, actor="trailmind")
     return path
+
+
+def set_task_priority(
+    repo_root: Path,
+    *,
+    task_ref: str,
+    priority: str,
+    actor: str,
+    note: str | None = None,
+) -> Path:
+    validated_priority = validate_task_priority(priority)
+    task_path = resolve_entity(repo_root, raw=task_ref, entity="T")
+    frontmatter, body = read_entity_user_facing(task_path, label="task")
+    old_priority = str(frontmatter.get("priority", DEFAULT_PRIORITY))
+    frontmatter["priority"] = validated_priority
+    body = append_activity_entry(
+        body,
+        action_activity_entry(
+            action=f"Priority changed from {old_priority} to {validated_priority}",
+            actor_label="actor",
+            actor=actor,
+            note=note,
+        ),
+    )
+    write_entity(task_path, frontmatter=frontmatter, body=body)
+    return task_path
 
 
 def add_task_deliverable(repo_root: Path, *, task_ref: str, item: str, actor: str) -> Path:
