@@ -267,6 +267,36 @@ def complete_task_deliverable(repo_root: Path, *, task_ref: str, item: str, acto
     return task_path
 
 
+def assign_task(
+    repo_root: Path,
+    *,
+    task_ref: str,
+    owner: str,
+    actor: str,
+    note: str | None = None,
+) -> Path:
+    """Reassign a task to a different owner."""
+    task_path = resolve_entity(repo_root, raw=task_ref, entity="T")
+    frontmatter, body = read_entity_user_facing(task_path, label="task")
+
+    roster = Roster.load(repo_root / "roster.yaml")
+    new_owner = roster.resolve_shortname(owner)
+    old_owner = str(frontmatter.get("owner", "unknown"))
+
+    frontmatter["owner"] = new_owner
+    body = append_activity_entry(
+        body,
+        action_activity_entry(
+            action=f"Assigned to {new_owner} (was {old_owner})",
+            actor_label="actor",
+            actor=actor,
+            note=note,
+        ),
+    )
+    write_entity(task_path, frontmatter=frontmatter, body=body)
+    return task_path
+
+
 def close_task(repo_root: Path, *, task_ref: str, closer: str, note: str) -> Path:
     task_path = resolve_entity(repo_root, raw=task_ref, entity="T")
     frontmatter, body = read_entity_user_facing(task_path, label="task")
