@@ -10,6 +10,7 @@ ENTITY_FOLDERS = {
     "T": "tasks",
     "I": "issues",
     "M": "milestones",
+    "IN": "inbox",
 }
 SLUG_SUFFIX_RE = re.compile(r"^[a-z0-9]+(?:-[a-z0-9]+)*$")
 
