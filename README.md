@@ -175,6 +175,19 @@ trailmind plan breakdown docs/plans/v0.4.md \
 
 Preview is read-only by default. See `docs/v0.4-plan-breakdown.md` for details.
 
+## Planning Artifacts
+
+Trailmind can manage spec and plan artifacts with formal frontmatter and CLI commands:
+
+```sh
+trailmind plan spec init --epic projects/demo_app/mvp --title "Parser Redesign" --author alice@example.com
+trailmind plan init --epic projects/demo_app/mvp --title "Implementation" --author alice@example.com --spec docs/specs/2026-07-02-parser-redesign.md
+trailmind plan spec list --epic projects/demo_app/mvp
+trailmind plan list --epic projects/demo_app/mvp
+```
+
+See `docs/v0.4-planning-artifacts.md` for details.
+
 See `docs/planning-workflow.md` for a complete walkthrough of the spec → plan → tasks workflow.
 
 See `docs/github-workflow.md` for a guide to using Trailmind with GitHub CI, PRs, and project boards.

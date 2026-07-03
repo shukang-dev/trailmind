@@ -1090,3 +1090,55 @@ def test_plan_breakdown_rejects_unknown_filer(tmp_path: Path):
 
     assert result.exit_code == 1
     assert "missing@example.com is not registered in roster.yaml" in result.output
+
+
+# --- Task 5: Plan Breakdown Integration — generated_tasks ---
+
+def test_breakdown_write_updates_plan_generated_tasks(tmp_path: Path):
+    repo = _repo_with_epic(tmp_path)
+    plan_path = _write_plan(repo)
+
+    report = build_breakdown_report(
+        repo,
+        plan_ref="docs/plans/v0.4.md",
+        epic_ref="projects/demo_app/mvp",
+        filer="alice@example.com",
+        owner="alice@example.com",
+        write=True,
+        force=False,
+    )
+
+    plan_text = plan_path.read_text(encoding="utf-8")
+    from trailmind.plan_artifact import parse_plan_info
+    info = parse_plan_info(plan_text, path="docs/plans/v0.4.md")
+
+    assert len(info.generated_tasks) == 2
+    assert "T-123456-001" in info.generated_tasks
+    assert "T-123456-002" in info.generated_tasks
+    assert report.created == [
+        "projects/demo_app/mvp/tasks/T-123456-001-parser-model.md",
+        "projects/demo_app/mvp/tasks/T-123456-002-cli-wiring.md",
+    ]
+
+
+def test_breakdown_write_legacy_plan_gets_minimal_frontmatter(tmp_path: Path):
+    repo = _repo_with_epic(tmp_path)
+    # Write a plan WITHOUT frontmatter
+    legacy_plan = repo / "projects" / "demo_app" / "mvp" / "docs" / "plans" / "legacy.md"
+    legacy_plan.parent.mkdir(parents=True, exist_ok=True)
+    legacy_plan.write_text(PLAN_TEXT, encoding="utf-8")
+
+    report = build_breakdown_report(
+        repo,
+        plan_ref="projects/demo_app/mvp/docs/plans/legacy.md",
+        epic_ref="projects/demo_app/mvp",
+        filer="alice@example.com",
+        owner="alice@example.com",
+        write=True,
+        force=False,
+    )
+
+    assert len(report.created) == 2
+    updated = legacy_plan.read_text(encoding="utf-8")
+    assert "---" in updated
+    assert "generated_tasks" in updated

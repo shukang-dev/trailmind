@@ -212,17 +212,25 @@ def _epic_summary(repo_root: Path, epic_path: Path, *, include_children: bool) -
         tasks = _entity_summaries(repo_root, epic_path / "tasks", label="task")
         issues = _entity_summaries(repo_root, epic_path / "issues", label="issue")
         milestones = _entity_summaries(repo_root, epic_path / "milestones", label="milestone")
+        specs = _doc_summaries(repo_root, epic_path / "docs" / "specs", label="spec")
+        plans = _doc_summaries(repo_root, epic_path / "docs" / "plans", label="plan")
         epic.update(
             {
                 "tasks": tasks,
                 "issues": issues,
                 "milestones": milestones,
+                "specs": specs,
+                "plans": plans,
                 "task_count": len(tasks),
                 "issue_count": len(issues),
                 "milestone_count": len(milestones),
+                "spec_count": len(specs),
+                "plan_count": len(plans),
                 "task_status_counts": _status_counts(tasks, "status"),
                 "issue_status_counts": _status_counts(issues, "status"),
                 "milestone_status_counts": _status_counts(milestones, "status"),
+                "spec_status_counts": _status_counts(specs, "status"),
+                "plan_status_counts": _status_counts(plans, "status"),
             }
         )
     else:
@@ -231,6 +239,8 @@ def _epic_summary(repo_root: Path, epic_path: Path, *, include_children: bool) -
                 "task_count": _markdown_count(epic_path / "tasks", label="task"),
                 "issue_count": _markdown_count(epic_path / "issues", label="issue"),
                 "milestone_count": _markdown_count(epic_path / "milestones", label="milestone"),
+                "spec_count": _doc_count(epic_path / "docs" / "specs"),
+                "plan_count": _doc_count(epic_path / "docs" / "plans"),
             }
         )
     return epic
@@ -275,6 +285,41 @@ def _markdown_count(directory: Path, *, label: str) -> int:
     if not directory.exists() or not directory.is_dir():
         return 0
     return len(_entity_markdown_files(directory, label=label))
+
+
+def _doc_summaries(repo_root: Path, directory: Path, *, label: str) -> list[dict[str, Any]]:
+    """Summarize Markdown docs (specs, plans) by frontmatter."""
+    if not directory.exists() or not directory.is_dir():
+        return []
+    docs = []
+    for path in sorted(directory.glob("*.md")):
+        if not path.is_file():
+            continue
+        try:
+            frontmatter, body = _read_entity_user_facing(path, label=label)
+        except TrailmindError:
+            continue
+        docs.append(
+            {
+                "path": path,
+                "relative_path": _relative(repo_root, path),
+                "title": _string_value(frontmatter.get("title"), path.stem),
+                "status": _string_value(frontmatter.get("status"), "unknown"),
+                "scope": _string_value(frontmatter.get("scope"), ""),
+                "created": _string_value(frontmatter.get("created"), ""),
+                "linked_spec": _string_value(frontmatter.get("linked_spec"), ""),
+                "linked_plans": _string_list(frontmatter.get("linked_plans")),
+                "generated_tasks": _string_list(frontmatter.get("generated_tasks")),
+                "body": body.strip(),
+            }
+        )
+    return docs
+
+
+def _doc_count(directory: Path) -> int:
+    if not directory.exists() or not directory.is_dir():
+        return 0
+    return sum(1 for p in directory.glob("*.md") if p.is_file())
 
 
 def _status_counts(items: list[dict[str, Any]], key: str) -> list[dict[str, Any]]:

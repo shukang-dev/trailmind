@@ -37,6 +37,23 @@ from trailmind.plan_breakdown import (
     build_breakdown_report,
     format_breakdown_markdown,
 )
+from trailmind.plan_artifact import (
+    PLAN_STATUSES,
+    SPEC_STATUSES,
+    _resolve_any_doc,
+    build_planning_status,
+    create_plan,
+    create_spec,
+    format_planning_status_markdown,
+    link_plan_spec,
+    list_plans,
+    list_specs,
+    parse_plan_info,
+    parse_spec_info,
+    planning_status_to_dict,
+    set_plan_status,
+    set_spec_status,
+)
 from trailmind.project import PROJECT_STATES, init_project, set_project_status, validate_project_state
 from trailmind.roster import Roster
 from trailmind.security_scan import scan_paths
@@ -565,6 +582,225 @@ def plan_breakdown(
         click.echo(json.dumps(breakdown_report_to_dict(report), ensure_ascii=False, indent=2))
     else:
         click.echo(format_breakdown_markdown(report), nl=False)
+
+
+@plan_group.group("spec")
+def spec_group() -> None:
+    """Manage spec artifacts."""
+
+
+@spec_group.command("init")
+@click.option("--epic", "epic_ref", required=True)
+@click.option("--title", required=True)
+@click.option("--author", required=True)
+@click.option("--scope", default=None)
+@click.option("--status", default="draft-for-review", type=click.Choice(SPEC_STATUSES))
+@click.pass_context
+def spec_init(ctx: click.Context, epic_ref: str, title: str, author: str, scope: str | None, status: str) -> None:
+    root = find_repo_root(_cwd_from_context(ctx))
+    touched = create_spec(
+        root,
+        epic_ref=epic_ref,
+        title=title,
+        author=author,
+        scope=scope,
+        status=status,
+    )
+    _echo_touched(root, [touched])
+
+
+@spec_group.command("list")
+@click.option("--epic", "epic_ref", default=None)
+@click.option("--json", "json_output", is_flag=True)
+@click.pass_context
+def spec_list(ctx: click.Context, epic_ref: str | None, json_output: bool) -> None:
+    root = find_repo_root(_cwd_from_context(ctx))
+    specs = list_specs(root, epic_ref=epic_ref)
+    if json_output:
+        data = [
+            {
+                "path": s.path,
+                "title": s.title,
+                "status": s.status,
+                "created": s.created,
+                "scope": s.scope,
+            }
+            for s in specs
+        ]
+        click.echo(json.dumps(data, ensure_ascii=False, indent=2))
+    else:
+        if not specs:
+            click.echo("No specs found.")
+            return
+        for s in specs:
+            scope_str = f" [{s.scope}]" if s.scope else ""
+            click.echo(f"{s.status:30s} {s.title}{scope_str}")
+            click.echo(f"  {s.path}")
+
+
+@spec_group.command("show")
+@click.argument("spec_ref")
+@click.option("--json", "json_output", is_flag=True)
+@click.pass_context
+def spec_show(ctx: click.Context, spec_ref: str, json_output: bool) -> None:
+    root = find_repo_root(_cwd_from_context(ctx))
+    path = _resolve_any_doc(root, spec_ref, "spec")
+    text = path.read_text(encoding="utf-8")
+    info = parse_spec_info(text, path=path.relative_to(root).as_posix())
+    if json_output:
+        click.echo(json.dumps({
+            "path": info.path,
+            "title": info.title,
+            "status": info.status,
+            "created": info.created,
+            "scope": info.scope,
+            "project": info.project,
+            "epic": info.epic,
+            "linked_plans": info.linked_plans,
+        }, ensure_ascii=False, indent=2))
+    else:
+        click.echo(f"# {info.title}")
+        click.echo(f"Status: {info.status}")
+        if info.created:
+            click.echo(f"Created: {info.created}")
+        if info.scope:
+            click.echo(f"Scope: {info.scope}")
+        click.echo(f"Path: {info.path}")
+        if info.linked_plans:
+            click.echo(f"Linked plans: {', '.join(info.linked_plans)}")
+
+
+@spec_group.command("set-status")
+@click.argument("spec_ref")
+@click.option("--status", required=True, type=click.Choice(SPEC_STATUSES))
+@click.option("--actor", required=True)
+@click.pass_context
+def spec_set_status_cmd(ctx: click.Context, spec_ref: str, status: str, actor: str) -> None:
+    root = find_repo_root(_cwd_from_context(ctx))
+    touched = set_spec_status(root, spec_ref=spec_ref, status=status, actor=actor)
+    _echo_touched(root, [touched])
+
+
+@plan_group.command("init")
+@click.option("--epic", "epic_ref", required=True)
+@click.option("--title", required=True)
+@click.option("--author", required=True)
+@click.option("--spec", "spec_ref", default=None)
+@click.option("--scope", default=None)
+@click.option("--status", default="draft", type=click.Choice(PLAN_STATUSES))
+@click.pass_context
+def plan_init_cmd(ctx: click.Context, epic_ref: str, title: str, author: str, spec_ref: str | None, scope: str | None, status: str) -> None:
+    root = find_repo_root(_cwd_from_context(ctx))
+    touched = create_plan(
+        root,
+        epic_ref=epic_ref,
+        title=title,
+        author=author,
+        spec_ref=spec_ref,
+        scope=scope,
+        status=status,
+    )
+    _echo_touched(root, [touched])
+
+
+@plan_group.command("list")
+@click.option("--epic", "epic_ref", default=None)
+@click.option("--json", "json_output", is_flag=True)
+@click.pass_context
+def plan_list_cmd(ctx: click.Context, epic_ref: str | None, json_output: bool) -> None:
+    root = find_repo_root(_cwd_from_context(ctx))
+    plans = list_plans(root, epic_ref=epic_ref)
+    if json_output:
+        data = [
+            {
+                "path": p.path,
+                "title": p.title,
+                "status": p.status,
+                "created": p.created,
+                "scope": p.scope,
+                "linked_spec": p.linked_spec,
+                "generated_tasks": p.generated_tasks,
+            }
+            for p in plans
+        ]
+        click.echo(json.dumps(data, ensure_ascii=False, indent=2))
+    else:
+        if not plans:
+            click.echo("No plans found.")
+            return
+        for p in plans:
+            scope_str = f" [{p.scope}]" if p.scope else ""
+            click.echo(f"{p.status:15s} {p.title}{scope_str}")
+            click.echo(f"  {p.path}")
+
+
+@plan_group.command("show")
+@click.argument("plan_ref")
+@click.option("--json", "json_output", is_flag=True)
+@click.pass_context
+def plan_show_cmd(ctx: click.Context, plan_ref: str, json_output: bool) -> None:
+    root = find_repo_root(_cwd_from_context(ctx))
+    path = _resolve_any_doc(root, plan_ref, "plan")
+    text = path.read_text(encoding="utf-8")
+    info = parse_plan_info(text, path=path.relative_to(root).as_posix())
+    if json_output:
+        click.echo(json.dumps({
+            "path": info.path,
+            "title": info.title,
+            "status": info.status,
+            "created": info.created,
+            "scope": info.scope,
+            "project": info.project,
+            "epic": info.epic,
+            "linked_spec": info.linked_spec,
+            "generated_tasks": info.generated_tasks,
+        }, ensure_ascii=False, indent=2))
+    else:
+        click.echo(f"# {info.title}")
+        click.echo(f"Status: {info.status}")
+        if info.created:
+            click.echo(f"Created: {info.created}")
+        if info.scope:
+            click.echo(f"Scope: {info.scope}")
+        click.echo(f"Path: {info.path}")
+        if info.linked_spec:
+            click.echo(f"Linked spec: {info.linked_spec}")
+        if info.generated_tasks:
+            click.echo(f"Generated tasks: {', '.join(info.generated_tasks)}")
+
+
+@plan_group.command("set-status")
+@click.argument("plan_ref")
+@click.option("--status", required=True, type=click.Choice(PLAN_STATUSES))
+@click.option("--actor", required=True)
+@click.pass_context
+def plan_set_status_cmd(ctx: click.Context, plan_ref: str, status: str, actor: str) -> None:
+    root = find_repo_root(_cwd_from_context(ctx))
+    touched = set_plan_status(root, plan_ref=plan_ref, status=status, actor=actor)
+    _echo_touched(root, [touched])
+
+
+@plan_group.command("link-spec")
+@click.option("--plan", "plan_ref", required=True)
+@click.option("--spec", "spec_ref", required=True)
+@click.pass_context
+def plan_link_spec_cmd(ctx: click.Context, plan_ref: str, spec_ref: str) -> None:
+    root = find_repo_root(_cwd_from_context(ctx))
+    touched = link_plan_spec(root, plan_ref=plan_ref, spec_ref=spec_ref)
+    _echo_touched(root, touched)
+
+
+@plan_group.command("status")
+@click.option("--epic", "epic_ref", required=True)
+@click.option("--json", "json_output", is_flag=True)
+@click.pass_context
+def plan_status_cmd(ctx: click.Context, epic_ref: str, json_output: bool) -> None:
+    root = find_repo_root(_cwd_from_context(ctx))
+    status = build_planning_status(root, epic_ref=epic_ref)
+    if json_output:
+        click.echo(json.dumps(planning_status_to_dict(status), ensure_ascii=False, indent=2))
+    else:
+        click.echo(format_planning_status_markdown(status), nl=False)
 
 
 @cli.group("project")

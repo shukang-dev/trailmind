@@ -145,6 +145,56 @@
         </tbody>
       </table>
     </section>
+
+    {% if epic.specs or epic.plans %}
+    <section>
+      <h2>Planning</h2>
+      {% if epic.specs %}
+      <h3>Specs ({{ epic.spec_count }})</h3>
+      <table>
+        <thead>
+          <tr><th>Spec</th><th>Status</th><th>Scope</th><th>Created</th><th>Plans</th></tr>
+        </thead>
+        <tbody>
+          {% for spec in epic.specs %}
+          <tr>
+            <td>
+              <strong>{{ spec.title }}</strong>
+              <p class="path">{{ spec.relative_path }}</p>
+            </td>
+            <td>{{ spec.status }}</td>
+            <td>{{ spec.scope }}</td>
+            <td>{{ spec.created }}</td>
+            <td>{{ spec.linked_plans|length }}</td>
+          </tr>
+          {% endfor %}
+        </tbody>
+      </table>
+      {% endif %}
+      {% if epic.plans %}
+      <h3>Plans ({{ epic.plan_count }})</h3>
+      <table>
+        <thead>
+          <tr><th>Plan</th><th>Status</th><th>Scope</th><th>Spec</th><th>Tasks</th></tr>
+        </thead>
+        <tbody>
+          {% for plan in epic.plans %}
+          <tr>
+            <td>
+              <strong>{{ plan.title }}</strong>
+              <p class="path">{{ plan.relative_path }}</p>
+            </td>
+            <td>{{ plan.status }}</td>
+            <td>{{ plan.scope }}</td>
+            <td>{{ plan.linked_spec or "—" }}</td>
+            <td>{{ plan.generated_tasks|length }}</td>
+          </tr>
+          {% endfor %}
+        </tbody>
+      </table>
+      {% endif %}
+    </section>
+    {% endif %}
   </main>
 </body>
 </html>
