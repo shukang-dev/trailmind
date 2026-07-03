@@ -221,6 +221,48 @@ def update_task_status(repo_root: Path, *, task_ref: str, status: str) -> Path:
     return path
 
 
+def set_task_due(
+    repo_root: Path,
+    *,
+    task_ref: str,
+    due_date: str | None,
+    actor: str,
+    note: str | None = None,
+) -> Path:
+    """Set or clear a task's due date.
+
+    Pass due_date=None to clear the due date.
+    """
+    if due_date is not None:
+        from datetime import datetime
+        try:
+            datetime.strptime(due_date, "%Y-%m-%d")
+        except ValueError as exc:
+            raise TrailmindError(f"invalid due date {due_date!r}; expected YYYY-MM-DD") from exc
+
+    task_path = resolve_entity(repo_root, raw=task_ref, entity="T")
+    frontmatter, body = read_entity_user_facing(task_path, label="task")
+    old_due = frontmatter.get("due")
+    frontmatter["due"] = due_date
+
+    if due_date is None:
+        action = f"Cleared due date (was {old_due})" if old_due else "Cleared due date"
+    else:
+        action = f"Due date set to {due_date}" + (f" (was {old_due})" if old_due else "")
+
+    body = append_activity_entry(
+        body,
+        action_activity_entry(
+            action=action,
+            actor_label="actor",
+            actor=actor,
+            note=note,
+        ),
+    )
+    write_entity(task_path, frontmatter=frontmatter, body=body)
+    return task_path
+
+
 def add_task_deliverable(repo_root: Path, *, task_ref: str, item: str, actor: str) -> Path:
     task_path = resolve_entity(repo_root, raw=task_ref, entity="T")
     frontmatter, body = read_entity_user_facing(task_path, label="task")
