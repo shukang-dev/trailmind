@@ -19,7 +19,7 @@ from trailmind.epic import EPIC_STATES, edit_epic, init_epic, set_epic_status, v
 from trailmind.errors import TrailmindError
 from trailmind.export import export_repo, format_export
 from trailmind.importer import import_repo, load_export_file
-from trailmind.inbox import add_inbox_item, list_inbox_items, resolve_inbox_item
+from trailmind.inbox import add_inbox_item, edit_inbox_item, list_inbox_items, resolve_inbox_item
 from trailmind.issue import (
     ISSUE_SEVERITIES,
     add_issue,
@@ -33,7 +33,7 @@ from trailmind.issue import (
     set_issue_severity,
 )
 from trailmind.log import log_activity
-from trailmind.milestone import add_milestone, list_milestones
+from trailmind.milestone import MILESTONE_STATUSES, add_milestone, edit_milestone, list_milestones
 from trailmind.paths import find_repo_root
 from trailmind.pickup import (
     build_issue_pickup,
@@ -506,6 +506,31 @@ def inbox_show(ctx: click.Context, item_ref: str, json_output: bool) -> None:
         click.echo(json.dumps(data, ensure_ascii=False, indent=2, default=str))
     else:
         click.echo(format_entity_show(data, entity_label="Inbox"), nl=False)
+
+
+@inbox_group.command("edit")
+@click.argument("item_ref")
+@click.option("--title", default=None, help="New inbox item title.")
+@click.option("--actor", required=True)
+@click.option("--note", default=None)
+@click.pass_context
+def inbox_edit(
+    ctx: click.Context,
+    item_ref: str,
+    title: str | None,
+    actor: str,
+    note: str | None,
+) -> None:
+    """Edit editable fields on an inbox item."""
+    root = find_repo_root(_cwd_from_context(ctx))
+    touched = edit_inbox_item(
+        root,
+        item_ref=item_ref,
+        actor=actor,
+        title=title,
+        note=note,
+    )
+    _echo_touched(root, [touched])
 
 
 def _cwd_from_context(ctx: click.Context) -> Path:
@@ -1864,6 +1889,38 @@ def milestone_show(ctx: click.Context, milestone_ref: str, json_output: bool) ->
         click.echo(json.dumps(data, ensure_ascii=False, indent=2, default=str))
     else:
         click.echo(format_entity_show(data, entity_label="Milestone"), nl=False)
+
+
+@milestone_group.command("edit")
+@click.argument("milestone_ref")
+@click.option("--title", default=None, help="New milestone title.")
+@click.option("--date", "milestone_date", default=None, help="New milestone date (YYYY-MM-DD).")
+@click.option("--status", default=None, type=click.Choice(MILESTONE_STATUSES, case_sensitive=False),
+              help="New milestone status.")
+@click.option("--actor", required=True)
+@click.option("--note", default=None)
+@click.pass_context
+def milestone_edit(
+    ctx: click.Context,
+    milestone_ref: str,
+    title: str | None,
+    milestone_date: str | None,
+    status: str | None,
+    actor: str,
+    note: str | None,
+) -> None:
+    """Edit editable fields on a milestone."""
+    root = find_repo_root(_cwd_from_context(ctx))
+    touched = edit_milestone(
+        root,
+        milestone_ref=milestone_ref,
+        actor=actor,
+        title=title,
+        milestone_date=milestone_date,
+        status=status,
+        note=note,
+    )
+    _echo_touched(root, [touched])
 
 
 @cli.command("log")

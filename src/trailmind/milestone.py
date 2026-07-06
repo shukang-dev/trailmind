@@ -6,7 +6,7 @@ from pathlib import Path, PurePosixPath, PureWindowsPath
 from trailmind.entity_io import write_entity
 from trailmind.errors import TrailmindError
 from trailmind.ids import next_entity_id, slugify
-from trailmind.log import read_entity_user_facing
+from trailmind.log import action_activity_entry, append_activity_entry, read_entity_user_facing
 
 
 def _missing_epic(raw: str) -> TrailmindError:
@@ -106,4 +106,64 @@ def add_milestone(repo_root: Path, *, epic: str, title: str, milestone_date: str
         },
         body=_initial_body(title, milestone_date),
     )
+    return milestone_path
+
+
+MILESTONE_STATUSES = ("planned", "in_progress", "done", "cancelled")
+
+
+def edit_milestone(
+    repo_root: Path,
+    *,
+    milestone_ref: str,
+    actor: str,
+    title: str | None = None,
+    milestone_date: str | None = None,
+    status: str | None = None,
+    note: str | None = None,
+) -> Path:
+    """Edit editable fields on a milestone."""
+    from trailmind.resolver import resolve_entity
+    milestone_path = resolve_entity(repo_root, raw=milestone_ref, entity="M")
+    frontmatter, body = read_entity_user_facing(milestone_path, label="milestone")
+
+    changes: list[str] = []
+
+    if title is not None and title.strip():
+        old_title = str(frontmatter.get("title", ""))
+        frontmatter["title"] = title.strip()
+        import re
+        body = re.sub(r"^# .+$", f"# {title.strip()}", body, count=1)
+        changes.append(f"Title: {old_title} → {title.strip()}")
+
+    if milestone_date is not None:
+        validated = _validate_date(milestone_date)
+        old_date = str(frontmatter.get("date", ""))
+        frontmatter["date"] = validated
+        import re
+        body = re.sub(r"^Date: .+$", f"Date: {validated}", body, count=1, flags=re.MULTILINE)
+        changes.append(f"Date: {old_date} → {validated}")
+
+    if status is not None:
+        normalized = status.strip().lower()
+        if normalized not in MILESTONE_STATUSES:
+            raise TrailmindError(f"invalid milestone status {status!r}; expected one of: {', '.join(MILESTONE_STATUSES)}")
+        old_status = str(frontmatter.get("status", "planned"))
+        frontmatter["status"] = normalized
+        changes.append(f"Status: {old_status} → {normalized}")
+
+    if not changes:
+        raise TrailmindError("no fields to edit; provide --title, --date, or --status")
+
+    action = f"Edited milestone: {'; '.join(changes)}"
+    body = append_activity_entry(
+        body,
+        action_activity_entry(
+            action=action,
+            actor_label="actor",
+            actor=actor,
+            note=note,
+        ),
+    )
+    write_entity(milestone_path, frontmatter=frontmatter, body=body)
     return milestone_path

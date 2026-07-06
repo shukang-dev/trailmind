@@ -215,3 +215,41 @@ def resolve_inbox_item(repo_root: Path, *, item_ref: str, resolver: str, note: s
     )
     write_entity(item_path, frontmatter=frontmatter, body=body)
     return item_path
+
+
+def edit_inbox_item(
+    repo_root: Path,
+    *,
+    item_ref: str,
+    actor: str,
+    title: str | None = None,
+    note: str | None = None,
+) -> Path:
+    """Edit editable fields on an inbox item."""
+    item_path = _resolve_inbox_item(repo_root, item_ref)
+    frontmatter, body = read_entity_user_facing(item_path, label="inbox")
+
+    changes: list[str] = []
+
+    if title is not None and title.strip():
+        old_title = str(frontmatter.get("title", ""))
+        frontmatter["title"] = title.strip()
+        import re
+        body = re.sub(r"^# .+$", f"# {title.strip()}", body, count=1)
+        changes.append(f"Title: {old_title} → {title.strip()}")
+
+    if not changes:
+        raise TrailmindError("no fields to edit; provide --title")
+
+    action = f"Edited inbox item: {'; '.join(changes)}"
+    body = append_activity_entry(
+        body,
+        action_activity_entry(
+            action=action,
+            actor_label="actor",
+            actor=actor,
+            note=note,
+        ),
+    )
+    write_entity(item_path, frontmatter=frontmatter, body=body)
+    return item_path
