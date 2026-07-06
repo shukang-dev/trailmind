@@ -83,6 +83,7 @@ from trailmind.task import (
     complete_task_deliverable,
     edit_task,
     list_tasks,
+    next_tasks,
     normalize_task_statuses,
     set_task_due,
     set_task_priority,
@@ -1359,6 +1360,43 @@ def task_reopen(
     _echo_touched(root, [touched])
     if warning:
         click.echo(warning)
+
+
+@task_group.command("next")
+@click.option("--owner", default=None, help="Filter by owner shortname.")
+@click.option("--limit", default=10, show_default=True, type=click.IntRange(min=1, max=50),
+              help="Maximum tasks to show.")
+@click.option("--json", "json_output", is_flag=True, help="Print structured JSON.")
+@click.pass_context
+def task_next(ctx: click.Context, owner: str | None, limit: int, json_output: bool) -> None:
+    """Show the most actionable tasks next to work on (sorted by priority then due date)."""
+    root = find_repo_root(_cwd_from_context(ctx))
+    tasks = next_tasks(root, owner=owner, limit=limit)
+
+    if json_output:
+        # Remove internal sort keys
+        clean = [{k: v for k, v in t.items() if not k.startswith("_")} for t in tasks]
+        click.echo(json.dumps(clean, ensure_ascii=False, indent=2))
+        return
+
+    if not tasks:
+        click.echo("No actionable tasks found. All caught up! 🎉")
+        return
+
+    click.echo("Next tasks to work on:\n")
+    for i, t in enumerate(tasks, 1):
+        pri = t.get("priority", "")
+        pri_str = f" [{pri.upper()}]" if pri else ""
+        due = t.get("due", "")
+        due_str = f" due:{due}" if due else ""
+        status = t.get("status", "")
+        in_prog = " (in progress)" if t.get("_in_progress") else ""
+        owner_str = f" @{t.get('owner', '')}" if t.get("owner") else ""
+        click.echo(f"  {i:2d}. {t['id']}{pri_str}{owner_str}{due_str}{in_prog}")
+        click.echo(f"      {t['title']}")
+        click.echo(f"      {t['path']}")
+        if i < len(tasks):
+            click.echo()
 
 
 @task_group.command("edit")

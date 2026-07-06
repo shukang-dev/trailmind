@@ -212,6 +212,42 @@ def list_tasks(
     return tasks
 
 
+PRIORITY_ORDER = {"critical": 0, "high": 1, "medium": 2, "low": 3, "": 4}
+
+
+def next_tasks(
+    repo_root: Path,
+    *,
+    owner: str | None = None,
+    limit: int = 10,
+) -> list[dict[str, Any]]:
+    """Return the most actionable tasks, sorted by priority then due date.
+
+    Includes tasks in `ready` or `created` status (not done, wontfix, blocked, or in_progress).
+    Sorted by: priority (critical first), then due date (earliest first), then created date.
+    """
+    ready = list_tasks(repo_root, status="ready", owner=owner)
+    created = list_tasks(repo_root, status="created", owner=owner)
+    candidates = ready + created
+
+    # Also include in_progress tasks that might need attention
+    in_progress = list_tasks(repo_root, status="in_progress", owner=owner)
+    # Mark in_progress tasks for display
+    for t in in_progress:
+        t["_in_progress"] = True
+    candidates = in_progress + candidates
+
+    def sort_key(t: dict[str, Any]) -> tuple:
+        pri = PRIORITY_ORDER.get(t.get("priority", ""), 4)
+        due = t.get("due", "") or "9999-99-99"  # no due date = last
+        created = t.get("created", "") or "9999-99-99"
+        in_prog = 0 if t.get("_in_progress") else 1  # in_progress first
+        return (in_prog, pri, due, created)
+
+    candidates.sort(key=sort_key)
+    return candidates[:limit]
+
+
 def add_task(
     repo_root: Path,
     *,
