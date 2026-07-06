@@ -210,7 +210,9 @@ def test_status_ignores_unrelated_markdown_in_entity_dirs(tmp_path: Path):
     project_result = runner.invoke(cli, ["status", "--project", "demo_app"], obj={"cwd": repo})
     assert project_result.exit_code == 0
     project_html = (repo / "projects" / "demo_app" / "dashboard.html").read_text(encoding="utf-8")
-    assert "1 tasks, 1 issues, 1 milestones" in project_html
+    assert ">1</strong> tasks" in project_html
+    assert ">1</strong> issues" in project_html
+    assert ">1</strong> milestones" in project_html
     assert "README" not in project_html
     assert "Bad" not in project_html
     assert "999I" not in project_html

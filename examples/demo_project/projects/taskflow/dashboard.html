@@ -3,7 +3,7 @@
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
-  <title>{{ title }}</title>
+  <title>TaskFlow Dashboard</title>
   <style>
     :root {
       color-scheme: light dark;
@@ -211,70 +211,78 @@
   <div class="breadcrumbs">
     <a href="../../overview.html">Overview</a>
     <span class="sep">/</span>
-    <span class="current">{{ project.title }}</span>
+    <span class="current">TaskFlow</span>
   </div>
 
   <main>
     <header class="page-header">
-      <h1>{{ project.title }}</h1>
-      <p class="subtitle">{{ project.goal }}</p>
-      <span class="repo-path">{{ project.relative_path }}</span>
+      <h1>TaskFlow</h1>
+      <p class="subtitle">Build a collaborative task management app.</p>
+      <span class="repo-path">projects/taskflow</span>
     </header>
 
     <div class="metrics" aria-label="Project counts">
-      <div class="metric"><strong>{{ project.epic_count }}</strong><span>Epics</span></div>
-      {% for count in project.epic_state_counts %}
-      <div class="metric"><strong>{{ count.count }}</strong><span>{{ count.label }} epics</span></div>
-      {% endfor %}
+      <div class="metric"><strong>2</strong><span>Epics</span></div>
+      <div class="metric"><strong>2</strong><span>active epics</span></div>
     </div>
 
     <div class="pills">
-      <span class="pill">{{ project.slug }}</span>
-      {% for owner in project.owners %}
-      <span class="pill">{{ owner }}</span>
-      {% endfor %}
-      {% for tag in project.tags %}
-      <span class="pill">{{ tag }}</span>
-      {% endfor %}
+      <span class="pill">taskflow</span>
+      <span class="pill">alice@example.com</span>
+      <span class="pill">demo</span>
+      <span class="pill">webapp</span>
     </div>
 
-    {% if project.body %}
     <section class="panel">
       <h2>Project Notes</h2>
-      <pre>{{ project.body }}</pre>
+      <pre># TaskFlow
+
+## Goal
+
+Build a collaborative task management app.</pre>
     </section>
-    {% endif %}
 
     <section>
-      <h2>Epics <span class="count-badge">{{ epics|length }}</span></h2>
+      <h2>Epics <span class="count-badge">2</span></h2>
       <div class="grid">
-        {% for epic in epics %}
-        {% set done_count = epic.task_done_count or 0 %}
-        {% set total_t = epic.task_count or 0 %}
-        {% set pct = (done_count / total_t * 100) if total_t > 0 else 0 %}
-        <a href="{{ epic.relative_path }}/dashboard.html" class="card">
+        <a href="projects/taskflow/auth/dashboard.html" class="card">
           <span class="card-arrow">→</span>
-          <h2>{{ epic.title }}</h2>
-          <p class="card-desc">{{ epic.goal }}</p>
+          <h2>Authentication &amp; Users</h2>
+          <p class="card-desc">User accounts, login, and session management</p>
           <div class="card-meta">
-            <span class="pill state-{{ epic.state }}">{{ epic.state }}</span>
-            {% if epic.target %}<span class="pill">{{ epic.target }}</span>{% endif %}
+            <span class="pill state-active">active</span>
+<span class="pill">2026-08-31</span>          </div>
+          <div class="progress-bar" title="0/2 tasks done">
+            <div class="fill" style="width: 0%"></div>
           </div>
-          {% if total_t > 0 %}
-          <div class="progress-bar" title="{{ done_count }}/{{ total_t }} tasks done">
-            <div class="fill" style="width: {{ pct|int }}%"></div>
-          </div>
-          {% endif %}
           <div class="card-stats">
-            <span class="card-stat"><strong>{{ epic.task_count }}</strong> tasks</span>
-            <span class="card-stat"><strong>{{ epic.issue_count }}</strong> issues</span>
-            <span class="card-stat"><strong>{{ epic.milestone_count }}</strong> milestones</span>
-            <span class="card-stat"><strong>{{ epic.spec_count }}</strong> specs</span>
-            <span class="card-stat"><strong>{{ epic.plan_count }}</strong> plans</span>
+            <span class="card-stat"><strong>2</strong> tasks</span>
+            <span class="card-stat"><strong>0</strong> issues</span>
+            <span class="card-stat"><strong>1</strong> milestones</span>
+            <span class="card-stat"><strong>0</strong> specs</span>
+            <span class="card-stat"><strong>0</strong> plans</span>
           </div>
-          <p class="card-path">{{ epic.relative_path }}</p>
+          <p class="card-path">projects/taskflow/auth</p>
         </a>
-        {% endfor %}
+        <a href="projects/taskflow/mvp/dashboard.html" class="card">
+          <span class="card-arrow">→</span>
+          <h2>MVP Release</h2>
+          <p class="card-desc">First usable release with core task management</p>
+          <div class="card-meta">
+            <span class="pill state-active">active</span>
+<span class="pill">2026-07-31</span>          </div>
+          <div class="progress-bar" title="1/4 tasks done">
+            <div class="fill" style="width: 25%"></div>
+          </div>
+          <div class="card-stats">
+            <span class="card-stat"><strong>4</strong> tasks</span>
+            <span class="card-stat"><strong>2</strong> issues</span>
+            <span class="card-stat"><strong>2</strong> milestones</span>
+            <span class="card-stat"><strong>2</strong> specs</span>
+            <span class="card-stat"><strong>3</strong> plans</span>
+          </div>
+          <p class="card-path">projects/taskflow/mvp</p>
+        </a>
       </div>
     </section>
   </main>

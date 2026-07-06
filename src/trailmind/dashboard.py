@@ -96,6 +96,7 @@ def render_project_dashboard_at(repo_root: Path, project_path: Path) -> Path:
             "title": f"{project['title']} Dashboard",
             "project": project,
             "epics": project["epics"],
+            "today": date.today().isoformat(),
         },
     )
 
@@ -220,7 +221,7 @@ def _read_entity_user_facing(path: Path, *, label: str) -> tuple[dict[str, Any],
 
 def _project_summary(repo_root: Path, project_path: Path) -> dict[str, Any]:
     frontmatter, body = _read_entity_user_facing(project_path / "PROJECT.md", label="project")
-    epics = [_epic_summary(repo_root, epic_path, include_children=False) for epic_path in _epic_dirs(project_path)]
+    epics = [_epic_summary(repo_root, epic_path, include_children=True) for epic_path in _epic_dirs(project_path)]
     return {
         "path": project_path,
         "relative_path": _relative(repo_root, project_path),
@@ -273,6 +274,7 @@ def _epic_summary(repo_root: Path, epic_path: Path, *, include_children: bool) -
                 "spec_count": len(specs),
                 "plan_count": len(plans),
                 "task_status_counts": _status_counts(tasks, "status"),
+                "task_done_count": sum(1 for t in tasks if t.get("status") == "done"),
                 "issue_status_counts": _status_counts(issues, "status"),
                 "milestone_status_counts": _status_counts(milestones, "status"),
                 "spec_status_counts": _status_counts(specs, "status"),

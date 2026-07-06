@@ -6,75 +6,250 @@
   <title>MVP Release Dashboard</title>
   <style>
     :root {
-      color-scheme: light;
-      --bg: #f7f8fb;
+      color-scheme: light dark;
+      --bg: #f0f2f5;
       --panel: #ffffff;
-      --ink: #20242c;
-      --muted: #5f6978;
-      --line: #d9dee8;
-      --accent: #8a4a2a;
-      --accent-soft: #f6eee9;
+      --ink: #1a1d23;
+      --muted: #6b7280;
+      --line: #e2e5ea;
+      --accent: #2563eb;
+      --accent-soft: #eff6ff;
+      --accent-ink: #1d4ed8;
+      --success: #059669;
+      --success-soft: #ecfdf5;
+      --warning: #d97706;
+      --warning-soft: #fffbeb;
+      --danger: #dc2626;
+      --danger-soft: #fef2f2;
+      --info: #7c3aed;
+      --info-soft: #f5f3ff;
+    }
+    @media (prefers-color-scheme: dark) {
+      :root {
+        --bg: #0f1117;
+        --panel: #1a1d27;
+        --ink: #e4e6eb;
+        --muted: #9ca3af;
+        --line: #2a2e3a;
+        --accent: #60a5fa;
+        --accent-soft: #1e3a5f;
+        --accent-ink: #93c5fd;
+        --success: #34d399;
+        --success-soft: #064e3b;
+        --warning: #fbbf24;
+        --warning-soft: #451a03;
+        --danger: #f87171;
+        --danger-soft: #450a0a;
+        --info: #a78bfa;
+        --info-soft: #2e1065;
+      }
     }
     * { box-sizing: border-box; }
-    body { margin: 0; font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif; color: var(--ink); background: var(--bg); }
-    main { max-width: 1180px; margin: 0 auto; padding: 32px 20px 48px; }
-    header { margin-bottom: 24px; }
-    h1 { margin: 0 0 8px; font-size: 2rem; line-height: 1.15; letter-spacing: 0; }
-    h2 { margin: 0 0 10px; font-size: 1.2rem; letter-spacing: 0; }
-    p { margin: 0; color: var(--muted); line-height: 1.5; }
-    .path { color: var(--muted); font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: 0.84rem; }
-    .panel { border: 1px solid var(--line); border-radius: 8px; background: var(--panel); padding: 16px; margin-bottom: 16px; }
+    body {
+      margin: 0;
+      font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+      color: var(--ink);
+      background: var(--bg);
+      line-height: 1.5;
+    }
+    a { color: var(--accent); text-decoration: none; }
+    a:hover { text-decoration: underline; }
+
+    .topnav {
+      background: var(--panel);
+      border-bottom: 1px solid var(--line);
+      padding: 0 24px;
+      position: sticky; top: 0; z-index: 100;
+    }
+    .topnav-inner {
+      max-width: 1200px; margin: 0 auto;
+      display: flex; align-items: center; height: 52px; gap: 16px;
+    }
+    .topnav .brand {
+      font-weight: 700; font-size: 1.05rem; color: var(--accent-ink);
+      display: flex; align-items: center; gap: 8px;
+    }
+    .topnav .brand:hover { text-decoration: none; }
+    .topnav .brand-icon {
+      width: 28px; height: 28px; background: var(--accent); border-radius: 7px;
+      display: flex; align-items: center; justify-content: center;
+      color: #fff; font-weight: 800; font-size: 0.85rem;
+    }
+    .topnav .nav-links { display: flex; gap: 4px; margin-left: auto; }
+    .topnav .nav-links a {
+      padding: 6px 12px; border-radius: 6px; font-size: 0.88rem;
+      color: var(--muted); transition: background 0.15s;
+    }
+    .topnav .nav-links a:hover { background: var(--accent-soft); color: var(--accent-ink); text-decoration: none; }
+
+    .breadcrumbs {
+      max-width: 1200px; margin: 0 auto;
+      padding: 14px 24px 0;
+      display: flex; align-items: center; gap: 6px;
+      font-size: 0.88rem; color: var(--muted);
+    }
+    .breadcrumbs a { color: var(--muted); }
+    .breadcrumbs a:hover { color: var(--accent-ink); }
+    .breadcrumbs .sep { color: var(--line); }
+    .breadcrumbs .current { color: var(--ink); font-weight: 500; }
+
+    main { max-width: 1200px; margin: 0 auto; padding: 20px 24px 48px; }
+
+    header.page-header { margin-bottom: 24px; }
+    header.page-header h1 { margin: 0 0 4px; font-size: 1.75rem; font-weight: 700; letter-spacing: -0.02em; }
+    header.page-header .subtitle { color: var(--muted); font-size: 0.95rem; margin-bottom: 4px; }
+    header.page-header .repo-path {
+      font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+      font-size: 0.8rem; color: var(--muted);
+      background: var(--bg); padding: 2px 8px; border-radius: 4px; display: inline-block;
+    }
+
     .metrics { display: flex; flex-wrap: wrap; gap: 10px; margin-top: 16px; }
-    .metric { min-width: 124px; border: 1px solid var(--line); border-radius: 8px; background: var(--panel); padding: 12px 14px; }
-    .metric strong { display: block; font-size: 1.35rem; line-height: 1.1; }
-    .metric span { color: var(--muted); font-size: 0.9rem; }
-    .pills { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 12px; }
-    .pill { display: inline-flex; align-items: center; min-height: 24px; padding: 2px 8px; border-radius: 999px; background: var(--accent-soft); color: var(--accent); font-size: 0.85rem; white-space: nowrap; }
-    table { width: 100%; border-collapse: collapse; background: var(--panel); border: 1px solid var(--line); border-radius: 8px; overflow: hidden; margin-bottom: 20px; }
-    th, td { padding: 10px 12px; border-bottom: 1px solid var(--line); text-align: left; vertical-align: top; }
-    th { color: var(--muted); font-size: 0.82rem; font-weight: 600; text-transform: uppercase; }
+    .metric {
+      min-width: 120px; border: 1px solid var(--line); border-radius: 10px;
+      background: var(--panel); padding: 14px 16px;
+      transition: box-shadow 0.15s;
+    }
+    .metric:hover { box-shadow: 0 2px 8px rgba(0,0,0,0.08); }
+    .metric strong { display: block; font-size: 1.6rem; font-weight: 700; line-height: 1.1; }
+    .metric span { color: var(--muted); font-size: 0.82rem; }
+
+    .pills { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 10px; }
+    .pill {
+      display: inline-flex; align-items: center;
+      padding: 3px 10px; border-radius: 999px;
+      font-size: 0.78rem; font-weight: 500; white-space: nowrap;
+      background: var(--accent-soft); color: var(--accent-ink);
+    }
+    .pill.state-active { background: var(--success-soft); color: var(--success); }
+    .pill.state-completed { background: var(--muted); color: #fff; }
+    .pill.state-paused { background: var(--warning-soft); color: var(--warning); }
+    .pill.state-planning { background: var(--info-soft); color: var(--info); }
+    .pill.state-archived, .pill.state-cancelled { background: var(--bg); color: var(--muted); }
+
+    /* Progress bar */
+    .progress-bar { height: 6px; background: var(--bg); border-radius: 3px; overflow: hidden; margin-top: 12px; }
+    .progress-bar .fill { height: 100%; background: var(--success); border-radius: 3px; transition: width 0.3s; }
+
+    section { margin-top: 28px; }
+    section h2 {
+      font-size: 1.05rem; font-weight: 600; margin: 0 0 12px;
+      display: flex; align-items: center; gap: 8px;
+    }
+    section h2 .count-badge {
+      font-size: 0.78rem; font-weight: 500;
+      background: var(--bg); color: var(--muted);
+      padding: 2px 8px; border-radius: 999px;
+    }
+    section h3 { font-size: 0.92rem; font-weight: 600; margin: 16px 0 8px; color: var(--muted); }
+
+    /* Tables */
+    table {
+      width: 100%; border-collapse: collapse;
+      background: var(--panel); border: 1px solid var(--line);
+      border-radius: 10px; overflow: hidden; margin-bottom: 20px;
+    }
+    th, td { padding: 10px 14px; border-bottom: 1px solid var(--line); text-align: left; vertical-align: top; }
+    th { color: var(--muted); font-size: 0.78rem; font-weight: 600; text-transform: uppercase; letter-spacing: 0.03em; background: var(--bg); }
     tr:last-child td { border-bottom: 0; }
+    tr:hover td { background: rgba(37, 99, 235, 0.03); }
+
+    td.entity-title strong a { color: var(--ink); }
+    td.entity-title strong a:hover { color: var(--accent); text-decoration: none; }
+    td .entity-path {
+      font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+      font-size: 0.78rem; color: var(--muted); margin-top: 2px;
+    }
+    td .entity-path a { color: var(--muted); }
+    td .entity-path a:hover { color: var(--accent); }
+
+    /* Status badges */
+    .status-badge {
+      display: inline-block; padding: 2px 10px; border-radius: 999px;
+      font-size: 0.78rem; font-weight: 500;
+    }
+    .status-created { background: var(--bg); color: var(--muted); }
+    .status-ready { background: var(--success-soft); color: var(--success); }
+    .status-in_progress { background: var(--accent-soft); color: var(--accent-ink); }
+    .status-blocked { background: var(--danger-soft); color: var(--danger); }
+    .status-done { background: var(--bg); color: var(--muted); text-decoration: line-through; }
+    .status-wontfix { background: var(--bg); color: var(--muted); text-decoration: line-through; }
+    .status-open { background: var(--warning-soft); color: var(--warning); }
+
+    /* Priority/severity badges */
+    .priority-badge, .severity-badge {
+      display: inline-block; padding: 2px 10px; border-radius: 6px;
+      font-size: 0.78rem; font-weight: 600;
+    }
+    .priority-critical, .severity-critical { background: var(--danger-soft); color: var(--danger); }
+    .priority-high, .severity-high { background: var(--warning-soft); color: var(--warning); }
+    .priority-medium, .severity-medium { background: var(--accent-soft); color: var(--accent-ink); }
+    .priority-low, .severity-low { background: var(--bg); color: var(--muted); }
+
+    /* Overdue */
+    .task-overdue { background: var(--danger-soft); }
+    .task-overdue td.entity-title strong a { color: var(--danger); }
+
+    /* Notes */
+    .panel { border: 1px solid var(--line); border-radius: 10px; background: var(--panel); padding: 16px; margin-bottom: 16px; }
+    .panel h2 { margin: 0 0 10px; font-size: 1rem; }
     details { margin-top: 6px; }
-    summary { color: var(--accent); cursor: pointer; }
-    pre { margin: 10px 0 0; white-space: pre-wrap; color: var(--muted); font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: 0.88rem; line-height: 1.45; }
-    .status-created { color: #6b7280; }
-    .status-ready { color: #059669; }
-    .status-in_progress { color: #2563eb; }
-    .status-blocked { color: #dc2626; }
-    .status-done { color: #6b7280; text-decoration: line-through; }
-    .status-wontfix { color: #9ca3af; text-decoration: line-through; }
-    .status-open { color: #dc2626; }
-    .priority-critical { display: inline-block; padding: 1px 8px; border-radius: 4px; background: #fef2f2; color: #dc2626; font-weight: 600; font-size: 0.8rem; }
-    .priority-high { display: inline-block; padding: 1px 8px; border-radius: 4px; background: #fff7ed; color: #ea580c; font-weight: 600; font-size: 0.8rem; }
-    .priority-medium { display: inline-block; padding: 1px 8px; border-radius: 4px; background: #eff6ff; color: #2563eb; font-size: 0.8rem; }
-    .priority-low { display: inline-block; padding: 1px 8px; border-radius: 4px; background: #f3f4f6; color: #6b7280; font-size: 0.8rem; }
-    .severity-critical { display: inline-block; padding: 1px 8px; border-radius: 4px; background: #fef2f2; color: #dc2626; font-weight: 600; font-size: 0.8rem; }
-    .severity-high { display: inline-block; padding: 1px 8px; border-radius: 4px; background: #fff7ed; color: #ea580c; font-weight: 600; font-size: 0.8rem; }
-    .severity-medium { display: inline-block; padding: 1px 8px; border-radius: 4px; background: #eff6ff; color: #2563eb; font-size: 0.8rem; }
-    .severity-low { display: inline-block; padding: 1px 8px; border-radius: 4px; background: #f3f4f6; color: #6b7280; font-size: 0.8rem; }
-    .task-overdue { background: #fff1f2; }
-    .task-overdue td:first-child strong { color: #dc2626; }
+    summary { color: var(--accent); cursor: pointer; font-size: 0.82rem; }
+    pre {
+      margin: 8px 0 0; white-space: pre-wrap; word-break: break-word;
+      color: var(--muted); font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+      font-size: 0.82rem; line-height: 1.5; background: var(--bg); padding: 10px; border-radius: 6px;
+    }
+
+    @media (max-width: 640px) {
+      .topnav-inner { height: 44px; }
+      main { padding: 12px 14px 32px; }
+      .metric { min-width: 100px; padding: 10px 12px; }
+      .metric strong { font-size: 1.3rem; }
+    }
   </style>
 </head>
 <body>
+  <nav class="topnav">
+    <div class="topnav-inner">
+      <a href="../../../overview.html" class="brand">
+        <span class="brand-icon">T</span>
+        Trailmind
+      </a>
+      <div class="nav-links">
+        <a href="../../../overview.html">Overview</a>
+        <a href="../dashboard.html">taskflow</a>
+      </div>
+    </div>
+  </nav>
+
+  <div class="breadcrumbs">
+    <a href="../../../overview.html">Overview</a>
+    <span class="sep">/</span>
+    <a href="../dashboard.html">taskflow</a>
+    <span class="sep">/</span>
+    <span class="current">MVP Release</span>
+  </div>
+
   <main>
-    <header>
+    <header class="page-header">
       <h1>MVP Release</h1>
-      <p>First usable release with core task management</p>
-      <p class="path">projects/taskflow/mvp</p>
-      <div class="metrics" aria-label="Epic counts">
-        <div class="metric"><strong>4</strong><span>Tasks</span></div>
-        <div class="metric"><strong>2</strong><span>Issues</span></div>
-        <div class="metric"><strong>2</strong><span>Milestones</span></div>
-      </div>
-      <div class="pills">
-        <span class="pill">active</span>
-        <span class="pill">project taskflow</span>
-<span class="pill">start 2026-07-01</span><span class="pill">target 2026-07-31</span>        <span class="pill">alice</span>
-        <span class="pill">bob</span>
-        <span class="pill">taskflow</span>
-      </div>
+      <p class="subtitle">First usable release with core task management</p>
+      <span class="repo-path">projects/taskflow/mvp</span>
     </header>
+
+    <div class="metrics" aria-label="Epic counts">
+      <div class="metric"><strong>4</strong><span>Tasks</span></div>
+      <div class="metric"><strong>2</strong><span>Issues</span></div>
+      <div class="metric"><strong>2</strong><span>Milestones</span></div>
+<div class="metric"><strong>2</strong><span>Specs</span></div><div class="metric"><strong>3</strong><span>Plans</span></div>    </div>
+
+    <div class="pills">
+      <span class="pill state-active">active</span>
+<span class="pill">start 2026-07-01</span><span class="pill">target 2026-07-31</span>      <span class="pill">alice</span>
+      <span class="pill">bob</span>
+      <span class="pill">taskflow</span>
+    </div>
 
     <section class="panel">
       <h2>Epic Notes</h2>
@@ -86,16 +261,16 @@ First usable release with core task management</pre>
     </section>
 
     <section>
-      <h2>Tasks</h2>
+      <h2>Tasks <span class="count-badge">4</span></h2>
       <table>
         <thead>
           <tr><th>Task</th><th>Status</th><th>Priority</th><th>Due</th><th>Owner</th><th>Created</th></tr>
         </thead>
         <tbody>
-          <tr class="task-ready">
-            <td>
-              <strong>T-123456-001 Build Task List View</strong>
-              <p class="path">projects/taskflow/mvp/tasks/T-123456-001-build-task-list-view.md</p>
+          <tr class="">
+            <td class="entity-title">
+              <strong><a href="projects/taskflow/mvp/tasks/T-123456-001-build-task-list-view.md">T-123456-001 Build Task List View</a></strong>
+              <p class="entity-path"><a href="projects/taskflow/mvp/tasks/T-123456-001-build-task-list-view.md">projects/taskflow/mvp/tasks/T-123456-001-build-task-list-view.md</a></p>
 <details><summary>Notes</summary><pre># Build Task List View
 
 ## Scope
@@ -110,16 +285,16 @@ TBD
 
 - 2026-07-02: Created task by alice.
 - 2026-07-02: Status changed from created to ready by alice. Design reviewed, ready to start.</pre></details>            </td>
-            <td><span class="status-ready">ready</span></td>
-            <td><span class="priority-high">high</span></td>
+            <td><span class="status-badge status-ready">ready</span></td>
+            <td><span class="priority-badge priority-high">high</span></td>
             <td>2026-07-10</td>
             <td>alice</td>
             <td>2026-07-02</td>
           </tr>
-          <tr class="task-done">
-            <td>
-              <strong>T-123456-002 Implement Task Create API</strong>
-              <p class="path">projects/taskflow/mvp/tasks/T-123456-002-implement-task-create-api.md</p>
+          <tr class="">
+            <td class="entity-title">
+              <strong><a href="projects/taskflow/mvp/tasks/T-123456-002-implement-task-create-api.md">T-123456-002 Implement Task Create API</a></strong>
+              <p class="entity-path"><a href="projects/taskflow/mvp/tasks/T-123456-002-implement-task-create-api.md">projects/taskflow/mvp/tasks/T-123456-002-implement-task-create-api.md</a></p>
 <details><summary>Notes</summary><pre># Implement Task Create API
 
 ## Scope
@@ -139,16 +314,16 @@ TBD
 - 2026-07-02: Added deliverable by bob. API documented
 - 2026-07-02: Completed deliverable by bob. API documented
 - 2026-07-02: Status changed from in_progress to done by bob. Implementation complete.</pre></details>            </td>
-            <td><span class="status-done">done</span></td>
-            <td><span class="priority-medium">medium</span></td>
+            <td><span class="status-badge status-done">done</span></td>
+            <td><span class="priority-badge priority-medium">medium</span></td>
             <td>2026-07-08</td>
             <td>bob</td>
             <td>2026-07-02</td>
           </tr>
-          <tr class="task-blocked">
-            <td>
-              <strong>T-123456-003 Wire Up Task Editing</strong>
-              <p class="path">projects/taskflow/mvp/tasks/T-123456-003-wire-up-task-editing.md</p>
+          <tr class="">
+            <td class="entity-title">
+              <strong><a href="projects/taskflow/mvp/tasks/T-123456-003-wire-up-task-editing.md">T-123456-003 Wire Up Task Editing</a></strong>
+              <p class="entity-path"><a href="projects/taskflow/mvp/tasks/T-123456-003-wire-up-task-editing.md">projects/taskflow/mvp/tasks/T-123456-003-wire-up-task-editing.md</a></p>
 <details><summary>Notes</summary><pre># Wire Up Task Editing
 
 ## Scope
@@ -163,16 +338,16 @@ TBD
 
 - 2026-07-02: Created task by alice.
 - 2026-07-02: Status changed from created to blocked by alice. Waiting for API design review.</pre></details>            </td>
-            <td><span class="status-blocked">blocked</span></td>
-            <td><span class="priority-medium">medium</span></td>
+            <td><span class="status-badge status-blocked">blocked</span></td>
+            <td><span class="priority-badge priority-medium">medium</span></td>
             <td>2026-07-12</td>
             <td>bob</td>
             <td>2026-07-02</td>
           </tr>
-          <tr class="task-created">
-            <td>
-              <strong>T-654321-001 Add Task Detail Page</strong>
-              <p class="path">projects/taskflow/mvp/tasks/T-654321-001-add-task-detail-page.md</p>
+          <tr class="">
+            <td class="entity-title">
+              <strong><a href="projects/taskflow/mvp/tasks/T-654321-001-add-task-detail-page.md">T-654321-001 Add Task Detail Page</a></strong>
+              <p class="entity-path"><a href="projects/taskflow/mvp/tasks/T-654321-001-add-task-detail-page.md">projects/taskflow/mvp/tasks/T-654321-001-add-task-detail-page.md</a></p>
 <details><summary>Notes</summary><pre># Add Task Detail Page
 
 ## Scope
@@ -186,8 +361,8 @@ TBD
 ## Activity Log
 
 - 2026-07-02: Created task by bob.</pre></details>            </td>
-            <td><span class="status-created">created</span></td>
-            <td><span class="priority-low">low</span></td>
+            <td><span class="status-badge status-created">created</span></td>
+            <td><span class="priority-badge priority-low">low</span></td>
             <td>2026-07-20</td>
             <td>alice</td>
             <td>2026-07-02</td>
@@ -197,16 +372,16 @@ TBD
     </section>
 
     <section>
-      <h2>Issues</h2>
+      <h2>Issues <span class="count-badge">2</span></h2>
       <table>
         <thead>
           <tr><th>Issue</th><th>Status</th><th>Severity</th><th>Owner</th><th>Filed By</th></tr>
         </thead>
         <tbody>
-          <tr class="issue-done">
-            <td>
-              <strong>I-123456-001 Task list crashes on empty</strong>
-              <p class="path">projects/taskflow/mvp/issues/I-123456-001-task-list-crashes-on-empty.md</p>
+          <tr>
+            <td class="entity-title">
+              <strong><a href="projects/taskflow/mvp/issues/I-123456-001-task-list-crashes-on-empty.md">I-123456-001 Task list crashes on empty</a></strong>
+              <p class="entity-path"><a href="projects/taskflow/mvp/issues/I-123456-001-task-list-crashes-on-empty.md">projects/taskflow/mvp/issues/I-123456-001-task-list-crashes-on-empty.md</a></p>
 <details><summary>Notes</summary><pre># Task list crashes on empty
 
 ## Description
@@ -221,15 +396,15 @@ TBD
 
 - 2026-07-02: Filed by alice.
 - 2026-07-02: Closed as done by alice. Fixed by adding empty state check.</pre></details>            </td>
-            <td><span class="status-done">done</span></td>
-            <td><span class="severity-high">high</span></td>
+            <td><span class="status-badge status-done">done</span></td>
+            <td><span class="severity-badge severity-high">high</span></td>
             <td>alice</td>
             <td>alice</td>
           </tr>
-          <tr class="issue-open">
-            <td>
-              <strong>I-654321-001 Create button disabled state unclear</strong>
-              <p class="path">projects/taskflow/mvp/issues/I-654321-001-create-button-disabled-state-unclear.md</p>
+          <tr>
+            <td class="entity-title">
+              <strong><a href="projects/taskflow/mvp/issues/I-654321-001-create-button-disabled-state-unclear.md">I-654321-001 Create button disabled state unclear</a></strong>
+              <p class="entity-path"><a href="projects/taskflow/mvp/issues/I-654321-001-create-button-disabled-state-unclear.md">projects/taskflow/mvp/issues/I-654321-001-create-button-disabled-state-unclear.md</a></p>
 <details><summary>Notes</summary><pre># Create button disabled state unclear
 
 ## Description
@@ -243,8 +418,8 @@ TBD
 ## Activity Log
 
 - 2026-07-02: Filed by bob.</pre></details>            </td>
-            <td><span class="status-open">open</span></td>
-            <td><span class="severity-low">low</span></td>
+            <td><span class="status-badge status-open">open</span></td>
+            <td><span class="severity-badge severity-low">low</span></td>
             <td>bob</td>
             <td>bob</td>
           </tr>
@@ -253,31 +428,31 @@ TBD
     </section>
 
     <section>
-      <h2>Milestones</h2>
+      <h2>Milestones <span class="count-badge">2</span></h2>
       <table>
         <thead>
           <tr><th>Milestone</th><th>Status</th><th>Date</th><th>Created</th></tr>
         </thead>
         <tbody>
           <tr>
-            <td>
-              <strong>M-001 Alpha</strong>
-              <p class="path">projects/taskflow/mvp/milestones/M-001-alpha.md</p>
+            <td class="entity-title">
+              <strong><a href="projects/taskflow/mvp/milestones/M-001-alpha.md">M-001 Alpha</a></strong>
+              <p class="entity-path"><a href="projects/taskflow/mvp/milestones/M-001-alpha.md">projects/taskflow/mvp/milestones/M-001-alpha.md</a></p>
 <details><summary>Notes</summary><pre># Alpha
 
 Date: 2026-07-15</pre></details>            </td>
-            <td>planned</td>
+            <td><span class="status-badge status-planned">planned</span></td>
             <td>2026-07-15</td>
             <td>2026-07-02</td>
           </tr>
           <tr>
-            <td>
-              <strong>M-002 Beta</strong>
-              <p class="path">projects/taskflow/mvp/milestones/M-002-beta.md</p>
+            <td class="entity-title">
+              <strong><a href="projects/taskflow/mvp/milestones/M-002-beta.md">M-002 Beta</a></strong>
+              <p class="entity-path"><a href="projects/taskflow/mvp/milestones/M-002-beta.md">projects/taskflow/mvp/milestones/M-002-beta.md</a></p>
 <details><summary>Notes</summary><pre># Beta
 
 Date: 2026-07-25</pre></details>            </td>
-            <td>planned</td>
+            <td><span class="status-badge status-planned">planned</span></td>
             <td>2026-07-25</td>
             <td>2026-07-02</td>
           </tr>
@@ -294,21 +469,21 @@ Date: 2026-07-25</pre></details>            </td>
         </thead>
         <tbody>
           <tr>
-            <td>
-              <strong>Task Notifications</strong>
-              <p class="path">projects/taskflow/mvp/docs/specs/2026-07-02-task-notifications.md</p>
+            <td class="entity-title">
+              <strong><a href="projects/taskflow/mvp/docs/specs/2026-07-02-task-notifications.md">Task Notifications</a></strong>
+              <p class="entity-path"><a href="projects/taskflow/mvp/docs/specs/2026-07-02-task-notifications.md">projects/taskflow/mvp/docs/specs/2026-07-02-task-notifications.md</a></p>
             </td>
-            <td>approved-for-spec</td>
+            <td><span class="status-badge status-approved-for-spec">approved-for-spec</span></td>
             <td>mvp</td>
             <td>2026-07-02</td>
             <td>1</td>
           </tr>
           <tr>
-            <td>
-              <strong>Task Search</strong>
-              <p class="path">projects/taskflow/mvp/docs/specs/2026-07-02-task-search.md</p>
+            <td class="entity-title">
+              <strong><a href="projects/taskflow/mvp/docs/specs/2026-07-02-task-search.md">Task Search</a></strong>
+              <p class="entity-path"><a href="projects/taskflow/mvp/docs/specs/2026-07-02-task-search.md">projects/taskflow/mvp/docs/specs/2026-07-02-task-search.md</a></p>
             </td>
-            <td>approved-for-spec</td>
+            <td><span class="status-badge status-approved-for-spec">approved-for-spec</span></td>
             <td>mvp</td>
             <td>2026-07-02</td>
             <td>0</td>
@@ -322,31 +497,31 @@ Date: 2026-07-25</pre></details>            </td>
         </thead>
         <tbody>
           <tr>
-            <td>
-              <strong>Task List Implementation</strong>
-              <p class="path">projects/taskflow/mvp/docs/plans/2026-07-01-task-list-implementation.md</p>
+            <td class="entity-title">
+              <strong><a href="projects/taskflow/mvp/docs/plans/2026-07-01-task-list-implementation.md">Task List Implementation</a></strong>
+              <p class="entity-path"><a href="projects/taskflow/mvp/docs/plans/2026-07-01-task-list-implementation.md">projects/taskflow/mvp/docs/plans/2026-07-01-task-list-implementation.md</a></p>
             </td>
-            <td>completed</td>
+            <td><span class="status-badge status-completed">completed</span></td>
             <td>mvp</td>
             <td>—</td>
             <td>3</td>
           </tr>
           <tr>
-            <td>
-              <strong>Dashboard Improvements</strong>
-              <p class="path">projects/taskflow/mvp/docs/plans/2026-07-02-dashboard-improvements.md</p>
+            <td class="entity-title">
+              <strong><a href="projects/taskflow/mvp/docs/plans/2026-07-02-dashboard-improvements.md">Dashboard Improvements</a></strong>
+              <p class="entity-path"><a href="projects/taskflow/mvp/docs/plans/2026-07-02-dashboard-improvements.md">projects/taskflow/mvp/docs/plans/2026-07-02-dashboard-improvements.md</a></p>
             </td>
-            <td>approved</td>
+            <td><span class="status-badge status-approved">approved</span></td>
             <td>mvp</td>
             <td>docs/specs/2026-07-02-task-search.md</td>
             <td>0</td>
           </tr>
           <tr>
-            <td>
-              <strong>Task Notifications Implementation</strong>
-              <p class="path">projects/taskflow/mvp/docs/plans/2026-07-02-task-notifications-implementation.md</p>
+            <td class="entity-title">
+              <strong><a href="projects/taskflow/mvp/docs/plans/2026-07-02-task-notifications-implementation.md">Task Notifications Implementation</a></strong>
+              <p class="entity-path"><a href="projects/taskflow/mvp/docs/plans/2026-07-02-task-notifications-implementation.md">projects/taskflow/mvp/docs/plans/2026-07-02-task-notifications-implementation.md</a></p>
             </td>
-            <td>in-progress</td>
+            <td><span class="status-badge status-in-progress">in-progress</span></td>
             <td>mvp</td>
             <td>docs/specs/2026-07-02-task-notifications.md</td>
             <td>0</td>

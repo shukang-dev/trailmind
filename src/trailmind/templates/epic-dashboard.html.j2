@@ -6,80 +6,257 @@
   <title>{{ title }}</title>
   <style>
     :root {
-      color-scheme: light;
-      --bg: #f7f8fb;
+      color-scheme: light dark;
+      --bg: #f0f2f5;
       --panel: #ffffff;
-      --ink: #20242c;
-      --muted: #5f6978;
-      --line: #d9dee8;
-      --accent: #8a4a2a;
-      --accent-soft: #f6eee9;
+      --ink: #1a1d23;
+      --muted: #6b7280;
+      --line: #e2e5ea;
+      --accent: #2563eb;
+      --accent-soft: #eff6ff;
+      --accent-ink: #1d4ed8;
+      --success: #059669;
+      --success-soft: #ecfdf5;
+      --warning: #d97706;
+      --warning-soft: #fffbeb;
+      --danger: #dc2626;
+      --danger-soft: #fef2f2;
+      --info: #7c3aed;
+      --info-soft: #f5f3ff;
+    }
+    @media (prefers-color-scheme: dark) {
+      :root {
+        --bg: #0f1117;
+        --panel: #1a1d27;
+        --ink: #e4e6eb;
+        --muted: #9ca3af;
+        --line: #2a2e3a;
+        --accent: #60a5fa;
+        --accent-soft: #1e3a5f;
+        --accent-ink: #93c5fd;
+        --success: #34d399;
+        --success-soft: #064e3b;
+        --warning: #fbbf24;
+        --warning-soft: #451a03;
+        --danger: #f87171;
+        --danger-soft: #450a0a;
+        --info: #a78bfa;
+        --info-soft: #2e1065;
+      }
     }
     * { box-sizing: border-box; }
-    body { margin: 0; font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif; color: var(--ink); background: var(--bg); }
-    main { max-width: 1180px; margin: 0 auto; padding: 32px 20px 48px; }
-    header { margin-bottom: 24px; }
-    h1 { margin: 0 0 8px; font-size: 2rem; line-height: 1.15; letter-spacing: 0; }
-    h2 { margin: 0 0 10px; font-size: 1.2rem; letter-spacing: 0; }
-    p { margin: 0; color: var(--muted); line-height: 1.5; }
-    .path { color: var(--muted); font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: 0.84rem; }
-    .panel { border: 1px solid var(--line); border-radius: 8px; background: var(--panel); padding: 16px; margin-bottom: 16px; }
+    body {
+      margin: 0;
+      font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+      color: var(--ink);
+      background: var(--bg);
+      line-height: 1.5;
+    }
+    a { color: var(--accent); text-decoration: none; }
+    a:hover { text-decoration: underline; }
+
+    .topnav {
+      background: var(--panel);
+      border-bottom: 1px solid var(--line);
+      padding: 0 24px;
+      position: sticky; top: 0; z-index: 100;
+    }
+    .topnav-inner {
+      max-width: 1200px; margin: 0 auto;
+      display: flex; align-items: center; height: 52px; gap: 16px;
+    }
+    .topnav .brand {
+      font-weight: 700; font-size: 1.05rem; color: var(--accent-ink);
+      display: flex; align-items: center; gap: 8px;
+    }
+    .topnav .brand:hover { text-decoration: none; }
+    .topnav .brand-icon {
+      width: 28px; height: 28px; background: var(--accent); border-radius: 7px;
+      display: flex; align-items: center; justify-content: center;
+      color: #fff; font-weight: 800; font-size: 0.85rem;
+    }
+    .topnav .nav-links { display: flex; gap: 4px; margin-left: auto; }
+    .topnav .nav-links a {
+      padding: 6px 12px; border-radius: 6px; font-size: 0.88rem;
+      color: var(--muted); transition: background 0.15s;
+    }
+    .topnav .nav-links a:hover { background: var(--accent-soft); color: var(--accent-ink); text-decoration: none; }
+
+    .breadcrumbs {
+      max-width: 1200px; margin: 0 auto;
+      padding: 14px 24px 0;
+      display: flex; align-items: center; gap: 6px;
+      font-size: 0.88rem; color: var(--muted);
+    }
+    .breadcrumbs a { color: var(--muted); }
+    .breadcrumbs a:hover { color: var(--accent-ink); }
+    .breadcrumbs .sep { color: var(--line); }
+    .breadcrumbs .current { color: var(--ink); font-weight: 500; }
+
+    main { max-width: 1200px; margin: 0 auto; padding: 20px 24px 48px; }
+
+    header.page-header { margin-bottom: 24px; }
+    header.page-header h1 { margin: 0 0 4px; font-size: 1.75rem; font-weight: 700; letter-spacing: -0.02em; }
+    header.page-header .subtitle { color: var(--muted); font-size: 0.95rem; margin-bottom: 4px; }
+    header.page-header .repo-path {
+      font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+      font-size: 0.8rem; color: var(--muted);
+      background: var(--bg); padding: 2px 8px; border-radius: 4px; display: inline-block;
+    }
+
     .metrics { display: flex; flex-wrap: wrap; gap: 10px; margin-top: 16px; }
-    .metric { min-width: 124px; border: 1px solid var(--line); border-radius: 8px; background: var(--panel); padding: 12px 14px; }
-    .metric strong { display: block; font-size: 1.35rem; line-height: 1.1; }
-    .metric span { color: var(--muted); font-size: 0.9rem; }
-    .pills { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 12px; }
-    .pill { display: inline-flex; align-items: center; min-height: 24px; padding: 2px 8px; border-radius: 999px; background: var(--accent-soft); color: var(--accent); font-size: 0.85rem; white-space: nowrap; }
-    table { width: 100%; border-collapse: collapse; background: var(--panel); border: 1px solid var(--line); border-radius: 8px; overflow: hidden; margin-bottom: 20px; }
-    th, td { padding: 10px 12px; border-bottom: 1px solid var(--line); text-align: left; vertical-align: top; }
-    th { color: var(--muted); font-size: 0.82rem; font-weight: 600; text-transform: uppercase; }
+    .metric {
+      min-width: 120px; border: 1px solid var(--line); border-radius: 10px;
+      background: var(--panel); padding: 14px 16px;
+      transition: box-shadow 0.15s;
+    }
+    .metric:hover { box-shadow: 0 2px 8px rgba(0,0,0,0.08); }
+    .metric strong { display: block; font-size: 1.6rem; font-weight: 700; line-height: 1.1; }
+    .metric span { color: var(--muted); font-size: 0.82rem; }
+
+    .pills { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 10px; }
+    .pill {
+      display: inline-flex; align-items: center;
+      padding: 3px 10px; border-radius: 999px;
+      font-size: 0.78rem; font-weight: 500; white-space: nowrap;
+      background: var(--accent-soft); color: var(--accent-ink);
+    }
+    .pill.state-active { background: var(--success-soft); color: var(--success); }
+    .pill.state-completed { background: var(--muted); color: #fff; }
+    .pill.state-paused { background: var(--warning-soft); color: var(--warning); }
+    .pill.state-planning { background: var(--info-soft); color: var(--info); }
+    .pill.state-archived, .pill.state-cancelled { background: var(--bg); color: var(--muted); }
+
+    /* Progress bar */
+    .progress-bar { height: 6px; background: var(--bg); border-radius: 3px; overflow: hidden; margin-top: 12px; }
+    .progress-bar .fill { height: 100%; background: var(--success); border-radius: 3px; transition: width 0.3s; }
+
+    section { margin-top: 28px; }
+    section h2 {
+      font-size: 1.05rem; font-weight: 600; margin: 0 0 12px;
+      display: flex; align-items: center; gap: 8px;
+    }
+    section h2 .count-badge {
+      font-size: 0.78rem; font-weight: 500;
+      background: var(--bg); color: var(--muted);
+      padding: 2px 8px; border-radius: 999px;
+    }
+    section h3 { font-size: 0.92rem; font-weight: 600; margin: 16px 0 8px; color: var(--muted); }
+
+    /* Tables */
+    table {
+      width: 100%; border-collapse: collapse;
+      background: var(--panel); border: 1px solid var(--line);
+      border-radius: 10px; overflow: hidden; margin-bottom: 20px;
+    }
+    th, td { padding: 10px 14px; border-bottom: 1px solid var(--line); text-align: left; vertical-align: top; }
+    th { color: var(--muted); font-size: 0.78rem; font-weight: 600; text-transform: uppercase; letter-spacing: 0.03em; background: var(--bg); }
     tr:last-child td { border-bottom: 0; }
+    tr:hover td { background: rgba(37, 99, 235, 0.03); }
+
+    td.entity-title strong a { color: var(--ink); }
+    td.entity-title strong a:hover { color: var(--accent); text-decoration: none; }
+    td .entity-path {
+      font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+      font-size: 0.78rem; color: var(--muted); margin-top: 2px;
+    }
+    td .entity-path a { color: var(--muted); }
+    td .entity-path a:hover { color: var(--accent); }
+
+    /* Status badges */
+    .status-badge {
+      display: inline-block; padding: 2px 10px; border-radius: 999px;
+      font-size: 0.78rem; font-weight: 500;
+    }
+    .status-created { background: var(--bg); color: var(--muted); }
+    .status-ready { background: var(--success-soft); color: var(--success); }
+    .status-in_progress { background: var(--accent-soft); color: var(--accent-ink); }
+    .status-blocked { background: var(--danger-soft); color: var(--danger); }
+    .status-done { background: var(--bg); color: var(--muted); text-decoration: line-through; }
+    .status-wontfix { background: var(--bg); color: var(--muted); text-decoration: line-through; }
+    .status-open { background: var(--warning-soft); color: var(--warning); }
+
+    /* Priority/severity badges */
+    .priority-badge, .severity-badge {
+      display: inline-block; padding: 2px 10px; border-radius: 6px;
+      font-size: 0.78rem; font-weight: 600;
+    }
+    .priority-critical, .severity-critical { background: var(--danger-soft); color: var(--danger); }
+    .priority-high, .severity-high { background: var(--warning-soft); color: var(--warning); }
+    .priority-medium, .severity-medium { background: var(--accent-soft); color: var(--accent-ink); }
+    .priority-low, .severity-low { background: var(--bg); color: var(--muted); }
+
+    /* Overdue */
+    .task-overdue { background: var(--danger-soft); }
+    .task-overdue td.entity-title strong a { color: var(--danger); }
+
+    /* Notes */
+    .panel { border: 1px solid var(--line); border-radius: 10px; background: var(--panel); padding: 16px; margin-bottom: 16px; }
+    .panel h2 { margin: 0 0 10px; font-size: 1rem; }
     details { margin-top: 6px; }
-    summary { color: var(--accent); cursor: pointer; }
-    pre { margin: 10px 0 0; white-space: pre-wrap; color: var(--muted); font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: 0.88rem; line-height: 1.45; }
-    .status-created { color: #6b7280; }
-    .status-ready { color: #059669; }
-    .status-in_progress { color: #2563eb; }
-    .status-blocked { color: #dc2626; }
-    .status-done { color: #6b7280; text-decoration: line-through; }
-    .status-wontfix { color: #9ca3af; text-decoration: line-through; }
-    .status-open { color: #dc2626; }
-    .priority-critical { display: inline-block; padding: 1px 8px; border-radius: 4px; background: #fef2f2; color: #dc2626; font-weight: 600; font-size: 0.8rem; }
-    .priority-high { display: inline-block; padding: 1px 8px; border-radius: 4px; background: #fff7ed; color: #ea580c; font-weight: 600; font-size: 0.8rem; }
-    .priority-medium { display: inline-block; padding: 1px 8px; border-radius: 4px; background: #eff6ff; color: #2563eb; font-size: 0.8rem; }
-    .priority-low { display: inline-block; padding: 1px 8px; border-radius: 4px; background: #f3f4f6; color: #6b7280; font-size: 0.8rem; }
-    .severity-critical { display: inline-block; padding: 1px 8px; border-radius: 4px; background: #fef2f2; color: #dc2626; font-weight: 600; font-size: 0.8rem; }
-    .severity-high { display: inline-block; padding: 1px 8px; border-radius: 4px; background: #fff7ed; color: #ea580c; font-weight: 600; font-size: 0.8rem; }
-    .severity-medium { display: inline-block; padding: 1px 8px; border-radius: 4px; background: #eff6ff; color: #2563eb; font-size: 0.8rem; }
-    .severity-low { display: inline-block; padding: 1px 8px; border-radius: 4px; background: #f3f4f6; color: #6b7280; font-size: 0.8rem; }
-    .task-overdue { background: #fff1f2; }
-    .task-overdue td:first-child strong { color: #dc2626; }
+    summary { color: var(--accent); cursor: pointer; font-size: 0.82rem; }
+    pre {
+      margin: 8px 0 0; white-space: pre-wrap; word-break: break-word;
+      color: var(--muted); font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+      font-size: 0.82rem; line-height: 1.5; background: var(--bg); padding: 10px; border-radius: 6px;
+    }
+
+    @media (max-width: 640px) {
+      .topnav-inner { height: 44px; }
+      main { padding: 12px 14px 32px; }
+      .metric { min-width: 100px; padding: 10px 12px; }
+      .metric strong { font-size: 1.3rem; }
+    }
   </style>
 </head>
 <body>
+  <nav class="topnav">
+    <div class="topnav-inner">
+      <a href="../../../overview.html" class="brand">
+        <span class="brand-icon">T</span>
+        Trailmind
+      </a>
+      <div class="nav-links">
+        <a href="../../../overview.html">Overview</a>
+        <a href="../dashboard.html">{{ epic.project }}</a>
+      </div>
+    </div>
+  </nav>
+
+  <div class="breadcrumbs">
+    <a href="../../../overview.html">Overview</a>
+    <span class="sep">/</span>
+    <a href="../dashboard.html">{{ epic.project }}</a>
+    <span class="sep">/</span>
+    <span class="current">{{ epic.title }}</span>
+  </div>
+
   <main>
-    <header>
+    <header class="page-header">
       <h1>{{ epic.title }}</h1>
-      <p>{{ epic.goal }}</p>
-      <p class="path">{{ epic.relative_path }}</p>
-      <div class="metrics" aria-label="Epic counts">
-        <div class="metric"><strong>{{ epic.task_count }}</strong><span>Tasks</span></div>
-        <div class="metric"><strong>{{ epic.issue_count }}</strong><span>Issues</span></div>
-        <div class="metric"><strong>{{ epic.milestone_count }}</strong><span>Milestones</span></div>
-      </div>
-      <div class="pills">
-        <span class="pill">{{ epic.state }}</span>
-        <span class="pill">project {{ epic.project }}</span>
-        {% if epic.start %}<span class="pill">start {{ epic.start }}</span>{% endif %}
-        {% if epic.target %}<span class="pill">target {{ epic.target }}</span>{% endif %}
-        {% for member in epic.roster %}
-        <span class="pill">{{ member }}</span>
-        {% endfor %}
-        {% for repo in epic.repos %}
-        <span class="pill">{{ repo }}</span>
-        {% endfor %}
-      </div>
+      <p class="subtitle">{{ epic.goal }}</p>
+      <span class="repo-path">{{ epic.relative_path }}</span>
     </header>
+
+    <div class="metrics" aria-label="Epic counts">
+      <div class="metric"><strong>{{ epic.task_count }}</strong><span>Tasks</span></div>
+      <div class="metric"><strong>{{ epic.issue_count }}</strong><span>Issues</span></div>
+      <div class="metric"><strong>{{ epic.milestone_count }}</strong><span>Milestones</span></div>
+      {% if epic.spec_count %}<div class="metric"><strong>{{ epic.spec_count }}</strong><span>Specs</span></div>{% endif %}
+      {% if epic.plan_count %}<div class="metric"><strong>{{ epic.plan_count }}</strong><span>Plans</span></div>{% endif %}
+    </div>
+
+    <div class="pills">
+      <span class="pill state-{{ epic.state }}">{{ epic.state }}</span>
+      {% if epic.start %}<span class="pill">start {{ epic.start }}</span>{% endif %}
+      {% if epic.target %}<span class="pill">target {{ epic.target }}</span>{% endif %}
+      {% for member in epic.roster %}
+      <span class="pill">{{ member }}</span>
+      {% endfor %}
+      {% for repo in epic.repos %}
+      <span class="pill">{{ repo }}</span>
+      {% endfor %}
+    </div>
 
     {% if epic.body %}
     <section class="panel">
@@ -89,60 +266,61 @@
     {% endif %}
 
     <section>
-      <h2>Tasks</h2>
+      <h2>Tasks <span class="count-badge">{{ epic.task_count }}</span></h2>
       <table>
         <thead>
           <tr><th>Task</th><th>Status</th><th>Priority</th><th>Due</th><th>Owner</th><th>Created</th></tr>
         </thead>
         <tbody>
           {% for task in epic.tasks %}
-          <tr class="task-{{ task.status }}{% if task.due and task.status not in ['done', 'wontfix'] and task.due < today %} task-overdue{% endif %}">
-            <td>
-              <strong>{{ task.id }} {{ task.title }}</strong>
-              <p class="path">{{ task.relative_path }}</p>
+          {% set is_overdue = task.due and task.status not in ['done', 'wontfix'] and task.due < today %}
+          <tr class="{% if is_overdue %}task-overdue{% endif %}">
+            <td class="entity-title">
+              <strong><a href="{{ task.relative_path }}">{{ task.id }} {{ task.title }}</a></strong>
+              <p class="entity-path"><a href="{{ task.relative_path }}">{{ task.relative_path }}</a></p>
               {% if task.body %}<details><summary>Notes</summary><pre>{{ task.body }}</pre></details>{% endif %}
             </td>
-            <td><span class="status-{{ task.status }}">{{ task.status }}</span></td>
-            <td>{% if task.priority %}<span class="priority-{{ task.priority }}">{{ task.priority }}</span>{% else %}-{% endif %}</td>
+            <td><span class="status-badge status-{{ task.status }}">{{ task.status }}</span></td>
+            <td>{% if task.priority %}<span class="priority-badge priority-{{ task.priority }}">{{ task.priority }}</span>{% else %}-{% endif %}</td>
             <td>{{ task.due or '-' }}</td>
-            <td>{{ task.owner }}</td>
+            <td>{{ task.owner or '-' }}</td>
             <td>{{ task.created }}</td>
           </tr>
           {% else %}
-          <tr><td colspan="6">No tasks.</td></tr>
+          <tr><td colspan="6" style="text-align:center; color: var(--muted); padding: 24px;">No tasks.</td></tr>
           {% endfor %}
         </tbody>
       </table>
     </section>
 
     <section>
-      <h2>Issues</h2>
+      <h2>Issues <span class="count-badge">{{ epic.issue_count }}</span></h2>
       <table>
         <thead>
           <tr><th>Issue</th><th>Status</th><th>Severity</th><th>Owner</th><th>Filed By</th></tr>
         </thead>
         <tbody>
           {% for issue in epic.issues %}
-          <tr class="issue-{{ issue.status }}">
-            <td>
-              <strong>{{ issue.id }} {{ issue.title }}</strong>
-              <p class="path">{{ issue.relative_path }}</p>
+          <tr>
+            <td class="entity-title">
+              <strong><a href="{{ issue.relative_path }}">{{ issue.id }} {{ issue.title }}</a></strong>
+              <p class="entity-path"><a href="{{ issue.relative_path }}">{{ issue.relative_path }}</a></p>
               {% if issue.body %}<details><summary>Notes</summary><pre>{{ issue.body }}</pre></details>{% endif %}
             </td>
-            <td><span class="status-{{ issue.status }}">{{ issue.status }}</span></td>
-            <td>{% if issue.severity %}<span class="severity-{{ issue.severity }}">{{ issue.severity }}</span>{% else %}-{% endif %}</td>
+            <td><span class="status-badge status-{{ issue.status }}">{{ issue.status }}</span></td>
+            <td>{% if issue.severity %}<span class="severity-badge severity-{{ issue.severity }}">{{ issue.severity }}</span>{% else %}-{% endif %}</td>
             <td>{{ issue.owner or '-' }}</td>
             <td>{{ issue.filer }}</td>
           </tr>
           {% else %}
-          <tr><td colspan="5">No issues.</td></tr>
+          <tr><td colspan="5" style="text-align:center; color: var(--muted); padding: 24px;">No issues.</td></tr>
           {% endfor %}
         </tbody>
       </table>
     </section>
 
     <section>
-      <h2>Milestones</h2>
+      <h2>Milestones <span class="count-badge">{{ epic.milestone_count }}</span></h2>
       <table>
         <thead>
           <tr><th>Milestone</th><th>Status</th><th>Date</th><th>Created</th></tr>
@@ -150,17 +328,17 @@
         <tbody>
           {% for milestone in epic.milestones %}
           <tr>
-            <td>
-              <strong>{{ milestone.id }} {{ milestone.title }}</strong>
-              <p class="path">{{ milestone.relative_path }}</p>
+            <td class="entity-title">
+              <strong><a href="{{ milestone.relative_path }}">{{ milestone.id }} {{ milestone.title }}</a></strong>
+              <p class="entity-path"><a href="{{ milestone.relative_path }}">{{ milestone.relative_path }}</a></p>
               {% if milestone.body %}<details><summary>Notes</summary><pre>{{ milestone.body }}</pre></details>{% endif %}
             </td>
-            <td>{{ milestone.status }}</td>
+            <td><span class="status-badge status-{{ milestone.status }}">{{ milestone.status }}</span></td>
             <td>{{ milestone.date }}</td>
             <td>{{ milestone.created }}</td>
           </tr>
           {% else %}
-          <tr><td colspan="4">No milestones.</td></tr>
+          <tr><td colspan="4" style="text-align:center; color: var(--muted); padding: 24px;">No milestones.</td></tr>
           {% endfor %}
         </tbody>
       </table>
@@ -178,12 +356,12 @@
         <tbody>
           {% for spec in epic.specs %}
           <tr>
-            <td>
-              <strong>{{ spec.title }}</strong>
-              <p class="path">{{ spec.relative_path }}</p>
+            <td class="entity-title">
+              <strong><a href="{{ spec.relative_path }}">{{ spec.title }}</a></strong>
+              <p class="entity-path"><a href="{{ spec.relative_path }}">{{ spec.relative_path }}</a></p>
             </td>
-            <td>{{ spec.status }}</td>
-            <td>{{ spec.scope }}</td>
+            <td><span class="status-badge status-{{ spec.status }}">{{ spec.status }}</span></td>
+            <td>{{ spec.scope or '-' }}</td>
             <td>{{ spec.created }}</td>
             <td>{{ spec.linked_plans|length }}</td>
           </tr>
@@ -200,13 +378,13 @@
         <tbody>
           {% for plan in epic.plans %}
           <tr>
-            <td>
-              <strong>{{ plan.title }}</strong>
-              <p class="path">{{ plan.relative_path }}</p>
+            <td class="entity-title">
+              <strong><a href="{{ plan.relative_path }}">{{ plan.title }}</a></strong>
+              <p class="entity-path"><a href="{{ plan.relative_path }}">{{ plan.relative_path }}</a></p>
             </td>
-            <td>{{ plan.status }}</td>
-            <td>{{ plan.scope }}</td>
-            <td>{{ plan.linked_spec or "—" }}</td>
+            <td><span class="status-badge status-{{ plan.status }}">{{ plan.status }}</span></td>
+            <td>{{ plan.scope or '-' }}</td>
+            <td>{{ plan.linked_spec or '—' }}</td>
             <td>{{ plan.generated_tasks|length }}</td>
           </tr>
           {% endfor %}
