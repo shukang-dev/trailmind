@@ -251,6 +251,63 @@ def set_issue_severity(
     return issue_path
 
 
+def edit_issue(
+    repo_root: Path,
+    *,
+    issue_ref: str,
+    actor: str,
+    title: str | None = None,
+    description: str | None = None,
+    note: str | None = None,
+) -> Path:
+    """Edit editable fields on an issue.
+
+    Only provided fields are updated. None means "don't change".
+    """
+    issue_path = resolve_entity(repo_root, raw=issue_ref, entity="I")
+    frontmatter, body = read_entity_user_facing(issue_path, label="issue")
+
+    changes: list[str] = []
+
+    if title is not None and title.strip():
+        old_title = str(frontmatter.get("title", ""))
+        frontmatter["title"] = title.strip()
+        changes.append(f"Title: {old_title} → {title.strip()}")
+
+    if description is not None:
+        # Replace the body's "## Description" section or prepend it
+        old_body = body
+        if "## Description" in old_body:
+            import re
+            new_body = re.sub(
+                r"## Description\n\n.*?(?=\n## |\Z)",
+                f"## Description\n\n{description.strip()}",
+                old_body,
+                count=1,
+                flags=re.DOTALL,
+            )
+            body = new_body
+        else:
+            body = f"## Description\n\n{description.strip()}\n\n{old_body.lstrip('#')}"
+        changes.append("Description updated")
+
+    if not changes:
+        raise TrailmindError("no fields to edit; provide --title or --description")
+
+    action = f"Edited issue: {'; '.join(changes)}"
+    body = append_activity_entry(
+        body,
+        action_activity_entry(
+            action=action,
+            actor_label="actor",
+            actor=actor,
+            note=note,
+        ),
+    )
+    write_entity(issue_path, frontmatter=frontmatter, body=body)
+    return issue_path
+
+
 def link_issue(repo_root: Path, *, raw_issue: str, raw_task: str) -> list[Path]:
     issue_path = resolve_entity(repo_root, raw=raw_issue, entity="I")
     task_path = resolve_entity(repo_root, raw=raw_task, entity="T")

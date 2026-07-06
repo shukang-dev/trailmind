@@ -26,6 +26,7 @@ from trailmind.issue import (
     assign_issue,
     carry_issue,
     close_issue,
+    edit_issue,
     link_issue,
     list_issues,
     set_issue_severity,
@@ -1523,6 +1524,34 @@ def issue_set_severity(
     """Change an issue's severity."""
     root = find_repo_root(_cwd_from_context(ctx))
     touched = set_issue_severity(root, issue_ref=issue_ref, severity=severity, actor=actor, note=note)
+    _echo_touched(root, [touched])
+
+
+@issue_group.command("edit")
+@click.argument("issue_ref")
+@click.option("--title", default=None, help="New issue title.")
+@click.option("--description", default=None, help="New issue description.")
+@click.option("--actor", required=True)
+@click.option("--note", default=None)
+@click.pass_context
+def issue_edit(
+    ctx: click.Context,
+    issue_ref: str,
+    title: str | None,
+    description: str | None,
+    actor: str,
+    note: str | None,
+) -> None:
+    """Edit editable fields on an issue."""
+    root = find_repo_root(_cwd_from_context(ctx))
+    touched = edit_issue(
+        root,
+        issue_ref=issue_ref,
+        actor=actor,
+        title=title,
+        description=description,
+        note=note,
+    )
     _echo_touched(root, [touched])
 
 
