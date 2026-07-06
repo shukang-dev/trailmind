@@ -19,6 +19,8 @@ def build_stats(repo_root: Path) -> dict[str, Any]:
             "issues": {"total": 0, "by_status": {}, "by_severity": {}},
             "milestones": 0,
             "inbox": {"total": 0, "open": 0},
+            "specs": {"total": 0, "by_status": {}},
+            "plans": {"total": 0, "by_status": {}},
             "overdue_tasks": 0,
         }
 
@@ -32,6 +34,8 @@ def build_stats(repo_root: Path) -> dict[str, Any]:
     milestone_count = 0
     inbox_total = 0
     inbox_open = 0
+    spec_status_counter: Counter[str] = Counter()
+    plan_status_counter: Counter[str] = Counter()
     overdue_tasks = 0
     today = date.today().isoformat()
 
@@ -111,8 +115,36 @@ def build_stats(repo_root: Path) -> dict[str, Any]:
                     if status == "open":
                         inbox_open += 1
 
+            # Specs
+            specs_dir = epic_dir / "docs" / "specs"
+            if specs_dir.exists():
+                for spec_file in sorted(specs_dir.glob("*.md")):
+                    if not spec_file.is_file():
+                        continue
+                    try:
+                        fm, _body = read_entity_user_facing(spec_file, label="spec")
+                        spec_status = str(fm.get("status", "unknown"))
+                        spec_status_counter[spec_status] += 1
+                    except Exception:
+                        continue
+
+            # Plans
+            plans_dir = epic_dir / "docs" / "plans"
+            if plans_dir.exists():
+                for plan_file in sorted(plans_dir.glob("*.md")):
+                    if not plan_file.is_file():
+                        continue
+                    try:
+                        fm, _body = read_entity_user_facing(plan_file, label="plan")
+                        plan_status = str(fm.get("status", "unknown"))
+                        plan_status_counter[plan_status] += 1
+                    except Exception:
+                        continue
+
     total_tasks = sum(task_status_counter.values())
     total_issues = sum(issue_status_counter.values())
+    total_specs = sum(spec_status_counter.values())
+    total_plans = sum(plan_status_counter.values())
 
     return {
         "projects": project_count,
@@ -132,6 +164,14 @@ def build_stats(repo_root: Path) -> dict[str, Any]:
         "inbox": {
             "total": inbox_total,
             "open": inbox_open,
+        },
+        "specs": {
+            "total": total_specs,
+            "by_status": dict(spec_status_counter),
+        },
+        "plans": {
+            "total": total_plans,
+            "by_status": dict(plan_status_counter),
         },
         "overdue_tasks": overdue_tasks,
     }
@@ -179,5 +219,20 @@ def format_stats(stats: dict[str, Any]) -> str:
 
     inbox = stats["inbox"]
     lines.append(f"  Inbox:      {inbox['total']} ({inbox['open']} open)")
+
+    specs = stats.get("specs", {"total": 0, "by_status": {}})
+    if specs["total"]:
+        lines.append("")
+        lines.append(f"  Specs:      {specs['total']}")
+        if specs["by_status"]:
+            for status, count in sorted(specs["by_status"].items()):
+                lines.append(f"      {status:30s} {count}")
+
+    plans = stats.get("plans", {"total": 0, "by_status": {}})
+    if plans["total"]:
+        lines.append(f"  Plans:      {plans['total']}")
+        if plans["by_status"]:
+            for status, count in sorted(plans["by_status"].items()):
+                lines.append(f"      {status:30s} {count}")
 
     return "\n".join(lines) + "\n"

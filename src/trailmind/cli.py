@@ -1359,11 +1359,23 @@ def issue_group() -> None:
 
 @issue_group.command("list")
 @click.option("--epic", "epic_ref", default=None)
+@click.option("--status", default=None, type=click.Choice(("open", "done", "wontfix"), case_sensitive=False),
+              help="Filter by issue status.")
+@click.option("--severity", default=None, type=click.Choice(ISSUE_SEVERITIES, case_sensitive=False),
+              help="Filter by severity.")
+@click.option("--owner", default=None, help="Filter by owner shortname.")
 @click.option("--json", "json_output", is_flag=True, help="Print structured JSON instead of tabular output.")
 @click.pass_context
-def issue_list_cmd(ctx: click.Context, epic_ref: str | None, json_output: bool) -> None:
+def issue_list_cmd(
+    ctx: click.Context,
+    epic_ref: str | None,
+    status: str | None,
+    severity: str | None,
+    owner: str | None,
+    json_output: bool,
+) -> None:
     root = find_repo_root(_cwd_from_context(ctx))
-    issues = list_issues(root, epic_ref=epic_ref)
+    issues = list_issues(root, epic_ref=epic_ref, status=status, severity=severity, owner=owner)
     if json_output:
         click.echo(json.dumps(issues, ensure_ascii=False, indent=2))
     else:
@@ -1372,8 +1384,8 @@ def issue_list_cmd(ctx: click.Context, epic_ref: str | None, json_output: bool) 
             return
         for i in issues:
             sev = f" [{i['severity']}]" if i['severity'] else ""
-            owner = f" @{i['owner']}" if i.get('owner') else ""
-            click.echo(f"{i['id']:16s} {i['status']:10s}{sev}{owner} {i['title']}")
+            owner_str = f" @{i['owner']}" if i.get('owner') else ""
+            click.echo(f"{i['id']:16s} {i['status']:10s}{sev}{owner_str} {i['title']}")
             click.echo(f"{'':16s} {'':10s}  {i['path']}")
 
 

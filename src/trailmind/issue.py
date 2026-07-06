@@ -104,8 +104,15 @@ def _validate_close_status(status: str) -> str:
     return status
 
 
-def list_issues(repo_root: Path, *, epic_ref: str | None = None) -> list[dict[str, str]]:
-    """List issues in an epic or across the repo."""
+def list_issues(
+    repo_root: Path,
+    *,
+    epic_ref: str | None = None,
+    status: str | None = None,
+    severity: str | None = None,
+    owner: str | None = None,
+) -> list[dict[str, str]]:
+    """List issues in an epic or across the repo, with optional filtering."""
     from trailmind.scopes import resolve_epic_dir
 
     if epic_ref:
@@ -123,18 +130,30 @@ def list_issues(repo_root: Path, *, epic_ref: str | None = None) -> list[dict[st
             continue
         try:
             frontmatter, _body = read_entity_user_facing(path, label="issue")
-            issues.append({
-                "id": str(frontmatter.get("id") or path.stem),
-                "title": str(frontmatter.get("title") or path.stem),
-                "status": str(frontmatter.get("status") or "open"),
-                "severity": str(frontmatter.get("severity") or ""),
-                "owner": str(frontmatter.get("owner") or ""),
-                "filer": str(frontmatter.get("filer") or ""),
-                "created": str(frontmatter.get("created") or ""),
-                "path": path.relative_to(repo_root).as_posix(),
-            })
         except TrailmindError:
             continue
+
+        issue_status = str(frontmatter.get("status") or "open")
+        issue_severity = str(frontmatter.get("severity") or "")
+        issue_owner = str(frontmatter.get("owner") or "")
+
+        if status and issue_status != status:
+            continue
+        if severity and issue_severity != severity:
+            continue
+        if owner and issue_owner != owner:
+            continue
+
+        issues.append({
+            "id": str(frontmatter.get("id") or path.stem),
+            "title": str(frontmatter.get("title") or path.stem),
+            "status": issue_status,
+            "severity": issue_severity,
+            "owner": issue_owner,
+            "filer": str(frontmatter.get("filer") or ""),
+            "created": str(frontmatter.get("created") or ""),
+            "path": path.relative_to(repo_root).as_posix(),
+        })
     return issues
 
 
