@@ -15,7 +15,7 @@ from trailmind.dashboard import (
     render_project_dashboard_at,
 )
 from trailmind.doctor import format_doctor_report, run_doctor
-from trailmind.epic import EPIC_STATES, init_epic, set_epic_status, validate_epic_state
+from trailmind.epic import EPIC_STATES, edit_epic, init_epic, set_epic_status, validate_epic_state
 from trailmind.errors import TrailmindError
 from trailmind.export import export_repo, format_export
 from trailmind.importer import import_repo, load_export_file
@@ -64,7 +64,7 @@ from trailmind.plan_artifact import (
     set_plan_status,
     set_spec_status,
 )
-from trailmind.project import PROJECT_STATES, init_project, set_project_status, validate_project_state
+from trailmind.project import PROJECT_STATES, edit_project, init_project, set_project_status, validate_project_state
 from trailmind.roster import Roster
 from trailmind.security_scan import scan_paths
 from trailmind.serve import serve_repo
@@ -901,6 +901,42 @@ def project_set_status(
     _echo_touched(root, [touched])
 
 
+@project_group.command("edit")
+@click.argument("project_slug")
+@click.option("--title", default=None, help="New project title.")
+@click.option("--goal", default=None, help="New project goal.")
+@click.option("--owners", default=None, help="Comma-separated owner emails/shortnames.")
+@click.option("--tags", default=None, help="Comma-separated tags.")
+@click.option("--actor", required=True)
+@click.option("--note", default=None)
+@click.pass_context
+def project_edit(
+    ctx: click.Context,
+    project_slug: str,
+    title: str | None,
+    goal: str | None,
+    owners: str | None,
+    tags: str | None,
+    actor: str,
+    note: str | None,
+) -> None:
+    """Edit editable fields on a project."""
+    root = find_repo_root(_cwd_from_context(ctx))
+    owner_list = split_csv(owners) if owners is not None else None
+    tag_list = split_csv(tags) if tags is not None else None
+    touched = edit_project(
+        root,
+        project_slug=project_slug,
+        actor=actor,
+        title=title,
+        goal=goal,
+        owners=owner_list,
+        tags=tag_list,
+        note=note,
+    )
+    _echo_touched(root, [touched])
+
+
 @cli.group("epic")
 def epic_group() -> None:
     """Manage epics."""
@@ -1006,6 +1042,45 @@ def epic_set_status(
     """Change an epic's state."""
     root = find_repo_root(_cwd_from_context(ctx))
     touched = set_epic_status(root, epic_ref=epic_ref, state=state, actor=actor, note=note)
+    _echo_touched(root, [touched])
+
+
+@epic_group.command("edit")
+@click.argument("epic_ref")
+@click.option("--title", default=None, help="New epic title.")
+@click.option("--goal", default=None, help="New epic goal.")
+@click.option("--target", default=None, help="New target date (YYYY-MM-DD).")
+@click.option("--roster", default=None, help="Comma-separated roster shortnames.")
+@click.option("--repos", default=None, help="Comma-separated repo names.")
+@click.option("--actor", required=True)
+@click.option("--note", default=None)
+@click.pass_context
+def epic_edit(
+    ctx: click.Context,
+    epic_ref: str,
+    title: str | None,
+    goal: str | None,
+    target: str | None,
+    roster: str | None,
+    repos: str | None,
+    actor: str,
+    note: str | None,
+) -> None:
+    """Edit editable fields on an epic."""
+    root = find_repo_root(_cwd_from_context(ctx))
+    roster_list = split_csv(roster) if roster is not None else None
+    repo_list = split_csv(repos) if repos is not None else None
+    touched = edit_epic(
+        root,
+        epic_ref=epic_ref,
+        actor=actor,
+        title=title,
+        goal=goal,
+        target=target,
+        roster=roster_list,
+        repos=repo_list,
+        note=note,
+    )
     _echo_touched(root, [touched])
 
 

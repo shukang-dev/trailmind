@@ -79,3 +79,71 @@ def init_project(
     )
     agents_path.write_text(render_project_agents(slug, title), encoding="utf-8")
     return [project_path, agents_path]
+
+
+def edit_project(
+    repo_root: Path,
+    *,
+    project_slug: str,
+    actor: str,
+    title: str | None = None,
+    goal: str | None = None,
+    owners: list[str] | None = None,
+    tags: list[str] | None = None,
+    note: str | None = None,
+) -> Path:
+    """Edit editable fields on a project.
+
+    Only provided fields are updated. None means "don't change".
+    """
+    project_path = project_dir(repo_root, project_slug)
+    frontmatter, body = read_entity_user_facing(project_path / "PROJECT.md", label="project")
+
+    changes: list[str] = []
+
+    if title is not None and title.strip():
+        old_title = str(frontmatter.get("title", ""))
+        frontmatter["title"] = title.strip()
+        # Also update the H1 in the body
+        import re
+        body = re.sub(r"^# .+$", f"# {title.strip()}", body, count=1)
+        changes.append(f"Title: {old_title} → {title.strip()}")
+
+    if goal is not None and goal.strip():
+        old_goal = str(frontmatter.get("goal", ""))
+        frontmatter["goal"] = goal.strip()
+        # Also update the ## Goal section in the body
+        import re
+        body = re.sub(
+            r"## Goal\n\n.+",
+            f"## Goal\n\n{goal.strip()}",
+            body,
+            count=1,
+        )
+        changes.append(f"Goal: {old_goal} → {goal.strip()}")
+
+    if owners is not None:
+        old_owners = ", ".join(str(o) for o in frontmatter.get("owners", []))
+        frontmatter["owners"] = owners
+        changes.append(f"Owners: {old_owners or '(none)'} → {', '.join(owners)}")
+
+    if tags is not None:
+        old_tags = ", ".join(str(t) for t in frontmatter.get("tags", []))
+        frontmatter["tags"] = tags
+        changes.append(f"Tags: {old_tags or '(none)'} → {', '.join(tags)}")
+
+    if not changes:
+        raise TrailmindError("no fields to edit; provide --title, --goal, --owners, or --tags")
+
+    action = f"Edited project: {'; '.join(changes)}"
+    body = append_activity_entry(
+        body,
+        action_activity_entry(
+            action=action,
+            actor_label="actor",
+            actor=actor,
+            note=note,
+        ),
+    )
+    write_entity(project_path / "PROJECT.md", frontmatter=frontmatter, body=body)
+    return project_path / "PROJECT.md"
