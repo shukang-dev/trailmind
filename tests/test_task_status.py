@@ -75,6 +75,10 @@ def test_is_terminal_task_status_rejects_unknown_status():
         ("blocked", "ready"),
         ("blocked", "in_progress"),
         ("blocked", "wontfix"),
+        ("done", "ready"),
+        ("done", "in_progress"),
+        ("wontfix", "ready"),
+        ("wontfix", "in_progress"),
         ("planned", "ready"),
         ("integration", "done"),
     ],
@@ -88,8 +92,6 @@ def test_validate_task_transition_accepts_allowed_moves(current: str, target: st
     [
         ("created", "done"),
         ("blocked", "done"),
-        ("done", "ready"),
-        ("wontfix", "ready"),
     ],
 )
 def test_validate_task_transition_rejects_disallowed_moves(current: str, target: str):

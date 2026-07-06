@@ -308,6 +308,35 @@ def edit_issue(
     return issue_path
 
 
+def reopen_issue(
+    repo_root: Path,
+    *,
+    issue_ref: str,
+    actor: str,
+    note: str | None = None,
+) -> Path:
+    """Reopen a closed issue (done or wontfix → open)."""
+    issue_path = resolve_entity(repo_root, raw=issue_ref, entity="I")
+    frontmatter, body = read_entity_user_facing(issue_path, label="issue")
+    old_status = str(frontmatter.get("status", "open"))
+
+    if old_status not in ISSUE_CLOSE_STATUSES:
+        raise TrailmindError(f"cannot reopen issue with status {old_status!r} (must be done or wontfix)")
+
+    frontmatter["status"] = "open"
+    body = append_activity_entry(
+        body,
+        action_activity_entry(
+            action=f"Reopened (was {old_status})",
+            actor_label="actor",
+            actor=actor,
+            note=note,
+        ),
+    )
+    write_entity(issue_path, frontmatter=frontmatter, body=body)
+    return issue_path
+
+
 def link_issue(repo_root: Path, *, raw_issue: str, raw_task: str) -> list[Path]:
     issue_path = resolve_entity(repo_root, raw=raw_issue, entity="I")
     task_path = resolve_entity(repo_root, raw=raw_task, entity="T")

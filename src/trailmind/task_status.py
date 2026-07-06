@@ -14,8 +14,8 @@ ALLOWED_TASK_TRANSITIONS = {
     "ready": ("in_progress", "blocked", "done", "wontfix"),
     "in_progress": ("ready", "blocked", "done", "wontfix"),
     "blocked": ("ready", "in_progress", "wontfix"),
-    "done": (),
-    "wontfix": (),
+    "done": ("ready", "in_progress"),
+    "wontfix": ("ready", "in_progress"),
 }
 
 

@@ -29,6 +29,7 @@ from trailmind.issue import (
     edit_issue,
     link_issue,
     list_issues,
+    reopen_issue,
     set_issue_severity,
 )
 from trailmind.log import log_activity
@@ -1330,6 +1331,36 @@ def task_done(
         click.echo(warning)
 
 
+@task_group.command("reopen")
+@click.argument("task_ref")
+@click.option("--to", "target_status", default="ready", type=click.Choice(("ready", "in_progress"), case_sensitive=False),
+              help="Status to reopen to (default: ready).")
+@click.option("--actor", required=True)
+@click.option("--note", default=None)
+@click.pass_context
+def task_reopen(
+    ctx: click.Context,
+    task_ref: str,
+    target_status: str,
+    actor: str,
+    note: str | None,
+) -> None:
+    """Reopen a done or wontfix task."""
+    root = find_repo_root(_cwd_from_context(ctx))
+    from trailmind.resolver import resolve_entity
+    from trailmind.log import read_entity_user_facing
+    task_path = resolve_entity(root, raw=task_ref, entity="T")
+    fm, _body = read_entity_user_facing(task_path, label="task")
+    current = str(fm.get("status", "created"))
+    if current not in ("done", "wontfix"):
+        raise click.UsageError(f"cannot reopen task with status {current!r} (must be done or wontfix)")
+    touched, warning = set_task_status(root, task_ref=task_ref, status=target_status, actor=actor,
+                                       note=note or "Reopened")
+    _echo_touched(root, [touched])
+    if warning:
+        click.echo(warning)
+
+
 @task_group.command("edit")
 @click.argument("task_ref")
 @click.option("--title", default=None, help="New task title.")
@@ -1627,6 +1658,23 @@ def issue_edit(
         description=description,
         note=note,
     )
+    _echo_touched(root, [touched])
+
+
+@issue_group.command("reopen")
+@click.argument("issue_ref")
+@click.option("--actor", required=True)
+@click.option("--note", default=None)
+@click.pass_context
+def issue_reopen(
+    ctx: click.Context,
+    issue_ref: str,
+    actor: str,
+    note: str | None,
+) -> None:
+    """Reopen a closed issue (done or wontfix → open)."""
+    root = find_repo_root(_cwd_from_context(ctx))
+    touched = reopen_issue(root, issue_ref=issue_ref, actor=actor, note=note)
     _echo_touched(root, [touched])
 
 
