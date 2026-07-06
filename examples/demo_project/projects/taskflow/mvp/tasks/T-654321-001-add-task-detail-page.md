@@ -4,9 +4,10 @@ title: Add Task Detail Page
 filer: bob
 owner: alice
 status: created
+priority: low
 created: '2026-07-02'
 start: null
-due: null
+due: '2026-07-20'
 branches: {}
 verify: {}
 code_paths:

@@ -4,9 +4,10 @@ title: User Registration
 filer: alice
 owner: alice
 status: created
+priority: critical
 created: '2026-07-02'
 start:
-due:
+due: '2026-07-05'
 branches: {}
 verify: {}
 code_paths:

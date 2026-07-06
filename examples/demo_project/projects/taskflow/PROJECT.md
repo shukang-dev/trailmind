@@ -2,6 +2,7 @@
 slug: taskflow
 title: TaskFlow
 goal: Build a collaborative task management app.
+state: active
 owners:
 - alice@example.com
 tags:

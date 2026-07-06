@@ -2,6 +2,7 @@
 id: I-123456-001
 title: Task list crashes on empty
 filer: alice
+owner: alice
 status: done
 severity: high
 created: '2026-07-02'

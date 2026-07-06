@@ -4,9 +4,10 @@ title: Login Session
 filer: alice
 owner: bob
 status: created
+priority: high
 created: '2026-07-02'
 start: null
-due: null
+due: '2026-07-08'
 branches: {}
 verify: {}
 code_paths:

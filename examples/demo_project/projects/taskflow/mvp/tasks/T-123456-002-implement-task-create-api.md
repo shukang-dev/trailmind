@@ -4,9 +4,10 @@ title: Implement Task Create API
 filer: alice
 owner: bob
 status: done
+priority: medium
 created: '2026-07-02'
-start:
-due:
+start: '2026-07-03'
+due: '2026-07-08'
 branches: {}
 verify: {}
 code_paths:

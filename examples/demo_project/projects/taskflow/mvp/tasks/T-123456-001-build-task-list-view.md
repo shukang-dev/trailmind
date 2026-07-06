@@ -4,9 +4,10 @@ title: Build Task List View
 filer: alice
 owner: alice
 status: ready
+priority: high
 created: '2026-07-02'
 start:
-due:
+due: '2026-07-10'
 branches: {}
 verify: {}
 code_paths:

@@ -2,6 +2,7 @@
 id: I-654321-001
 title: Create button disabled state unclear
 filer: bob
+owner: bob
 status: open
 severity: low
 created: '2026-07-02'

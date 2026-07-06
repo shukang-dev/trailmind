@@ -5,7 +5,7 @@ created: '2026-07-02'
 scope: mvp
 project: taskflow
 epic: mvp
-linked_spec: null
+linked_spec: docs/specs/2026-07-02-task-search.md
 generated_tasks: []
 ---
 

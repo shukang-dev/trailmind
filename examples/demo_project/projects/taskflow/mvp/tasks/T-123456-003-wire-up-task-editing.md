@@ -4,9 +4,10 @@ title: Wire Up Task Editing
 filer: alice
 owner: bob
 status: blocked
+priority: medium
 created: '2026-07-02'
 start:
-due:
+due: '2026-07-12'
 branches: {}
 verify: {}
 code_paths:
