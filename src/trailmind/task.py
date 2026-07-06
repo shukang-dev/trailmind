@@ -148,8 +148,19 @@ def normalize_task_statuses(repo_root: Path, *, write: bool) -> list[StatusNorma
     return normalizations
 
 
-def list_tasks(repo_root: Path, *, epic_ref: str | None = None) -> list[dict[str, Any]]:
-    """List tasks in an epic or across the repo."""
+def list_tasks(
+    repo_root: Path,
+    *,
+    epic_ref: str | None = None,
+    status: str | None = None,
+    owner: str | None = None,
+    priority: str | None = None,
+    due_before: str | None = None,
+    due_after: str | None = None,
+    overdue: bool = False,
+) -> list[dict[str, Any]]:
+    """List tasks in an epic or across the repo, with optional filtering."""
+    from datetime import date
     from trailmind.scopes import resolve_epic_dir
 
     if epic_ref:
@@ -158,23 +169,46 @@ def list_tasks(repo_root: Path, *, epic_ref: str | None = None) -> list[dict[str
     else:
         task_paths = _iter_task_files(repo_root)
 
+    today = date.today().isoformat()
     tasks = []
     for path in task_paths:
         if not path.is_file():
             continue
         try:
             frontmatter, _body = read_entity_user_facing(path, label="task")
-            tasks.append({
-                "id": str(frontmatter.get("id") or path.stem),
-                "title": str(frontmatter.get("title") or path.stem),
-                "status": str(frontmatter.get("status") or "created"),
-                "owner": str(frontmatter.get("owner") or ""),
-                "filer": str(frontmatter.get("filer") or ""),
-                "created": str(frontmatter.get("created") or ""),
-                "path": path.relative_to(repo_root).as_posix(),
-            })
         except TrailmindError:
             continue
+
+        task_status = str(frontmatter.get("status") or "created")
+        task_owner = str(frontmatter.get("owner") or "")
+        task_priority = str(frontmatter.get("priority") or "")
+        task_due = frontmatter.get("due")
+
+        # Apply filters
+        if status and task_status != status:
+            continue
+        if owner and task_owner != owner:
+            continue
+        if priority and task_priority != priority:
+            continue
+        if due_before and (not task_due or task_due > due_before):
+            continue
+        if due_after and (not task_due or task_due < due_after):
+            continue
+        if overdue and (not task_due or task_due >= today or task_status in ("done", "wontfix")):
+            continue
+
+        tasks.append({
+            "id": str(frontmatter.get("id") or path.stem),
+            "title": str(frontmatter.get("title") or path.stem),
+            "status": task_status,
+            "owner": task_owner,
+            "priority": task_priority,
+            "due": str(task_due) if task_due else "",
+            "filer": str(frontmatter.get("filer") or ""),
+            "created": str(frontmatter.get("created") or ""),
+            "path": path.relative_to(repo_root).as_posix(),
+        })
     return tasks
 
 

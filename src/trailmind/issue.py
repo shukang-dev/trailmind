@@ -12,6 +12,15 @@ from trailmind.roster import Roster
 
 
 ISSUE_CLOSE_STATUSES = ("done", "wontfix")
+ISSUE_SEVERITIES = ("low", "medium", "high", "critical")
+
+
+def validate_issue_severity(severity: str) -> str:
+    normalized = severity.strip().lower()
+    if normalized not in ISSUE_SEVERITIES:
+        expected = ", ".join(ISSUE_SEVERITIES)
+        raise TrailmindError(f"invalid issue severity {severity!r}; expected one of: {expected}")
+    return normalized
 
 
 def _missing_epic(raw: str) -> TrailmindError:
@@ -119,6 +128,7 @@ def list_issues(repo_root: Path, *, epic_ref: str | None = None) -> list[dict[st
                 "title": str(frontmatter.get("title") or path.stem),
                 "status": str(frontmatter.get("status") or "open"),
                 "severity": str(frontmatter.get("severity") or ""),
+                "owner": str(frontmatter.get("owner") or ""),
                 "filer": str(frontmatter.get("filer") or ""),
                 "created": str(frontmatter.get("created") or ""),
                 "path": path.relative_to(repo_root).as_posix(),
@@ -152,6 +162,7 @@ def add_issue(
             "id": issue_id,
             "title": title,
             "filer": filer_shortname,
+            "owner": filer_shortname,
             "status": "open",
             "severity": severity,
             "created": date.today().isoformat(),
@@ -160,6 +171,64 @@ def add_issue(
         },
         body=_initial_body(title, description, filer_shortname),
     )
+    return issue_path
+
+
+def assign_issue(
+    repo_root: Path,
+    *,
+    issue_ref: str,
+    owner: str,
+    actor: str,
+    note: str | None = None,
+) -> Path:
+    """Reassign an issue to a different owner."""
+    issue_path = resolve_entity(repo_root, raw=issue_ref, entity="I")
+    frontmatter, body = read_entity_user_facing(issue_path, label="issue")
+
+    roster = Roster.load(repo_root / "roster.yaml")
+    new_owner = roster.resolve_shortname(owner)
+    old_owner = str(frontmatter.get("owner", "unknown"))
+
+    frontmatter["owner"] = new_owner
+    body = append_activity_entry(
+        body,
+        action_activity_entry(
+            action=f"Assigned to {new_owner} (was {old_owner})",
+            actor_label="actor",
+            actor=actor,
+            note=note,
+        ),
+    )
+    write_entity(issue_path, frontmatter=frontmatter, body=body)
+    return issue_path
+
+
+def set_issue_severity(
+    repo_root: Path,
+    *,
+    issue_ref: str,
+    severity: str,
+    actor: str,
+    note: str | None = None,
+) -> Path:
+    """Change an issue's severity."""
+    validated = validate_issue_severity(severity)
+    issue_path = resolve_entity(repo_root, raw=issue_ref, entity="I")
+    frontmatter, body = read_entity_user_facing(issue_path, label="issue")
+    old_severity = str(frontmatter.get("severity", "unknown"))
+
+    frontmatter["severity"] = validated
+    body = append_activity_entry(
+        body,
+        action_activity_entry(
+            action=f"Severity changed from {old_severity} to {validated}",
+            actor_label="actor",
+            actor=actor,
+            note=note,
+        ),
+    )
+    write_entity(issue_path, frontmatter=frontmatter, body=body)
     return issue_path
 
 

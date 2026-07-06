@@ -20,7 +20,16 @@ from trailmind.errors import TrailmindError
 from trailmind.export import export_repo, format_export
 from trailmind.importer import import_repo, load_export_file
 from trailmind.inbox import add_inbox_item, list_inbox_items, resolve_inbox_item
-from trailmind.issue import add_issue, carry_issue, close_issue, link_issue, list_issues
+from trailmind.issue import (
+    ISSUE_SEVERITIES,
+    add_issue,
+    assign_issue,
+    carry_issue,
+    close_issue,
+    link_issue,
+    list_issues,
+    set_issue_severity,
+)
 from trailmind.log import log_activity
 from trailmind.milestone import add_milestone, list_milestones
 from trailmind.paths import find_repo_root
@@ -59,6 +68,7 @@ from trailmind.roster import Roster
 from trailmind.security_scan import scan_paths
 from trailmind.serve import serve_repo
 from trailmind.show import format_entity_show, show_entity
+from trailmind.stats import build_stats, format_stats
 from trailmind.sweep import build_sweep_report, format_sweep_report, sweep_report_to_dict
 from trailmind.task import (
     DEFAULT_PRIORITY,
@@ -79,6 +89,7 @@ from trailmind.task import (
     update_task_status,
 )
 from trailmind.task_rules import linked_open_issues_for_task
+from trailmind.task_status import TASK_STATUSES
 
 
 @click.group()
@@ -345,6 +356,19 @@ def scan_command(ctx: click.Context) -> None:
         noun = "finding" if count == 1 else "findings"
         raise TrailmindError(f"security scan found {count} {noun}")
     click.echo("scan passed")
+
+
+@cli.command("stats")
+@click.option("--json", "json_output", is_flag=True, help="Print structured JSON instead of text report.")
+@click.pass_context
+def stats_command(ctx: click.Context, json_output: bool) -> None:
+    """Show repository statistics."""
+    root = find_repo_root(_cwd_from_context(ctx))
+    data = build_stats(root)
+    if json_output:
+        click.echo(json.dumps(data, ensure_ascii=False, indent=2, default=str))
+    else:
+        click.echo(format_stats(data), nl=False)
 
 
 @cli.command("doctor")
@@ -990,11 +1014,38 @@ def task_group() -> None:
 
 @task_group.command("list")
 @click.option("--epic", "epic_ref", default=None)
+@click.option("--status", default=None, type=click.Choice(TASK_STATUSES, case_sensitive=False),
+              help="Filter by task status.")
+@click.option("--owner", default=None, help="Filter by owner shortname.")
+@click.option("--priority", default=None, type=click.Choice(TASK_PRIORITIES, case_sensitive=False),
+              help="Filter by priority.")
+@click.option("--due-before", default=None, help="Filter tasks due before YYYY-MM-DD.")
+@click.option("--due-after", default=None, help="Filter tasks due after YYYY-MM-DD.")
+@click.option("--overdue", is_flag=True, help="Show only overdue tasks (not done/wontfix).")
 @click.option("--json", "json_output", is_flag=True, help="Print structured JSON instead of tabular output.")
 @click.pass_context
-def task_list_cmd(ctx: click.Context, epic_ref: str | None, json_output: bool) -> None:
+def task_list_cmd(
+    ctx: click.Context,
+    epic_ref: str | None,
+    status: str | None,
+    owner: str | None,
+    priority: str | None,
+    due_before: str | None,
+    due_after: str | None,
+    overdue: bool,
+    json_output: bool,
+) -> None:
     root = find_repo_root(_cwd_from_context(ctx))
-    tasks = list_tasks(root, epic_ref=epic_ref)
+    tasks = list_tasks(
+        root,
+        epic_ref=epic_ref,
+        status=status,
+        owner=owner,
+        priority=priority,
+        due_before=due_before,
+        due_after=due_after,
+        overdue=overdue,
+    )
     if json_output:
         click.echo(json.dumps(tasks, ensure_ascii=False, indent=2))
     else:
@@ -1002,8 +1053,12 @@ def task_list_cmd(ctx: click.Context, epic_ref: str | None, json_output: bool) -
             click.echo("No tasks.")
             return
         for t in tasks:
-            click.echo(f"{t['id']:16s} {t['status']:14s} {t['owner']:12s} {t['title']}")
-            click.echo(f"{'':16s} {'':14s} {'':12s} {t['path']}")
+            due = t.get("due", "")
+            pri = t.get("priority", "")
+            extras = f" [{pri}]" if pri else ""
+            due_str = f" due:{due}" if due else ""
+            click.echo(f"{t['id']:16s} {t['status']:14s} {t['owner']:12s}{extras}{due_str}  {t['title']}")
+            click.echo(f"{'':16s} {'':14s} {'':12s}  {t['path']}")
 
 
 @task_group.command("add")
@@ -1317,7 +1372,8 @@ def issue_list_cmd(ctx: click.Context, epic_ref: str | None, json_output: bool) 
             return
         for i in issues:
             sev = f" [{i['severity']}]" if i['severity'] else ""
-            click.echo(f"{i['id']:16s} {i['status']:10s}{sev} {i['title']}")
+            owner = f" @{i['owner']}" if i.get('owner') else ""
+            click.echo(f"{i['id']:16s} {i['status']:10s}{sev}{owner} {i['title']}")
             click.echo(f"{'':16s} {'':10s}  {i['path']}")
 
 
@@ -1385,6 +1441,44 @@ def issue_show(ctx: click.Context, issue_ref: str, json_output: bool) -> None:
         click.echo(json.dumps(data, ensure_ascii=False, indent=2, default=str))
     else:
         click.echo(format_entity_show(data, entity_label="Issue"), nl=False)
+
+
+@issue_group.command("assign")
+@click.argument("issue_ref")
+@click.argument("owner")
+@click.option("--actor", required=True)
+@click.option("--note", default=None)
+@click.pass_context
+def issue_assign(
+    ctx: click.Context,
+    issue_ref: str,
+    owner: str,
+    actor: str,
+    note: str | None,
+) -> None:
+    """Reassign an issue to a different owner."""
+    root = find_repo_root(_cwd_from_context(ctx))
+    touched = assign_issue(root, issue_ref=issue_ref, owner=owner, actor=actor, note=note)
+    _echo_touched(root, [touched])
+
+
+@issue_group.command("set-severity")
+@click.argument("issue_ref")
+@click.argument("severity", type=click.Choice(ISSUE_SEVERITIES, case_sensitive=False))
+@click.option("--actor", required=True)
+@click.option("--note", default=None)
+@click.pass_context
+def issue_set_severity(
+    ctx: click.Context,
+    issue_ref: str,
+    severity: str,
+    actor: str,
+    note: str | None,
+) -> None:
+    """Change an issue's severity."""
+    root = find_repo_root(_cwd_from_context(ctx))
+    touched = set_issue_severity(root, issue_ref=issue_ref, severity=severity, actor=actor, note=note)
+    _echo_touched(root, [touched])
 
 
 @issue_group.command("pickup")
