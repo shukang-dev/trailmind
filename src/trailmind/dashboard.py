@@ -22,6 +22,42 @@ _ENTITY_FILENAME_RE = {
 
 def render_overview(repo_root: Path) -> Path:
     projects = [_project_summary(repo_root, project_path) for project_path in _project_dirs(repo_root)]
+
+    # Compute aggregates across all epics
+    all_epics: list[dict[str, Any]] = []
+    for project in projects:
+        all_epics.extend(project.get("epics", []))
+
+    # For aggregates we need child counts; re-read epics with include_children
+    total_tasks = 0
+    total_issues = 0
+    total_specs = 0
+    total_plans = 0
+    total_milestones = 0
+    overdue_tasks = 0
+    today_str = date.today().isoformat()
+    task_status_counter: Counter[str] = Counter()
+    task_priority_counter: Counter[str] = Counter()
+
+    for project in projects:
+        for epic_data in project.get("epics", []):
+            epic_path = repo_root / epic_data["relative_path"]
+            epic_full = _epic_summary(repo_root, epic_path, include_children=True)
+            total_tasks += epic_full.get("task_count", 0)
+            total_issues += epic_full.get("issue_count", 0)
+            total_specs += epic_full.get("spec_count", 0)
+            total_plans += epic_full.get("plan_count", 0)
+            total_milestones += epic_full.get("milestone_count", 0)
+            for task in epic_full.get("tasks", []):
+                status = task.get("status", "unknown")
+                task_status_counter[status] += 1
+                priority = task.get("priority", "")
+                if priority:
+                    task_priority_counter[priority] += 1
+                due = task.get("due", "")
+                if due and due < today_str and status not in ("done", "wontfix"):
+                    overdue_tasks += 1
+
     output_path = repo_root / "overview.html"
     return _render_to_file(
         "overview.html.j2",
@@ -32,6 +68,14 @@ def render_overview(repo_root: Path) -> Path:
             "projects": projects,
             "project_count": len(projects),
             "epic_count": sum(project["epic_count"] for project in projects),
+            "total_tasks": total_tasks,
+            "total_issues": total_issues,
+            "total_specs": total_specs,
+            "total_plans": total_plans,
+            "total_milestones": total_milestones,
+            "overdue_tasks": overdue_tasks,
+            "task_status_counts": dict(task_status_counter),
+            "task_priority_counts": dict(task_priority_counter),
         },
     )
 

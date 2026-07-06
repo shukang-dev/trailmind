@@ -3,7 +3,7 @@
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
-  <title>{{ title }}</title>
+  <title>Trailmind Overview</title>
   <style>
     :root {
       color-scheme: light;
@@ -71,61 +71,45 @@
   <main>
     <header>
       <h1>Trailmind Overview</h1>
-      <p class="path">{{ repo_name }}</p>
+      <p class="path">demo_project</p>
       <div class="metrics" aria-label="Repository counts">
-        <div class="metric"><strong>{{ project_count }}</strong><span>Projects</span></div>
-        <div class="metric"><strong>{{ epic_count }}</strong><span>Epics</span></div>
-        <div class="metric"><strong>{{ total_tasks }}</strong><span>Tasks</span></div>
-        <div class="metric"><strong>{{ total_issues }}</strong><span>Issues</span></div>
-        <div class="metric"><strong>{{ total_milestones }}</strong><span>Milestones</span></div>
-        <div class="metric"><strong>{{ total_specs }}</strong><span>Specs</span></div>
-        <div class="metric"><strong>{{ total_plans }}</strong><span>Plans</span></div>
-        {% if overdue_tasks > 0 %}
-        <div class="metric overdue"><strong>{{ overdue_tasks }}</strong><span>Overdue</span></div>
-        {% endif %}
+        <div class="metric"><strong>1</strong><span>Projects</span></div>
+        <div class="metric"><strong>2</strong><span>Epics</span></div>
+        <div class="metric"><strong>6</strong><span>Tasks</span></div>
+        <div class="metric"><strong>2</strong><span>Issues</span></div>
+        <div class="metric"><strong>3</strong><span>Milestones</span></div>
+        <div class="metric"><strong>2</strong><span>Specs</span></div>
+        <div class="metric"><strong>3</strong><span>Plans</span></div>
+        <div class="metric overdue"><strong>1</strong><span>Overdue</span></div>
       </div>
-      {% if task_status_counts %}
       <div class="breakdown" aria-label="Task status breakdown">
-        {% for status, count in task_status_counts.items() %}
-        <span class="breakdown-item">{{ status }}: {{ count }}</span>
-        {% endfor %}
+        <span class="breakdown-item">created: 3</span>
+        <span class="breakdown-item">ready: 1</span>
+        <span class="breakdown-item">done: 1</span>
+        <span class="breakdown-item">blocked: 1</span>
       </div>
-      {% endif %}
-      {% if task_priority_counts %}
       <div class="breakdown" aria-label="Task priority breakdown">
-        {% for priority, count in task_priority_counts.items() %}
-        <span class="breakdown-item {% if priority in ['critical', 'high'] %}overdue{% endif %}">{{ priority }}: {{ count }}</span>
-        {% endfor %}
+        <span class="breakdown-item overdue">critical: 1</span>
+        <span class="breakdown-item overdue">high: 2</span>
+        <span class="breakdown-item ">medium: 2</span>
+        <span class="breakdown-item ">low: 1</span>
       </div>
-      {% endif %}
     </header>
 
-    {% if projects %}
     <section class="grid" aria-label="Projects">
-      {% for project in projects %}
       <article class="project">
-        <h2>{{ project.title }}</h2>
-        <p>{{ project.goal }}</p>
+        <h2>TaskFlow</h2>
+        <p>Build a collaborative task management app.</p>
         <div class="meta">
-          <span class="pill">{{ project.slug }}</span>
-          <span class="pill">{{ project.epic_count }} epics</span>
-          {% for owner in project.owners %}
-          <span class="pill">owner {{ owner }}</span>
-          {% endfor %}
-          {% for tag in project.tags %}
-          <span class="pill">{{ tag }}</span>
-          {% endfor %}
+          <span class="pill">taskflow</span>
+          <span class="pill">2 epics</span>
+          <span class="pill">owner alice@example.com</span>
+          <span class="pill">demo</span>
+          <span class="pill">webapp</span>
         </div>
-        <p class="path">{{ project.relative_path }}/dashboard.html</p>
+        <p class="path">projects/taskflow/dashboard.html</p>
       </article>
-      {% endfor %}
     </section>
-    {% else %}
-    <section class="empty">
-      <h2>No projects</h2>
-      <p>No project dashboards are available yet.</p>
-    </section>
-    {% endif %}
   </main>
 </body>
 </html>

@@ -1,0 +1,359 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>MVP Release Dashboard</title>
+  <style>
+    :root {
+      color-scheme: light;
+      --bg: #f7f8fb;
+      --panel: #ffffff;
+      --ink: #20242c;
+      --muted: #5f6978;
+      --line: #d9dee8;
+      --accent: #8a4a2a;
+      --accent-soft: #f6eee9;
+    }
+    * { box-sizing: border-box; }
+    body { margin: 0; font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif; color: var(--ink); background: var(--bg); }
+    main { max-width: 1180px; margin: 0 auto; padding: 32px 20px 48px; }
+    header { margin-bottom: 24px; }
+    h1 { margin: 0 0 8px; font-size: 2rem; line-height: 1.15; letter-spacing: 0; }
+    h2 { margin: 0 0 10px; font-size: 1.2rem; letter-spacing: 0; }
+    p { margin: 0; color: var(--muted); line-height: 1.5; }
+    .path { color: var(--muted); font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: 0.84rem; }
+    .panel { border: 1px solid var(--line); border-radius: 8px; background: var(--panel); padding: 16px; margin-bottom: 16px; }
+    .metrics { display: flex; flex-wrap: wrap; gap: 10px; margin-top: 16px; }
+    .metric { min-width: 124px; border: 1px solid var(--line); border-radius: 8px; background: var(--panel); padding: 12px 14px; }
+    .metric strong { display: block; font-size: 1.35rem; line-height: 1.1; }
+    .metric span { color: var(--muted); font-size: 0.9rem; }
+    .pills { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 12px; }
+    .pill { display: inline-flex; align-items: center; min-height: 24px; padding: 2px 8px; border-radius: 999px; background: var(--accent-soft); color: var(--accent); font-size: 0.85rem; white-space: nowrap; }
+    table { width: 100%; border-collapse: collapse; background: var(--panel); border: 1px solid var(--line); border-radius: 8px; overflow: hidden; margin-bottom: 20px; }
+    th, td { padding: 10px 12px; border-bottom: 1px solid var(--line); text-align: left; vertical-align: top; }
+    th { color: var(--muted); font-size: 0.82rem; font-weight: 600; text-transform: uppercase; }
+    tr:last-child td { border-bottom: 0; }
+    details { margin-top: 6px; }
+    summary { color: var(--accent); cursor: pointer; }
+    pre { margin: 10px 0 0; white-space: pre-wrap; color: var(--muted); font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: 0.88rem; line-height: 1.45; }
+    .status-created { color: #6b7280; }
+    .status-ready { color: #059669; }
+    .status-in_progress { color: #2563eb; }
+    .status-blocked { color: #dc2626; }
+    .status-done { color: #6b7280; text-decoration: line-through; }
+    .status-wontfix { color: #9ca3af; text-decoration: line-through; }
+    .status-open { color: #dc2626; }
+    .priority-critical { display: inline-block; padding: 1px 8px; border-radius: 4px; background: #fef2f2; color: #dc2626; font-weight: 600; font-size: 0.8rem; }
+    .priority-high { display: inline-block; padding: 1px 8px; border-radius: 4px; background: #fff7ed; color: #ea580c; font-weight: 600; font-size: 0.8rem; }
+    .priority-medium { display: inline-block; padding: 1px 8px; border-radius: 4px; background: #eff6ff; color: #2563eb; font-size: 0.8rem; }
+    .priority-low { display: inline-block; padding: 1px 8px; border-radius: 4px; background: #f3f4f6; color: #6b7280; font-size: 0.8rem; }
+    .severity-critical { display: inline-block; padding: 1px 8px; border-radius: 4px; background: #fef2f2; color: #dc2626; font-weight: 600; font-size: 0.8rem; }
+    .severity-high { display: inline-block; padding: 1px 8px; border-radius: 4px; background: #fff7ed; color: #ea580c; font-weight: 600; font-size: 0.8rem; }
+    .severity-medium { display: inline-block; padding: 1px 8px; border-radius: 4px; background: #eff6ff; color: #2563eb; font-size: 0.8rem; }
+    .severity-low { display: inline-block; padding: 1px 8px; border-radius: 4px; background: #f3f4f6; color: #6b7280; font-size: 0.8rem; }
+    .task-overdue { background: #fff1f2; }
+    .task-overdue td:first-child strong { color: #dc2626; }
+  </style>
+</head>
+<body>
+  <main>
+    <header>
+      <h1>MVP Release</h1>
+      <p>First usable release with core task management</p>
+      <p class="path">projects/taskflow/mvp</p>
+      <div class="metrics" aria-label="Epic counts">
+        <div class="metric"><strong>4</strong><span>Tasks</span></div>
+        <div class="metric"><strong>2</strong><span>Issues</span></div>
+        <div class="metric"><strong>2</strong><span>Milestones</span></div>
+      </div>
+      <div class="pills">
+        <span class="pill">active</span>
+        <span class="pill">project taskflow</span>
+<span class="pill">start 2026-07-01</span><span class="pill">target 2026-07-31</span>        <span class="pill">alice</span>
+        <span class="pill">bob</span>
+        <span class="pill">taskflow</span>
+      </div>
+    </header>
+
+    <section class="panel">
+      <h2>Epic Notes</h2>
+      <pre># MVP Release
+
+## Goal
+
+First usable release with core task management</pre>
+    </section>
+
+    <section>
+      <h2>Tasks</h2>
+      <table>
+        <thead>
+          <tr><th>Task</th><th>Status</th><th>Priority</th><th>Due</th><th>Owner</th><th>Created</th></tr>
+        </thead>
+        <tbody>
+          <tr class="task-ready">
+            <td>
+              <strong>T-123456-001 Build Task List View</strong>
+              <p class="path">projects/taskflow/mvp/tasks/T-123456-001-build-task-list-view.md</p>
+<details><summary>Notes</summary><pre># Build Task List View
+
+## Scope
+
+TBD
+
+## Acceptance
+
+- TBD
+
+## Activity Log
+
+- 2026-07-02: Created task by alice.
+- 2026-07-02: Status changed from created to ready by alice. Design reviewed, ready to start.</pre></details>            </td>
+            <td><span class="status-ready">ready</span></td>
+            <td><span class="priority-high">high</span></td>
+            <td>2026-07-10</td>
+            <td>alice</td>
+            <td>2026-07-02</td>
+          </tr>
+          <tr class="task-done">
+            <td>
+              <strong>T-123456-002 Implement Task Create API</strong>
+              <p class="path">projects/taskflow/mvp/tasks/T-123456-002-implement-task-create-api.md</p>
+<details><summary>Notes</summary><pre># Implement Task Create API
+
+## Scope
+
+TBD
+
+## Acceptance
+
+- TBD
+
+## Activity Log
+
+- 2026-07-02: Created task by alice.
+- 2026-07-02: Status changed from created to in_progress by bob. Started implementation.
+- 2026-07-02: Added deliverable by bob. tests pass
+- 2026-07-02: Completed deliverable by bob. tests pass
+- 2026-07-02: Added deliverable by bob. API documented
+- 2026-07-02: Completed deliverable by bob. API documented
+- 2026-07-02: Status changed from in_progress to done by bob. Implementation complete.</pre></details>            </td>
+            <td><span class="status-done">done</span></td>
+            <td><span class="priority-medium">medium</span></td>
+            <td>2026-07-08</td>
+            <td>bob</td>
+            <td>2026-07-02</td>
+          </tr>
+          <tr class="task-blocked">
+            <td>
+              <strong>T-123456-003 Wire Up Task Editing</strong>
+              <p class="path">projects/taskflow/mvp/tasks/T-123456-003-wire-up-task-editing.md</p>
+<details><summary>Notes</summary><pre># Wire Up Task Editing
+
+## Scope
+
+TBD
+
+## Acceptance
+
+- TBD
+
+## Activity Log
+
+- 2026-07-02: Created task by alice.
+- 2026-07-02: Status changed from created to blocked by alice. Waiting for API design review.</pre></details>            </td>
+            <td><span class="status-blocked">blocked</span></td>
+            <td><span class="priority-medium">medium</span></td>
+            <td>2026-07-12</td>
+            <td>bob</td>
+            <td>2026-07-02</td>
+          </tr>
+          <tr class="task-created">
+            <td>
+              <strong>T-654321-001 Add Task Detail Page</strong>
+              <p class="path">projects/taskflow/mvp/tasks/T-654321-001-add-task-detail-page.md</p>
+<details><summary>Notes</summary><pre># Add Task Detail Page
+
+## Scope
+
+TBD
+
+## Acceptance
+
+- TBD
+
+## Activity Log
+
+- 2026-07-02: Created task by bob.</pre></details>            </td>
+            <td><span class="status-created">created</span></td>
+            <td><span class="priority-low">low</span></td>
+            <td>2026-07-20</td>
+            <td>alice</td>
+            <td>2026-07-02</td>
+          </tr>
+        </tbody>
+      </table>
+    </section>
+
+    <section>
+      <h2>Issues</h2>
+      <table>
+        <thead>
+          <tr><th>Issue</th><th>Status</th><th>Severity</th><th>Owner</th><th>Filed By</th></tr>
+        </thead>
+        <tbody>
+          <tr class="issue-done">
+            <td>
+              <strong>I-123456-001 Task list crashes on empty</strong>
+              <p class="path">projects/taskflow/mvp/issues/I-123456-001-task-list-crashes-on-empty.md</p>
+<details><summary>Notes</summary><pre># Task list crashes on empty
+
+## Description
+
+When there are no tasks, the list view throws an IndexError.
+
+## Resolution
+
+TBD
+
+## Activity Log
+
+- 2026-07-02: Filed by alice.
+- 2026-07-02: Closed as done by alice. Fixed by adding empty state check.</pre></details>            </td>
+            <td><span class="status-done">done</span></td>
+            <td><span class="severity-high">high</span></td>
+            <td>alice</td>
+            <td>alice</td>
+          </tr>
+          <tr class="issue-open">
+            <td>
+              <strong>I-654321-001 Create button disabled state unclear</strong>
+              <p class="path">projects/taskflow/mvp/issues/I-654321-001-create-button-disabled-state-unclear.md</p>
+<details><summary>Notes</summary><pre># Create button disabled state unclear
+
+## Description
+
+The Create button looks clickable even when form is invalid.
+
+## Resolution
+
+TBD
+
+## Activity Log
+
+- 2026-07-02: Filed by bob.</pre></details>            </td>
+            <td><span class="status-open">open</span></td>
+            <td><span class="severity-low">low</span></td>
+            <td>bob</td>
+            <td>bob</td>
+          </tr>
+        </tbody>
+      </table>
+    </section>
+
+    <section>
+      <h2>Milestones</h2>
+      <table>
+        <thead>
+          <tr><th>Milestone</th><th>Status</th><th>Date</th><th>Created</th></tr>
+        </thead>
+        <tbody>
+          <tr>
+            <td>
+              <strong>M-001 Alpha</strong>
+              <p class="path">projects/taskflow/mvp/milestones/M-001-alpha.md</p>
+<details><summary>Notes</summary><pre># Alpha
+
+Date: 2026-07-15</pre></details>            </td>
+            <td>planned</td>
+            <td>2026-07-15</td>
+            <td>2026-07-02</td>
+          </tr>
+          <tr>
+            <td>
+              <strong>M-002 Beta</strong>
+              <p class="path">projects/taskflow/mvp/milestones/M-002-beta.md</p>
+<details><summary>Notes</summary><pre># Beta
+
+Date: 2026-07-25</pre></details>            </td>
+            <td>planned</td>
+            <td>2026-07-25</td>
+            <td>2026-07-02</td>
+          </tr>
+        </tbody>
+      </table>
+    </section>
+
+    <section>
+      <h2>Planning</h2>
+      <h3>Specs (2)</h3>
+      <table>
+        <thead>
+          <tr><th>Spec</th><th>Status</th><th>Scope</th><th>Created</th><th>Plans</th></tr>
+        </thead>
+        <tbody>
+          <tr>
+            <td>
+              <strong>Task Notifications</strong>
+              <p class="path">projects/taskflow/mvp/docs/specs/2026-07-02-task-notifications.md</p>
+            </td>
+            <td>approved-for-spec</td>
+            <td>mvp</td>
+            <td>2026-07-02</td>
+            <td>1</td>
+          </tr>
+          <tr>
+            <td>
+              <strong>Task Search</strong>
+              <p class="path">projects/taskflow/mvp/docs/specs/2026-07-02-task-search.md</p>
+            </td>
+            <td>approved-for-spec</td>
+            <td>mvp</td>
+            <td>2026-07-02</td>
+            <td>0</td>
+          </tr>
+        </tbody>
+      </table>
+      <h3>Plans (3)</h3>
+      <table>
+        <thead>
+          <tr><th>Plan</th><th>Status</th><th>Scope</th><th>Spec</th><th>Tasks</th></tr>
+        </thead>
+        <tbody>
+          <tr>
+            <td>
+              <strong>Task List Implementation</strong>
+              <p class="path">projects/taskflow/mvp/docs/plans/2026-07-01-task-list-implementation.md</p>
+            </td>
+            <td>completed</td>
+            <td>mvp</td>
+            <td>—</td>
+            <td>3</td>
+          </tr>
+          <tr>
+            <td>
+              <strong>Dashboard Improvements</strong>
+              <p class="path">projects/taskflow/mvp/docs/plans/2026-07-02-dashboard-improvements.md</p>
+            </td>
+            <td>approved</td>
+            <td>mvp</td>
+            <td>docs/specs/2026-07-02-task-search.md</td>
+            <td>0</td>
+          </tr>
+          <tr>
+            <td>
+              <strong>Task Notifications Implementation</strong>
+              <p class="path">projects/taskflow/mvp/docs/plans/2026-07-02-task-notifications-implementation.md</p>
+            </td>
+            <td>in-progress</td>
+            <td>mvp</td>
+            <td>docs/specs/2026-07-02-task-notifications.md</td>
+            <td>0</td>
+          </tr>
+        </tbody>
+      </table>
+    </section>
+  </main>
+</body>
+</html>
