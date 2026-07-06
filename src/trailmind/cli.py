@@ -77,6 +77,7 @@ from trailmind.task import (
     TASK_PRIORITIES,
     add_task,
     add_task_deliverable,
+    add_task_dependency,
     assign_task,
     close_task,
     complete_task,
@@ -85,6 +86,7 @@ from trailmind.task import (
     list_tasks,
     next_tasks,
     normalize_task_statuses,
+    remove_task_dependency,
     set_task_due,
     set_task_priority,
     set_task_status,
@@ -1426,6 +1428,67 @@ def task_edit(
         title=title,
         code_paths=paths,
         design_doc=design_doc,
+        note=note,
+    )
+    _echo_touched(root, [touched])
+
+
+@task_group.group("depend")
+def task_depend_group() -> None:
+    """Manage task dependencies."""
+
+
+@task_depend_group.command("add")
+@click.argument("task_ref")
+@click.argument("depends_on_ref")
+@click.option("--soft", is_flag=True, help="Add as a soft dependency (informational, not blocking).")
+@click.option("--actor", required=True)
+@click.option("--note", default=None)
+@click.pass_context
+def task_depend_add(
+    ctx: click.Context,
+    task_ref: str,
+    depends_on_ref: str,
+    soft: bool,
+    actor: str,
+    note: str | None,
+) -> None:
+    """Add a dependency to a task."""
+    root = find_repo_root(_cwd_from_context(ctx))
+    touched = add_task_dependency(
+        root,
+        task_ref=task_ref,
+        depends_on_ref=depends_on_ref,
+        actor=actor,
+        soft=soft,
+        note=note,
+    )
+    _echo_touched(root, [touched])
+
+
+@task_depend_group.command("remove")
+@click.argument("task_ref")
+@click.argument("depends_on_ref")
+@click.option("--soft", is_flag=True, help="Remove from soft dependencies.")
+@click.option("--actor", required=True)
+@click.option("--note", default=None)
+@click.pass_context
+def task_depend_remove(
+    ctx: click.Context,
+    task_ref: str,
+    depends_on_ref: str,
+    soft: bool,
+    actor: str,
+    note: str | None,
+) -> None:
+    """Remove a dependency from a task."""
+    root = find_repo_root(_cwd_from_context(ctx))
+    touched = remove_task_dependency(
+        root,
+        task_ref=task_ref,
+        depends_on_ref=depends_on_ref,
+        actor=actor,
+        soft=soft,
         note=note,
     )
     _echo_touched(root, [touched])

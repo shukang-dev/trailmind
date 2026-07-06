@@ -462,6 +462,88 @@ def complete_task(
     )
 
 
+def add_task_dependency(
+    repo_root: Path,
+    *,
+    task_ref: str,
+    depends_on_ref: str,
+    actor: str,
+    soft: bool = False,
+    note: str | None = None,
+) -> Path:
+    """Add a dependency to a task.
+
+    If soft=True, adds to soft_depends_on instead of depends_on.
+    """
+    task_path = resolve_entity(repo_root, raw=task_ref, entity="T")
+    dep_path = resolve_entity(repo_root, raw=depends_on_ref, entity="T")
+
+    if task_path == dep_path:
+        raise TrailmindError("task cannot depend on itself")
+
+    frontmatter, body = read_entity_user_facing(task_path, label="task")
+    field = "soft_depends_on" if soft else "depends_on"
+    label = "soft dependency" if soft else "dependency"
+
+    existing = string_list_field(frontmatter, field, label="task")
+    dep_id = str(read_entity_user_facing(dep_path, label="task")[0].get("id") or dep_path.stem)
+
+    if dep_id in existing:
+        raise TrailmindError(f"task already has {label} on {dep_id}")
+
+    existing.append(dep_id)
+    frontmatter[field] = existing
+
+    body = append_activity_entry(
+        body,
+        action_activity_entry(
+            action=f"Added {label}: depends on {dep_id}",
+            actor_label="actor",
+            actor=actor,
+            note=note,
+        ),
+    )
+    write_entity(task_path, frontmatter=frontmatter, body=body)
+    return task_path
+
+
+def remove_task_dependency(
+    repo_root: Path,
+    *,
+    task_ref: str,
+    depends_on_ref: str,
+    actor: str,
+    soft: bool = False,
+    note: str | None = None,
+) -> Path:
+    """Remove a dependency from a task."""
+    task_path = resolve_entity(repo_root, raw=task_ref, entity="T")
+    frontmatter, body = read_entity_user_facing(task_path, label="task")
+    field = "soft_depends_on" if soft else "depends_on"
+    label = "soft dependency" if soft else "dependency"
+
+    existing = string_list_field(frontmatter, field, label="task")
+    dep_id = depends_on_ref.strip()
+
+    if dep_id not in existing:
+        raise TrailmindError(f"task does not have {label} on {dep_id}")
+
+    existing.remove(dep_id)
+    frontmatter[field] = existing
+
+    body = append_activity_entry(
+        body,
+        action_activity_entry(
+            action=f"Removed {label}: no longer depends on {dep_id}",
+            actor_label="actor",
+            actor=actor,
+            note=note,
+        ),
+    )
+    write_entity(task_path, frontmatter=frontmatter, body=body)
+    return task_path
+
+
 def edit_task(
     repo_root: Path,
     *,
