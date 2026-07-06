@@ -1135,6 +1135,7 @@ def task_group() -> None:
               type=click.Choice(("status", "owner", "priority"), case_sensitive=False),
               help="Group tasks by status, owner, or priority.")
 @click.option("--compact", is_flag=True, help="Compact single-line output.")
+@click.option("--csv", "csv_output", is_flag=True, help="Output as CSV for spreadsheet import.")
 @click.option("--json", "json_output", is_flag=True, help="Print structured JSON instead of tabular output.")
 @click.pass_context
 def task_list_cmd(
@@ -1149,6 +1150,7 @@ def task_list_cmd(
     sort_by: str,
     group_by: str | None,
     compact: bool,
+    csv_output: bool,
     json_output: bool,
 ) -> None:
     root = find_repo_root(_cwd_from_context(ctx))
@@ -1163,6 +1165,21 @@ def task_list_cmd(
         overdue=overdue,
         sort_by=sort_by,
     )
+    if csv_output:
+        import csv
+        import io
+        output = io.StringIO()
+        writer = csv.writer(output)
+        writer.writerow(["id", "title", "status", "priority", "owner", "due", "created", "path"])
+        for t in tasks:
+            writer.writerow([
+                t.get("id", ""), t.get("title", ""), t.get("status", ""),
+                t.get("priority", ""), t.get("owner", ""), t.get("due", ""),
+                t.get("created", ""), t.get("path", ""),
+            ])
+        click.echo(output.getvalue(), nl=False)
+        return
+
     if json_output:
         click.echo(json.dumps(tasks, ensure_ascii=False, indent=2))
         return
@@ -1685,6 +1702,7 @@ def issue_group() -> None:
               type=click.Choice(("status", "severity", "owner"), case_sensitive=False),
               help="Group issues by status, severity, or owner.")
 @click.option("--compact", is_flag=True, help="Compact single-line output.")
+@click.option("--csv", "csv_output", is_flag=True, help="Output as CSV for spreadsheet import.")
 @click.option("--json", "json_output", is_flag=True, help="Print structured JSON instead of tabular output.")
 @click.pass_context
 def issue_list_cmd(
@@ -1696,10 +1714,27 @@ def issue_list_cmd(
     sort_by: str,
     group_by: str | None,
     compact: bool,
+    csv_output: bool,
     json_output: bool,
 ) -> None:
     root = find_repo_root(_cwd_from_context(ctx))
     issues = list_issues(root, epic_ref=epic_ref, status=status, severity=severity, owner=owner, sort_by=sort_by)
+
+    if csv_output:
+        import csv
+        import io
+        output = io.StringIO()
+        writer = csv.writer(output)
+        writer.writerow(["id", "title", "status", "severity", "owner", "filer", "created", "path"])
+        for i in issues:
+            writer.writerow([
+                i.get("id", ""), i.get("title", ""), i.get("status", ""),
+                i.get("severity", ""), i.get("owner", ""), i.get("filer", ""),
+                i.get("created", ""), i.get("path", ""),
+            ])
+        click.echo(output.getvalue(), nl=False)
+        return
+
     if json_output:
         click.echo(json.dumps(issues, ensure_ascii=False, indent=2))
         return
