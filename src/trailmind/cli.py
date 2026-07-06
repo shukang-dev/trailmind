@@ -1131,6 +1131,9 @@ def task_group() -> None:
 @click.option("--sort", "sort_by", default="created",
               type=click.Choice(("created", "priority", "due", "status", "title"), case_sensitive=False),
               help="Sort tasks (default: created).")
+@click.option("--group-by", default=None,
+              type=click.Choice(("status", "owner", "priority"), case_sensitive=False),
+              help="Group tasks by status, owner, or priority.")
 @click.option("--json", "json_output", is_flag=True, help="Print structured JSON instead of tabular output.")
 @click.pass_context
 def task_list_cmd(
@@ -1143,6 +1146,7 @@ def task_list_cmd(
     due_after: str | None,
     overdue: bool,
     sort_by: str,
+    group_by: str | None,
     json_output: bool,
 ) -> None:
     root = find_repo_root(_cwd_from_context(ctx))
@@ -1159,10 +1163,41 @@ def task_list_cmd(
     )
     if json_output:
         click.echo(json.dumps(tasks, ensure_ascii=False, indent=2))
+        return
+
+    if not tasks:
+        click.echo("No tasks.")
+        return
+
+    if group_by:
+        from collections import defaultdict
+        groups: dict[str, list[dict]] = defaultdict(list)
+        for t in tasks:
+            key = t.get(group_by, "") or "unassigned"
+            groups[key].append(t)
+
+        # Sort groups: by natural order for status/priority, alphabetical for owner
+        if group_by == "status":
+            order = {s: i for i, s in enumerate(TASK_STATUSES)}
+            sorted_keys = sorted(groups.keys(), key=lambda k: order.get(k, 99))
+        elif group_by == "priority":
+            from trailmind.task import PRIORITY_ORDER
+            sorted_keys = sorted(groups.keys(), key=lambda k: PRIORITY_ORDER.get(k, 99))
+        else:
+            sorted_keys = sorted(groups.keys())
+
+        for key in sorted_keys:
+            group_tasks = groups[key]
+            click.echo(f"\n{key.upper()} ({len(group_tasks)})")
+            click.echo("─" * 60)
+            for t in group_tasks:
+                due = t.get("due", "")
+                pri = t.get("priority", "")
+                extras = f" [{pri}]" if pri else ""
+                due_str = f" due:{due}" if due else ""
+                click.echo(f"  {t['id']:16s} {t['status']:14s} {t['owner']:12s}{extras}{due_str}  {t['title']}")
+                click.echo(f"  {'':16s} {'':14s} {'':12s}  {t['path']}")
     else:
-        if not tasks:
-            click.echo("No tasks.")
-            return
         for t in tasks:
             due = t.get("due", "")
             pri = t.get("priority", "")
@@ -1638,6 +1673,9 @@ def issue_group() -> None:
 @click.option("--sort", "sort_by", default="created",
               type=click.Choice(("created", "severity", "status", "title"), case_sensitive=False),
               help="Sort issues (default: created).")
+@click.option("--group-by", default=None,
+              type=click.Choice(("status", "severity", "owner"), case_sensitive=False),
+              help="Group issues by status, severity, or owner.")
 @click.option("--json", "json_output", is_flag=True, help="Print structured JSON instead of tabular output.")
 @click.pass_context
 def issue_list_cmd(
@@ -1647,16 +1685,45 @@ def issue_list_cmd(
     severity: str | None,
     owner: str | None,
     sort_by: str,
+    group_by: str | None,
     json_output: bool,
 ) -> None:
     root = find_repo_root(_cwd_from_context(ctx))
     issues = list_issues(root, epic_ref=epic_ref, status=status, severity=severity, owner=owner, sort_by=sort_by)
     if json_output:
         click.echo(json.dumps(issues, ensure_ascii=False, indent=2))
+        return
+
+    if not issues:
+        click.echo("No issues.")
+        return
+
+    if group_by:
+        from collections import defaultdict
+        groups: dict[str, list[dict]] = defaultdict(list)
+        for i in issues:
+            key = i.get(group_by, "") or "unassigned"
+            groups[key].append(i)
+
+        if group_by == "severity":
+            sev_order = {s: i for i, s in enumerate(("critical", "high", "medium", "low", ""))}
+            sorted_keys = sorted(groups.keys(), key=lambda k: sev_order.get(k, 99))
+        elif group_by == "status":
+            st_order = {s: i for i, s in enumerate(("open", "in_progress", "done", "wontfix"))}
+            sorted_keys = sorted(groups.keys(), key=lambda k: st_order.get(k, 99))
+        else:
+            sorted_keys = sorted(groups.keys())
+
+        for key in sorted_keys:
+            group_issues = groups[key]
+            click.echo(f"\n{key.upper()} ({len(group_issues)})")
+            click.echo("─" * 60)
+            for i in group_issues:
+                sev = f" [{i['severity']}]" if i['severity'] else ""
+                owner_str = f" @{i['owner']}" if i.get('owner') else ""
+                click.echo(f"  {i['id']:16s} {i['status']:10s}{sev}{owner_str} {i['title']}")
+                click.echo(f"  {'':16s} {'':10s}  {i['path']}")
     else:
-        if not issues:
-            click.echo("No issues.")
-            return
         for i in issues:
             sev = f" [{i['severity']}]" if i['severity'] else ""
             owner_str = f" @{i['owner']}" if i.get('owner') else ""
