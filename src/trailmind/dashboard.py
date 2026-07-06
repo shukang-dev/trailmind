@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import re
 from collections import Counter
+from datetime import date
 from pathlib import Path, PurePosixPath, PureWindowsPath
 from typing import Any
 
@@ -70,6 +71,7 @@ def render_epic_dashboard_at(repo_root: Path, epic_path: Path) -> Path:
         {
             "title": f"{epic['title']} Dashboard",
             "epic": epic,
+            "today": date.today().isoformat(),
         },
     )
 
@@ -264,6 +266,8 @@ def _entity_summaries(repo_root: Path, directory: Path, *, label: str) -> list[d
                 "owner": _string_value(frontmatter.get("owner"), ""),
                 "filer": _string_value(frontmatter.get("filer"), ""),
                 "severity": _string_value(frontmatter.get("severity"), ""),
+                "priority": _string_value(frontmatter.get("priority"), ""),
+                "due": _string_value(frontmatter.get("due"), ""),
                 "date": _string_value(frontmatter.get("date"), ""),
                 "created": _string_value(frontmatter.get("created"), ""),
                 "body": body.strip(),

@@ -37,6 +37,23 @@
     details { margin-top: 6px; }
     summary { color: var(--accent); cursor: pointer; }
     pre { margin: 10px 0 0; white-space: pre-wrap; color: var(--muted); font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: 0.88rem; line-height: 1.45; }
+    .status-created { color: #6b7280; }
+    .status-ready { color: #059669; }
+    .status-in_progress { color: #2563eb; }
+    .status-blocked { color: #dc2626; }
+    .status-done { color: #6b7280; text-decoration: line-through; }
+    .status-wontfix { color: #9ca3af; text-decoration: line-through; }
+    .status-open { color: #dc2626; }
+    .priority-critical { display: inline-block; padding: 1px 8px; border-radius: 4px; background: #fef2f2; color: #dc2626; font-weight: 600; font-size: 0.8rem; }
+    .priority-high { display: inline-block; padding: 1px 8px; border-radius: 4px; background: #fff7ed; color: #ea580c; font-weight: 600; font-size: 0.8rem; }
+    .priority-medium { display: inline-block; padding: 1px 8px; border-radius: 4px; background: #eff6ff; color: #2563eb; font-size: 0.8rem; }
+    .priority-low { display: inline-block; padding: 1px 8px; border-radius: 4px; background: #f3f4f6; color: #6b7280; font-size: 0.8rem; }
+    .severity-critical { display: inline-block; padding: 1px 8px; border-radius: 4px; background: #fef2f2; color: #dc2626; font-weight: 600; font-size: 0.8rem; }
+    .severity-high { display: inline-block; padding: 1px 8px; border-radius: 4px; background: #fff7ed; color: #ea580c; font-weight: 600; font-size: 0.8rem; }
+    .severity-medium { display: inline-block; padding: 1px 8px; border-radius: 4px; background: #eff6ff; color: #2563eb; font-size: 0.8rem; }
+    .severity-low { display: inline-block; padding: 1px 8px; border-radius: 4px; background: #f3f4f6; color: #6b7280; font-size: 0.8rem; }
+    .task-overdue { background: #fff1f2; }
+    .task-overdue td:first-child strong { color: #dc2626; }
   </style>
 </head>
 <body>
@@ -75,22 +92,24 @@
       <h2>Tasks</h2>
       <table>
         <thead>
-          <tr><th>Task</th><th>Status</th><th>Owner</th><th>Created</th></tr>
+          <tr><th>Task</th><th>Status</th><th>Priority</th><th>Due</th><th>Owner</th><th>Created</th></tr>
         </thead>
         <tbody>
           {% for task in epic.tasks %}
-          <tr>
+          <tr class="task-{{ task.status }}{% if task.due and task.status not in ['done', 'wontfix'] and task.due < today %} task-overdue{% endif %}">
             <td>
               <strong>{{ task.id }} {{ task.title }}</strong>
               <p class="path">{{ task.relative_path }}</p>
               {% if task.body %}<details><summary>Notes</summary><pre>{{ task.body }}</pre></details>{% endif %}
             </td>
-            <td>{{ task.status }}</td>
+            <td><span class="status-{{ task.status }}">{{ task.status }}</span></td>
+            <td>{% if task.priority %}<span class="priority-{{ task.priority }}">{{ task.priority }}</span>{% else %}-{% endif %}</td>
+            <td>{{ task.due or '-' }}</td>
             <td>{{ task.owner }}</td>
             <td>{{ task.created }}</td>
           </tr>
           {% else %}
-          <tr><td colspan="4">No tasks.</td></tr>
+          <tr><td colspan="6">No tasks.</td></tr>
           {% endfor %}
         </tbody>
       </table>
@@ -100,22 +119,23 @@
       <h2>Issues</h2>
       <table>
         <thead>
-          <tr><th>Issue</th><th>Status</th><th>Severity</th><th>Filed By</th></tr>
+          <tr><th>Issue</th><th>Status</th><th>Severity</th><th>Owner</th><th>Filed By</th></tr>
         </thead>
         <tbody>
           {% for issue in epic.issues %}
-          <tr>
+          <tr class="issue-{{ issue.status }}">
             <td>
               <strong>{{ issue.id }} {{ issue.title }}</strong>
               <p class="path">{{ issue.relative_path }}</p>
               {% if issue.body %}<details><summary>Notes</summary><pre>{{ issue.body }}</pre></details>{% endif %}
             </td>
-            <td>{{ issue.status }}</td>
-            <td>{{ issue.severity }}</td>
+            <td><span class="status-{{ issue.status }}">{{ issue.status }}</span></td>
+            <td>{% if issue.severity %}<span class="severity-{{ issue.severity }}">{{ issue.severity }}</span>{% else %}-{% endif %}</td>
+            <td>{{ issue.owner or '-' }}</td>
             <td>{{ issue.filer }}</td>
           </tr>
           {% else %}
-          <tr><td colspan="4">No issues.</td></tr>
+          <tr><td colspan="5">No issues.</td></tr>
           {% endfor %}
         </tbody>
       </table>
