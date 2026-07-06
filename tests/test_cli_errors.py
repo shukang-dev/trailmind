@@ -5,6 +5,7 @@ from pathlib import Path
 
 from click.testing import CliRunner
 
+from trailmind import __version__
 from trailmind.cli import cli
 
 ERROR_MESSAGE = "error: not inside a git repository"
@@ -13,7 +14,7 @@ ERROR_MESSAGE = "error: not inside a git repository"
 def test_cli_version_smoke():
     result = CliRunner().invoke(cli, ["--version"])
     assert result.exit_code == 0
-    assert "trailmind, version 0.1.0" in result.output
+    assert f"trailmind, version {__version__}" in result.output
 
 
 def test_cli_errors_do_not_show_traceback(tmp_path: Path):

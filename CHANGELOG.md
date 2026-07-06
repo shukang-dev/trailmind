@@ -4,8 +4,29 @@ All notable changes to Trailmind are documented here.
 
 ## [Unreleased]
 
+## [v1.0.0] - 2026-07-05
+
+First stable release. Trailmind core schema and CLI are now stable within the 1.x line.
+
 ### Added
 - `trailmind init` command for repo scaffolding (roster.yaml, CI, templates)
+- `trailmind doctor` — diagnose common repo issues (with `--json`)
+- `trailmind stats` — repository statistics (with `--json`)
+- `trailmind export` / `trailmind import` — JSON data export and import
+- `trailmind task start` and `trailmind task done` — convenience workflow commands
+- `trailmind task set-priority` — priority management (low/medium/high/critical)
+- `trailmind task due` — due date management (set/clear)
+- `trailmind task assign` — reassign task owner
+- `trailmind task list` with `--status`, `--owner`, `--priority`, `--due-before`, `--due-after`, `--overdue` filters
+- `trailmind task show` — single task detail view
+- `trailmind issue assign` — reassign issue owner
+- `trailmind issue set-severity` — change issue severity
+- `trailmind issue list` with `--status`, `--severity`, `--owner` filters
+- `trailmind issue show` — single issue detail view
+- `trailmind milestone show` — single milestone detail view
+- `trailmind inbox show` — single inbox item detail view
+- `trailmind project list` and `trailmind epic list` with `--json`
+- `trailmind project set-status` and `trailmind epic set-status` — state management
 - `trailmind task list` with `--json` support
 - `trailmind issue list` with `--json` support
 - `trailmind milestone list` with `--json` support
@@ -25,16 +46,21 @@ All notable changes to Trailmind are documented here.
 - `docs/github-workflow.md` GitHub integration guide
 - `docs/planning-workflow.md` planning workflow showcase
 - `docs/migration-guide.md` upgrade and migration guide
+- `docs/v1.0-migration-policy.md` stability and migration policy
 - `docs/release-checklist.md` release process checklist
 - GitHub Actions CI workflow reference
 - PR and Issue templates
 
 ### Changed
 - `plan breakdown` now uses `--filer` and `--owner` flags (was positional)
+- `trailmind task update` renamed to `trailmind task set-status` (old name kept as alias)
+- Issues now have an `owner` field (defaults to filer at creation)
+- Tasks now have `priority` and `due` fields
 
 ### Fixed
 - Sweep report handles tasks with missing frontmatter gracefully
 - Inbox resolve rejects non-inbox direct paths
+- `task done` auto-transitions `created` → `ready` → `done`
 
 ## [v0.4.0] - 2026-06-29
 
