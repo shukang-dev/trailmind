@@ -426,6 +426,58 @@ def complete_task(
     )
 
 
+def edit_task(
+    repo_root: Path,
+    *,
+    task_ref: str,
+    actor: str,
+    title: str | None = None,
+    code_paths: list[str] | None = None,
+    design_doc: str | None = None,
+    note: str | None = None,
+) -> Path:
+    """Edit editable fields on a task.
+
+    Only provided fields are updated. None means "don't change".
+    """
+    task_path = resolve_entity(repo_root, raw=task_ref, entity="T")
+    frontmatter, body = read_entity_user_facing(task_path, label="task")
+
+    changes: list[str] = []
+
+    if title is not None and title.strip():
+        old_title = str(frontmatter.get("title", ""))
+        frontmatter["title"] = title.strip()
+        changes.append(f"Title: {old_title} → {title.strip()}")
+
+    if code_paths is not None:
+        old_paths = string_list_field(frontmatter, "code_paths", label="task")
+        frontmatter["code_paths"] = [p.strip() for p in code_paths if p.strip()]
+        changes.append(f"Code paths: {', '.join(old_paths) or '(none)'} → {', '.join(frontmatter['code_paths']) or '(none)'}")
+
+    if design_doc is not None:
+        old_doc = str(frontmatter.get("design_doc", "") or "")
+        new_doc = design_doc.strip() or None
+        frontmatter["design_doc"] = new_doc
+        changes.append(f"Design doc: {old_doc or '(none)'} → {new_doc or '(none)'}")
+
+    if not changes:
+        raise TrailmindError("no fields to edit; provide --title, --code-paths, or --design-doc")
+
+    action = f"Edited task: {'; '.join(changes)}"
+    body = append_activity_entry(
+        body,
+        action_activity_entry(
+            action=action,
+            actor_label="actor",
+            actor=actor,
+            note=note,
+        ),
+    )
+    write_entity(task_path, frontmatter=frontmatter, body=body)
+    return task_path
+
+
 def add_task_deliverable(repo_root: Path, *, task_ref: str, item: str, actor: str) -> Path:
     task_path = resolve_entity(repo_root, raw=task_ref, entity="T")
     frontmatter, body = read_entity_user_facing(task_path, label="task")

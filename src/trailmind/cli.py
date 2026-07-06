@@ -79,6 +79,7 @@ from trailmind.task import (
     close_task,
     complete_task,
     complete_task_deliverable,
+    edit_task,
     list_tasks,
     normalize_task_statuses,
     set_task_due,
@@ -1251,6 +1252,38 @@ def task_done(
     _echo_touched(root, [touched])
     if warning:
         click.echo(warning)
+
+
+@task_group.command("edit")
+@click.argument("task_ref")
+@click.option("--title", default=None, help="New task title.")
+@click.option("--code-paths", default=None, help="Comma-separated code paths.")
+@click.option("--design-doc", default=None, help="Path to design document.")
+@click.option("--actor", required=True)
+@click.option("--note", default=None)
+@click.pass_context
+def task_edit(
+    ctx: click.Context,
+    task_ref: str,
+    title: str | None,
+    code_paths: str | None,
+    design_doc: str | None,
+    actor: str,
+    note: str | None,
+) -> None:
+    """Edit editable fields on a task."""
+    root = find_repo_root(_cwd_from_context(ctx))
+    paths = split_csv(code_paths) if code_paths is not None else None
+    touched = edit_task(
+        root,
+        task_ref=task_ref,
+        actor=actor,
+        title=title,
+        code_paths=paths,
+        design_doc=design_doc,
+        note=note,
+    )
+    _echo_touched(root, [touched])
 
 
 @task_group.command("normalize-statuses")
