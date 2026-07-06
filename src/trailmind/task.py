@@ -158,8 +158,12 @@ def list_tasks(
     due_before: str | None = None,
     due_after: str | None = None,
     overdue: bool = False,
+    sort_by: str = "created",
 ) -> list[dict[str, Any]]:
-    """List tasks in an epic or across the repo, with optional filtering."""
+    """List tasks in an epic or across the repo, with optional filtering and sorting.
+
+    sort_by: "created" (default), "priority", "due", "status", "title"
+    """
     from datetime import date
     from trailmind.scopes import resolve_epic_dir
 
@@ -209,6 +213,23 @@ def list_tasks(
             "created": str(frontmatter.get("created") or ""),
             "path": path.relative_to(repo_root).as_posix(),
         })
+
+    # Sort
+    STATUS_ORDER = {"in_progress": 0, "ready": 1, "blocked": 2, "created": 3, "done": 4, "wontfix": 5}
+
+    def sort_key(t: dict[str, Any]) -> tuple:
+        if sort_by == "priority":
+            return (PRIORITY_ORDER.get(t["priority"], 4), t.get("due", "") or "9999-99-99", t.get("created", ""))
+        elif sort_by == "due":
+            return (t.get("due", "") or "9999-99-99", PRIORITY_ORDER.get(t["priority"], 4))
+        elif sort_by == "status":
+            return (STATUS_ORDER.get(t["status"], 9), PRIORITY_ORDER.get(t["priority"], 4))
+        elif sort_by == "title":
+            return (t.get("title", "").lower(),)
+        else:  # created
+            return (t.get("created", "") or "9999-99-99", PRIORITY_ORDER.get(t["priority"], 4))
+
+    tasks.sort(key=sort_key)
     return tasks
 
 

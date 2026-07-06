@@ -1128,6 +1128,9 @@ def task_group() -> None:
 @click.option("--due-before", default=None, help="Filter tasks due before YYYY-MM-DD.")
 @click.option("--due-after", default=None, help="Filter tasks due after YYYY-MM-DD.")
 @click.option("--overdue", is_flag=True, help="Show only overdue tasks (not done/wontfix).")
+@click.option("--sort", "sort_by", default="created",
+              type=click.Choice(("created", "priority", "due", "status", "title"), case_sensitive=False),
+              help="Sort tasks (default: created).")
 @click.option("--json", "json_output", is_flag=True, help="Print structured JSON instead of tabular output.")
 @click.pass_context
 def task_list_cmd(
@@ -1139,6 +1142,7 @@ def task_list_cmd(
     due_before: str | None,
     due_after: str | None,
     overdue: bool,
+    sort_by: str,
     json_output: bool,
 ) -> None:
     root = find_repo_root(_cwd_from_context(ctx))
@@ -1151,6 +1155,7 @@ def task_list_cmd(
         due_before=due_before,
         due_after=due_after,
         overdue=overdue,
+        sort_by=sort_by,
     )
     if json_output:
         click.echo(json.dumps(tasks, ensure_ascii=False, indent=2))
@@ -1630,6 +1635,9 @@ def issue_group() -> None:
 @click.option("--severity", default=None, type=click.Choice(ISSUE_SEVERITIES, case_sensitive=False),
               help="Filter by severity.")
 @click.option("--owner", default=None, help="Filter by owner shortname.")
+@click.option("--sort", "sort_by", default="created",
+              type=click.Choice(("created", "severity", "status", "title"), case_sensitive=False),
+              help="Sort issues (default: created).")
 @click.option("--json", "json_output", is_flag=True, help="Print structured JSON instead of tabular output.")
 @click.pass_context
 def issue_list_cmd(
@@ -1638,10 +1646,11 @@ def issue_list_cmd(
     status: str | None,
     severity: str | None,
     owner: str | None,
+    sort_by: str,
     json_output: bool,
 ) -> None:
     root = find_repo_root(_cwd_from_context(ctx))
-    issues = list_issues(root, epic_ref=epic_ref, status=status, severity=severity, owner=owner)
+    issues = list_issues(root, epic_ref=epic_ref, status=status, severity=severity, owner=owner, sort_by=sort_by)
     if json_output:
         click.echo(json.dumps(issues, ensure_ascii=False, indent=2))
     else:

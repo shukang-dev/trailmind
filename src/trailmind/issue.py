@@ -111,8 +111,12 @@ def list_issues(
     status: str | None = None,
     severity: str | None = None,
     owner: str | None = None,
+    sort_by: str = "created",
 ) -> list[dict[str, str]]:
-    """List issues in an epic or across the repo, with optional filtering."""
+    """List issues in an epic or across the repo, with optional filtering and sorting.
+
+    sort_by: "created" (default), "severity", "status", "title"
+    """
     from trailmind.scopes import resolve_epic_dir
 
     if epic_ref:
@@ -154,6 +158,22 @@ def list_issues(
             "created": str(frontmatter.get("created") or ""),
             "path": path.relative_to(repo_root).as_posix(),
         })
+
+    # Sort
+    SEVERITY_ORDER = {"critical": 0, "high": 1, "medium": 2, "low": 3, "": 4}
+    STATUS_ORDER = {"open": 0, "in_progress": 1, "done": 2, "wontfix": 3}
+
+    def sort_key(i: dict[str, str]) -> tuple:
+        if sort_by == "severity":
+            return (SEVERITY_ORDER.get(i["severity"], 4), STATUS_ORDER.get(i["status"], 9), i.get("created", ""))
+        elif sort_by == "status":
+            return (STATUS_ORDER.get(i["status"], 9), SEVERITY_ORDER.get(i["severity"], 4))
+        elif sort_by == "title":
+            return (i.get("title", "").lower(),)
+        else:  # created
+            return (i.get("created", "") or "9999-99-99", SEVERITY_ORDER.get(i["severity"], 4))
+
+    issues.sort(key=sort_key)
     return issues
 
 
