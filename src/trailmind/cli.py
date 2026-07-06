@@ -1134,6 +1134,7 @@ def task_group() -> None:
 @click.option("--group-by", default=None,
               type=click.Choice(("status", "owner", "priority"), case_sensitive=False),
               help="Group tasks by status, owner, or priority.")
+@click.option("--compact", is_flag=True, help="Compact single-line output.")
 @click.option("--json", "json_output", is_flag=True, help="Print structured JSON instead of tabular output.")
 @click.pass_context
 def task_list_cmd(
@@ -1147,6 +1148,7 @@ def task_list_cmd(
     overdue: bool,
     sort_by: str,
     group_by: str | None,
+    compact: bool,
     json_output: bool,
 ) -> None:
     root = find_repo_root(_cwd_from_context(ctx))
@@ -1195,16 +1197,22 @@ def task_list_cmd(
                 pri = t.get("priority", "")
                 extras = f" [{pri}]" if pri else ""
                 due_str = f" due:{due}" if due else ""
-                click.echo(f"  {t['id']:16s} {t['status']:14s} {t['owner']:12s}{extras}{due_str}  {t['title']}")
-                click.echo(f"  {'':16s} {'':14s} {'':12s}  {t['path']}")
+                if compact:
+                    click.echo(f"  {t['id']:16s} {t['status']:12s} {t['owner']:10s}{extras}{due_str}  {t['title']}")
+                else:
+                    click.echo(f"  {t['id']:16s} {t['status']:14s} {t['owner']:12s}{extras}{due_str}  {t['title']}")
+                    click.echo(f"  {'':16s} {'':14s} {'':12s}  {t['path']}")
     else:
         for t in tasks:
             due = t.get("due", "")
             pri = t.get("priority", "")
             extras = f" [{pri}]" if pri else ""
             due_str = f" due:{due}" if due else ""
-            click.echo(f"{t['id']:16s} {t['status']:14s} {t['owner']:12s}{extras}{due_str}  {t['title']}")
-            click.echo(f"{'':16s} {'':14s} {'':12s}  {t['path']}")
+            if compact:
+                click.echo(f"{t['id']:16s} {t['status']:12s} {t['owner']:10s}{extras}{due_str}  {t['title']}")
+            else:
+                click.echo(f"{t['id']:16s} {t['status']:14s} {t['owner']:12s}{extras}{due_str}  {t['title']}")
+                click.echo(f"{'':16s} {'':14s} {'':12s}  {t['path']}")
 
 
 @task_group.command("add")
@@ -1676,6 +1684,7 @@ def issue_group() -> None:
 @click.option("--group-by", default=None,
               type=click.Choice(("status", "severity", "owner"), case_sensitive=False),
               help="Group issues by status, severity, or owner.")
+@click.option("--compact", is_flag=True, help="Compact single-line output.")
 @click.option("--json", "json_output", is_flag=True, help="Print structured JSON instead of tabular output.")
 @click.pass_context
 def issue_list_cmd(
@@ -1686,6 +1695,7 @@ def issue_list_cmd(
     owner: str | None,
     sort_by: str,
     group_by: str | None,
+    compact: bool,
     json_output: bool,
 ) -> None:
     root = find_repo_root(_cwd_from_context(ctx))
@@ -1721,14 +1731,20 @@ def issue_list_cmd(
             for i in group_issues:
                 sev = f" [{i['severity']}]" if i['severity'] else ""
                 owner_str = f" @{i['owner']}" if i.get('owner') else ""
-                click.echo(f"  {i['id']:16s} {i['status']:10s}{sev}{owner_str} {i['title']}")
-                click.echo(f"  {'':16s} {'':10s}  {i['path']}")
+                if compact:
+                    click.echo(f"  {i['id']:16s} {i['status']:10s}{sev}{owner_str} {i['title']}")
+                else:
+                    click.echo(f"  {i['id']:16s} {i['status']:10s}{sev}{owner_str} {i['title']}")
+                    click.echo(f"  {'':16s} {'':10s}  {i['path']}")
     else:
         for i in issues:
             sev = f" [{i['severity']}]" if i['severity'] else ""
             owner_str = f" @{i['owner']}" if i.get('owner') else ""
-            click.echo(f"{i['id']:16s} {i['status']:10s}{sev}{owner_str} {i['title']}")
-            click.echo(f"{'':16s} {'':10s}  {i['path']}")
+            if compact:
+                click.echo(f"{i['id']:16s} {i['status']:10s}{sev}{owner_str} {i['title']}")
+            else:
+                click.echo(f"{i['id']:16s} {i['status']:10s}{sev}{owner_str} {i['title']}")
+                click.echo(f"{'':16s} {'':10s}  {i['path']}")
 
 
 @issue_group.command("add")
