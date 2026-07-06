@@ -85,6 +85,7 @@ projects/taskflow/
 
 ```sh
 cd examples/demo_project
+git init  # Trailmind requires a git repo
 
 # View status
 trailmind status --overview
