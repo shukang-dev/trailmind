@@ -967,9 +967,10 @@ def project_group() -> None:
 
 
 @project_group.command("list")
+@click.option("--active", is_flag=True, help="Show only active projects.")
 @click.option("--json", "json_output", is_flag=True, help="Print structured JSON.")
 @click.pass_context
-def project_list_cmd(ctx: click.Context, json_output: bool) -> None:
+def project_list_cmd(ctx: click.Context, active: bool, json_output: bool) -> None:
     root = find_repo_root(_cwd_from_context(ctx))
     projects_path = root / "projects"
     if not projects_path.exists() or not projects_path.is_dir():
@@ -984,11 +985,14 @@ def project_list_cmd(ctx: click.Context, json_output: bool) -> None:
     for project_path in sorted(p for p in projects_path.iterdir() if (p / "PROJECT.md").is_file()):
         try:
             fm, _body = read_entity_user_facing(project_path / "PROJECT.md", label="project")
+            state = str(fm.get("state") or "unknown")
+            if active and state not in ("active",):
+                continue
             projects.append({
                 "slug": str(fm.get("slug") or project_path.name),
                 "title": str(fm.get("title") or project_path.name),
                 "goal": str(fm.get("goal") or ""),
-                "state": str(fm.get("state") or "unknown"),
+                "state": state,
                 "path": project_path.relative_to(root).as_posix(),
             })
         except TrailmindError:
@@ -996,6 +1000,9 @@ def project_list_cmd(ctx: click.Context, json_output: bool) -> None:
     if json_output:
         click.echo(json.dumps(projects, ensure_ascii=False, indent=2))
     else:
+        if not projects:
+            click.echo("No projects.")
+            return
         for p in projects:
             click.echo(f"{p['slug']:20s} {p['state']:12s} {p['title']}")
             click.echo(f"{'':20s} {'':12s} {p['path']}")
@@ -1111,9 +1118,10 @@ def epic_group() -> None:
 
 @epic_group.command("list")
 @click.option("--project", "project_slug", default=None)
+@click.option("--active", is_flag=True, help="Show only active epics.")
 @click.option("--json", "json_output", is_flag=True, help="Print structured JSON.")
 @click.pass_context
-def epic_list_cmd(ctx: click.Context, project_slug: str | None, json_output: bool) -> None:
+def epic_list_cmd(ctx: click.Context, project_slug: str | None, active: bool, json_output: bool) -> None:
     root = find_repo_root(_cwd_from_context(ctx))
     from trailmind.log import read_entity_user_facing
 
@@ -1138,12 +1146,15 @@ def epic_list_cmd(ctx: click.Context, project_slug: str | None, json_output: boo
         for epic_dir in sorted(e for e in project_dir.iterdir() if (e / "EPIC.md").is_file()):
             try:
                 fm, _body = read_entity_user_facing(epic_dir / "EPIC.md", label="epic")
+                state = str(fm.get("state") or "unknown")
+                if active and state not in ("active",):
+                    continue
                 epics.append({
                     "project": project_dir.name,
                     "slug": str(fm.get("slug") or epic_dir.name),
                     "title": str(fm.get("title") or epic_dir.name),
                     "goal": str(fm.get("goal") or ""),
-                    "state": str(fm.get("state") or "unknown"),
+                    "state": state,
                     "target": str(fm.get("target") or ""),
                     "path": epic_dir.relative_to(root).as_posix(),
                 })
@@ -1748,15 +1759,16 @@ def task_reopen(
 @click.option("--owner", default=None, help="Filter by owner shortname.")
 @click.option("--epic", "epic_ref", default=None, help="Filter by epic path.")
 @click.option("--project", "project_ref", default=None, help="Filter by project slug.")
+@click.option("--tag", default=None, help="Filter by tag (case-insensitive substring match).")
 @click.option("--limit", default=10, show_default=True, type=click.IntRange(min=1, max=50),
               help="Maximum tasks to show.")
 @click.option("--json", "json_output", is_flag=True, help="Print structured JSON.")
 @click.pass_context
 def task_next(ctx: click.Context, owner: str | None, epic_ref: str | None, project_ref: str | None,
-              limit: int, json_output: bool) -> None:
+              tag: str | None, limit: int, json_output: bool) -> None:
     """Show the most actionable tasks next to work on (sorted by priority then due date)."""
     root = find_repo_root(_cwd_from_context(ctx))
-    tasks = next_tasks(root, owner=owner, epic=epic_ref, project=project_ref, limit=limit)
+    tasks = next_tasks(root, owner=owner, epic=epic_ref, project=project_ref, tag=tag, limit=limit)
 
     if json_output:
         # Remove internal sort keys

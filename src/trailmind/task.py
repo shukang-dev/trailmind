@@ -285,6 +285,7 @@ def next_tasks(
     owner: str | None = None,
     epic: str | None = None,
     project: str | None = None,
+    tag: str | None = None,
     limit: int = 10,
 ) -> list[dict[str, Any]]:
     """Return the most actionable tasks, sorted by priority then due date.
@@ -292,12 +293,12 @@ def next_tasks(
     Includes tasks in `ready` or `created` status (not done, wontfix, blocked, or in_progress).
     Sorted by: priority (critical first), then due date (earliest first), then created date.
     """
-    ready = list_tasks(repo_root, status="ready", owner=owner, epic_ref=epic, project_ref=project)
-    created = list_tasks(repo_root, status="created", owner=owner, epic_ref=epic, project_ref=project)
+    ready = list_tasks(repo_root, status="ready", owner=owner, epic_ref=epic, project_ref=project, tag=tag)
+    created = list_tasks(repo_root, status="created", owner=owner, epic_ref=epic, project_ref=project, tag=tag)
     candidates = ready + created
 
     # Also include in_progress tasks that might need attention
-    in_progress = list_tasks(repo_root, status="in_progress", owner=owner, epic_ref=epic, project_ref=project)
+    in_progress = list_tasks(repo_root, status="in_progress", owner=owner, epic_ref=epic, project_ref=project, tag=tag)
     # Mark in_progress tasks for display
     for t in in_progress:
         t["_in_progress"] = True
