@@ -1305,6 +1305,7 @@ def task_group() -> None:
               help="Show only tasks that have a due date.")
 @click.option("--no-due", "has_due", flag_value=False,
               help="Show only tasks without a due date.")
+@click.option("--tag", default=None, help="Filter by tag (case-insensitive substring match).")
 @click.option("--sort", "sort_by", default="created",
               type=click.Choice(("created", "priority", "due", "status", "title"), case_sensitive=False),
               help="Sort tasks (default: created).")
@@ -1329,6 +1330,7 @@ def task_list_cmd(
     due_within_days: int | None,
     due_today: bool,
     has_due: bool | None,
+    tag: str | None,
     sort_by: str,
     group_by: str | None,
     compact: bool,
@@ -1355,6 +1357,7 @@ def task_list_cmd(
         overdue=overdue,
         due_within_days=effective_due_within,
         has_due=has_due,
+        tag=tag,
         sort_by=sort_by,
     )
     if limit:
@@ -1364,11 +1367,12 @@ def task_list_cmd(
         import io
         output = io.StringIO()
         writer = csv.writer(output)
-        writer.writerow(["id", "title", "status", "priority", "owner", "due", "created", "path"])
+        writer.writerow(["id", "title", "status", "priority", "owner", "due", "tags", "created", "path"])
         for t in tasks:
             writer.writerow([
                 t.get("id", ""), t.get("title", ""), t.get("status", ""),
                 t.get("priority", ""), t.get("owner", ""), t.get("due", ""),
+                ";".join(t.get("tags", [])),
                 t.get("created", ""), t.get("path", ""),
             ])
         click.echo(output.getvalue(), nl=False)
@@ -1406,23 +1410,27 @@ def task_list_cmd(
             for t in group_tasks:
                 due = t.get("due", "")
                 pri = t.get("priority", "")
+                tags = t.get("tags") or []
+                tag_str = f" ({', '.join(tags)})" if tags else ""
                 extras = f" [{pri}]" if pri else ""
                 due_str = f" due:{due}" if due else ""
                 if compact:
-                    click.echo(f"  {t['id']:16s} {t['status']:12s} {t['owner']:10s}{extras}{due_str}  {t['title']}")
+                    click.echo(f"  {t['id']:16s} {t['status']:12s} {t['owner']:10s}{extras}{due_str}{tag_str}  {t['title']}")
                 else:
-                    click.echo(f"  {t['id']:16s} {t['status']:14s} {t['owner']:12s}{extras}{due_str}  {t['title']}")
+                    click.echo(f"  {t['id']:16s} {t['status']:14s} {t['owner']:12s}{extras}{due_str}{tag_str}  {t['title']}")
                     click.echo(f"  {'':16s} {'':14s} {'':12s}  {t['path']}")
     else:
         for t in tasks:
             due = t.get("due", "")
             pri = t.get("priority", "")
+            tags = t.get("tags") or []
+            tag_str = f" ({', '.join(tags)})" if tags else ""
             extras = f" [{pri}]" if pri else ""
             due_str = f" due:{due}" if due else ""
             if compact:
-                click.echo(f"{t['id']:16s} {t['status']:12s} {t['owner']:10s}{extras}{due_str}  {t['title']}")
+                click.echo(f"{t['id']:16s} {t['status']:12s} {t['owner']:10s}{extras}{due_str}{tag_str}  {t['title']}")
             else:
-                click.echo(f"{t['id']:16s} {t['status']:14s} {t['owner']:12s}{extras}{due_str}  {t['title']}")
+                click.echo(f"{t['id']:16s} {t['status']:14s} {t['owner']:12s}{extras}{due_str}{tag_str}  {t['title']}")
                 click.echo(f"{'':16s} {'':14s} {'':12s}  {t['path']}")
 
 
@@ -1440,6 +1448,7 @@ def task_list_cmd(
 @click.option("--priority", default=DEFAULT_PRIORITY, show_default=True,
               type=click.Choice(TASK_PRIORITIES, case_sensitive=False),
               help="Task priority level.")
+@click.option("--tags", default=None, help="Comma-separated tags.")
 @click.pass_context
 def task_add(
     ctx: click.Context,
@@ -1454,8 +1463,10 @@ def task_add(
     known_issues: str,
     deliverables: str,
     priority: str,
+    tags: str | None,
 ) -> None:
     root = find_repo_root(_cwd_from_context(ctx))
+    tag_list = split_csv(tags) if tags else []
     touched = add_task(
         root,
         epic=epic,
@@ -1469,6 +1480,7 @@ def task_add(
         known_issues=split_csv(known_issues),
         deliverables=split_csv(deliverables),
         priority=priority,
+        tags=tag_list,
     )
     _echo_touched(root, [touched])
 
@@ -1564,6 +1576,59 @@ def task_assign(
     root = find_repo_root(_cwd_from_context(ctx))
     touched = assign_task(root, task_ref=task_ref, owner=owner, actor=actor, note=note)
     _echo_touched(root, [touched])
+
+
+@task_group.group("tag")
+def task_tag_group() -> None:
+    """Manage task tags."""
+
+
+@task_tag_group.command("add")
+@click.argument("task_ref")
+@click.argument("tag")
+@click.option("--actor", required=True)
+@click.pass_context
+def task_tag_add(ctx: click.Context, task_ref: str, tag: str, actor: str) -> None:
+    """Add a tag to a task."""
+    from trailmind.resolver import resolve_entity
+    from trailmind.log import read_entity_user_facing
+    from trailmind.entity_io import write_entity
+
+    root = find_repo_root(_cwd_from_context(ctx))
+    path = resolve_entity(root, raw=task_ref, entity="T")
+    fm, body = read_entity_user_facing(path, label="task")
+    tags = list(fm.get("tags") or [])
+    if tag not in tags:
+        tags.append(tag)
+        fm["tags"] = tags
+        write_entity(path, frontmatter=fm, body=body)
+        _echo_touched(root, [path])
+    else:
+        click.echo(f"Tag {tag!r} already on task.")
+
+
+@task_tag_group.command("remove")
+@click.argument("task_ref")
+@click.argument("tag")
+@click.option("--actor", required=True)
+@click.pass_context
+def task_tag_remove(ctx: click.Context, task_ref: str, tag: str, actor: str) -> None:
+    """Remove a tag from a task."""
+    from trailmind.resolver import resolve_entity
+    from trailmind.log import read_entity_user_facing
+    from trailmind.entity_io import write_entity
+
+    root = find_repo_root(_cwd_from_context(ctx))
+    path = resolve_entity(root, raw=task_ref, entity="T")
+    fm, body = read_entity_user_facing(path, label="task")
+    tags = list(fm.get("tags") or [])
+    if tag in tags:
+        tags.remove(tag)
+        fm["tags"] = tags
+        write_entity(path, frontmatter=fm, body=body)
+        _echo_touched(root, [path])
+    else:
+        click.echo(f"Tag {tag!r} not found on task.")
 
 
 @task_group.command("show")

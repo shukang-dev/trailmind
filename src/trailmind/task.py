@@ -161,11 +161,13 @@ def list_tasks(
     overdue: bool = False,
     due_within_days: int | None = None,
     has_due: bool | None = None,
+    tag: str | None = None,
     sort_by: str = "created",
 ) -> list[dict[str, Any]]:
     """List tasks in an epic, a project, or across the repo, with optional filtering and sorting.
 
     sort_by: "created" (default), "priority", "due", "status", "title"
+    tag: filter by tag name (case-insensitive substring match)
     """
     from datetime import date
     from trailmind.scopes import resolve_epic_dir
@@ -226,7 +228,18 @@ def list_tasks(
             continue
         if has_due is False and task_due:
             continue
+        if tag:
+            task_tags = frontmatter.get("tags") or []
+            if isinstance(task_tags, list):
+                tag_lower = tag.lower()
+                if not any(tag_lower in str(t).lower() for t in task_tags):
+                    continue
+            else:
+                continue
 
+        task_tags_list = frontmatter.get("tags") or []
+        if not isinstance(task_tags_list, list):
+            task_tags_list = []
         tasks.append({
             "id": str(frontmatter.get("id") or path.stem),
             "title": str(frontmatter.get("title") or path.stem),
@@ -236,6 +249,7 @@ def list_tasks(
             "due": str(task_due) if task_due else "",
             "filer": str(frontmatter.get("filer") or ""),
             "created": str(frontmatter.get("created") or ""),
+            "tags": [str(t) for t in task_tags_list],
             "path": path.relative_to(repo_root).as_posix(),
         })
 
@@ -310,6 +324,7 @@ def add_task(
     known_issues: list[str],
     deliverables: list[str],
     priority: str = DEFAULT_PRIORITY,
+    tags: list[str] | None = None,
 ) -> Path:
     epic_path = _resolve_epic(repo_root, epic)
     roster = Roster.load(repo_root / "roster.yaml")
@@ -344,6 +359,7 @@ def add_task(
             "known_issues": known_issues,
             "deliverables": normalized_deliverables,
             "completed_deliverables": [],
+            "tags": tags or [],
         },
         body=_initial_body(title, filer_shortname),
     )
