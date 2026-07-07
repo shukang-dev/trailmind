@@ -968,6 +968,41 @@ def project_edit(
     _echo_touched(root, [touched])
 
 
+@project_group.command("show")
+@click.argument("project_slug")
+@click.option("--json", "json_output", is_flag=True, help="Print structured JSON.")
+@click.pass_context
+def project_show(ctx: click.Context, project_slug: str, json_output: bool) -> None:
+    """Show details of a single project."""
+    root = find_repo_root(_cwd_from_context(ctx))
+    from trailmind.log import read_entity_user_facing
+    from trailmind.errors import TrailmindError
+
+    # Resolve project directory
+    proj_dir = root / "projects" / project_slug
+    proj_md = proj_dir / "PROJECT.md"
+    if not proj_md.exists():
+        # Try as full path
+        proj_dir = root / project_slug
+        proj_md = proj_dir / "PROJECT.md"
+    if not proj_md.exists():
+        raise TrailmindError(f"project not found: {project_slug}")
+
+    frontmatter, body = read_entity_user_facing(proj_md, label="project")
+    data = {
+        "path": str(proj_md.relative_to(root)),
+        "body": body.strip(),
+    }
+    for key, value in frontmatter.items():
+        if value is not None:
+            data[key] = value
+
+    if json_output:
+        click.echo(json.dumps(data, ensure_ascii=False, indent=2, default=str))
+    else:
+        click.echo(format_entity_show(data, entity_label="Project"), nl=False)
+
+
 @cli.group("epic")
 def epic_group() -> None:
     """Manage epics."""
@@ -1113,6 +1148,37 @@ def epic_edit(
         note=note,
     )
     _echo_touched(root, [touched])
+
+
+@epic_group.command("show")
+@click.argument("epic_ref")
+@click.option("--json", "json_output", is_flag=True, help="Print structured JSON.")
+@click.pass_context
+def epic_show(ctx: click.Context, epic_ref: str, json_output: bool) -> None:
+    """Show details of a single epic."""
+    root = find_repo_root(_cwd_from_context(ctx))
+    from trailmind.log import read_entity_user_facing
+    from trailmind.errors import TrailmindError
+    from trailmind.scopes import resolve_epic_dir
+
+    epic_path = resolve_epic_dir(root, epic_ref)
+    epic_md = epic_path / "EPIC.md"
+    if not epic_md.exists():
+        raise TrailmindError(f"epic not found: {epic_ref}")
+
+    frontmatter, body = read_entity_user_facing(epic_md, label="epic")
+    data = {
+        "path": str(epic_md.relative_to(root)),
+        "body": body.strip(),
+    }
+    for key, value in frontmatter.items():
+        if value is not None:
+            data[key] = value
+
+    if json_output:
+        click.echo(json.dumps(data, ensure_ascii=False, indent=2, default=str))
+    else:
+        click.echo(format_entity_show(data, entity_label="Epic"), nl=False)
 
 
 @cli.group("task")

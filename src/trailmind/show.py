@@ -29,8 +29,9 @@ def format_entity_show(data: dict[str, Any], *, entity_label: str) -> str:
     lines.append("")
 
     # Key fields first
-    key_fields = ["id", "status", "priority", "owner", "filer", "severity", "date",
-                  "due", "start", "target", "created", "resolved"]
+    key_fields = ["id", "slug", "status", "state", "priority", "severity",
+                  "owner", "filer", "date", "due", "start", "target",
+                  "created", "resolved", "scope", "project", "goal"]
     for field in key_fields:
         if field in data and data[field]:
             lines.append(f"  {field:12s}: {data[field]}")
