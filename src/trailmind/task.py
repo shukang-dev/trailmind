@@ -716,3 +716,58 @@ def close_task(repo_root: Path, *, task_ref: str, closer: str, note: str) -> Pat
     )
     write_entity(task_path, frontmatter=frontmatter, body=body)
     return task_path
+
+
+def move_task(
+    repo_root: Path,
+    *,
+    task_ref: str,
+    target_epic: str,
+    actor: str,
+    note: str | None = None,
+) -> Path:
+    """Move a task from its current epic to a different epic.
+
+    target_epic: path like "projects/demo/new_epic" or epic ref.
+    """
+    from trailmind.scopes import resolve_epic_dir
+
+    task_path = resolve_entity(repo_root, raw=task_ref, entity="T")
+    frontmatter, body = read_entity_user_facing(task_path, label="task")
+
+    # Determine source epic
+    source_epic_path = task_path.parent.parent
+    source_epic_rel = source_epic_path.relative_to(repo_root).as_posix()
+
+    # Resolve target epic
+    target_epic_path = resolve_epic_dir(repo_root, target_epic)
+    target_epic_rel = target_epic_path.relative_to(repo_root).as_posix()
+
+    if source_epic_path == target_epic_path:
+        raise TrailmindError("task is already in the target epic")
+
+    # Ensure target tasks directory exists
+    target_tasks_dir = target_epic_path / "tasks"
+    target_tasks_dir.mkdir(parents=True, exist_ok=True)
+
+    # Build new path (same filename)
+    new_path = target_tasks_dir / task_path.name
+    if new_path.exists():
+        raise TrailmindError(f"a task with the same filename already exists in {target_epic_rel}")
+
+    # Add activity entry
+    body = append_activity_entry(
+        body,
+        action_activity_entry(
+            action=f"Moved from {source_epic_rel} to {target_epic_rel}",
+            actor_label="actor",
+            actor=actor,
+            note=note,
+        ),
+    )
+
+    # Write to new location and delete old
+    write_entity(new_path, frontmatter=frontmatter, body=body)
+    task_path.unlink()
+
+    return new_path

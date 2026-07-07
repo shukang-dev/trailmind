@@ -87,6 +87,7 @@ from trailmind.task import (
     complete_task_deliverable,
     edit_task,
     list_tasks,
+    move_task,
     next_tasks,
     normalize_task_statuses,
     remove_task_dependency,
@@ -1603,6 +1604,31 @@ def task_edit(
         title=title,
         code_paths=paths,
         design_doc=design_doc,
+        note=note,
+    )
+    _echo_touched(root, [touched])
+
+
+@task_group.command("move")
+@click.argument("task_ref")
+@click.argument("target_epic")
+@click.option("--actor", required=True)
+@click.option("--note", default=None)
+@click.pass_context
+def task_move(
+    ctx: click.Context,
+    task_ref: str,
+    target_epic: str,
+    actor: str,
+    note: str | None,
+) -> None:
+    """Move a task to a different epic (e.g. projects/demo/new_epic)."""
+    root = find_repo_root(_cwd_from_context(ctx))
+    touched = move_task(
+        root,
+        task_ref=task_ref,
+        target_epic=target_epic,
+        actor=actor,
         note=note,
     )
     _echo_touched(root, [touched])
