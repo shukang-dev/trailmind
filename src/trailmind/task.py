@@ -240,6 +240,9 @@ def list_tasks(
         task_tags_list = frontmatter.get("tags") or []
         if not isinstance(task_tags_list, list):
             task_tags_list = []
+        # Derive epic path from file location
+        rel_path = path.relative_to(repo_root).as_posix()
+        epic_path = "/".join(rel_path.split("/")[:3])  # projects/<project>/<epic>
         tasks.append({
             "id": str(frontmatter.get("id") or path.stem),
             "title": str(frontmatter.get("title") or path.stem),
@@ -250,7 +253,8 @@ def list_tasks(
             "filer": str(frontmatter.get("filer") or ""),
             "created": str(frontmatter.get("created") or ""),
             "tags": [str(t) for t in task_tags_list],
-            "path": path.relative_to(repo_root).as_posix(),
+            "epic": epic_path,
+            "path": rel_path,
         })
 
     # Sort

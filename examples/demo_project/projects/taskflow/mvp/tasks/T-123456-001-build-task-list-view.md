@@ -22,6 +22,8 @@ deliverables:
 - tests pass
 - UI renders correctly
 completed_deliverables: []
+tags:
+- frontend
 ---
 # Build Task List View
 
@@ -33,7 +35,14 @@ TBD
 
 - TBD
 
+## Comments
+
+> **alice** · 2026-07-07 20:10
+>
+> Almost ready to ship!
+
 ## Activity Log
 
 - 2026-07-02: Created task by alice.
 - 2026-07-02: Status changed from created to ready by alice. Design reviewed, ready to start.
+- 2026-07-07: Comment added by alice.

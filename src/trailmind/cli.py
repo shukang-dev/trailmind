@@ -1301,6 +1301,7 @@ def task_group() -> None:
 @click.option("--due-within", "due_within_days", default=None, type=click.IntRange(min=1),
               help="Show tasks due within N days (not done/wontfix, not overdue).")
 @click.option("--due-today", is_flag=True, help="Show tasks due today (shortcut for --due-within 0).")
+@click.option("--active", is_flag=True, help="Show only active tasks (not done or wontfix).")
 @click.option("--has-due", "has_due", flag_value=True, default=None,
               help="Show only tasks that have a due date.")
 @click.option("--no-due", "has_due", flag_value=False,
@@ -1310,8 +1311,8 @@ def task_group() -> None:
               type=click.Choice(("created", "priority", "due", "status", "title"), case_sensitive=False),
               help="Sort tasks (default: created).")
 @click.option("--group-by", default=None,
-              type=click.Choice(("status", "owner", "priority"), case_sensitive=False),
-              help="Group tasks by status, owner, or priority.")
+              type=click.Choice(("status", "owner", "priority", "epic"), case_sensitive=False),
+              help="Group tasks by status, owner, priority, or epic.")
 @click.option("--compact", is_flag=True, help="Compact single-line output.")
 @click.option("--csv", "csv_output", is_flag=True, help="Output as CSV for spreadsheet import.")
 @click.option("--limit", default=None, type=click.IntRange(min=1), help="Limit number of results.")
@@ -1329,6 +1330,7 @@ def task_list_cmd(
     overdue: bool,
     due_within_days: int | None,
     due_today: bool,
+    active: bool,
     has_due: bool | None,
     tag: str | None,
     sort_by: str,
@@ -1360,6 +1362,8 @@ def task_list_cmd(
         tag=tag,
         sort_by=sort_by,
     )
+    if active:
+        tasks = [t for t in tasks if t.get("status") not in ("done", "wontfix")]
     if limit:
         tasks = tasks[:limit]
     if csv_output:
@@ -1390,10 +1394,13 @@ def task_list_cmd(
         from collections import defaultdict
         groups: dict[str, list[dict]] = defaultdict(list)
         for t in tasks:
-            key = t.get(group_by, "") or "unassigned"
+            if group_by == "epic":
+                key = t.get("epic", "") or "unknown"
+            else:
+                key = t.get(group_by, "") or "unassigned"
             groups[key].append(t)
 
-        # Sort groups: by natural order for status/priority, alphabetical for owner
+        # Sort groups: by natural order for status/priority, alphabetical for owner/epic
         if group_by == "status":
             order = {s: i for i, s in enumerate(TASK_STATUSES)}
             sorted_keys = sorted(groups.keys(), key=lambda k: order.get(k, 99))
@@ -1405,7 +1412,11 @@ def task_list_cmd(
 
         for key in sorted_keys:
             group_tasks = groups[key]
-            click.echo(f"\n{key.upper()} ({len(group_tasks)})")
+            display_key = key
+            if group_by == "epic":
+                # Show just the epic slug (last part of path)
+                display_key = key.split("/")[-1] if "/" in key else key
+            click.echo(f"\n{display_key.upper()} ({len(group_tasks)})")
             click.echo("─" * 60)
             for t in group_tasks:
                 due = t.get("due", "")
@@ -2062,8 +2073,8 @@ def issue_group() -> None:
               type=click.Choice(("created", "severity", "status", "title"), case_sensitive=False),
               help="Sort issues (default: created).")
 @click.option("--group-by", default=None,
-              type=click.Choice(("status", "severity", "owner"), case_sensitive=False),
-              help="Group issues by status, severity, or owner.")
+              type=click.Choice(("status", "severity", "owner", "epic"), case_sensitive=False),
+              help="Group issues by status, severity, owner, or epic.")
 @click.option("--compact", is_flag=True, help="Compact single-line output.")
 @click.option("--csv", "csv_output", is_flag=True, help="Output as CSV for spreadsheet import.")
 @click.option("--limit", default=None, type=click.IntRange(min=1), help="Limit number of results.")
@@ -2116,7 +2127,10 @@ def issue_list_cmd(
         from collections import defaultdict
         groups: dict[str, list[dict]] = defaultdict(list)
         for i in issues:
-            key = i.get(group_by, "") or "unassigned"
+            if group_by == "epic":
+                key = i.get("epic", "") or "unknown"
+            else:
+                key = i.get(group_by, "") or "unassigned"
             groups[key].append(i)
 
         if group_by == "severity":
@@ -2130,7 +2144,10 @@ def issue_list_cmd(
 
         for key in sorted_keys:
             group_issues = groups[key]
-            click.echo(f"\n{key.upper()} ({len(group_issues)})")
+            display_key = key
+            if group_by == "epic":
+                display_key = key.split("/")[-1] if "/" in key else key
+            click.echo(f"\n{display_key.upper()} ({len(group_issues)})")
             click.echo("─" * 60)
             for i in group_issues:
                 sev = f" [{i['severity']}]" if i['severity'] else ""

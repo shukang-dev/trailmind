@@ -20,7 +20,14 @@ When there are no tasks, the list view throws an IndexError.
 
 TBD
 
+## Comments
+
+> **alice** · 2026-07-07 20:11
+>
+> Reproduced in v0.3, investigating
+
 ## Activity Log
 
 - 2026-07-02: Filed by alice.
 - 2026-07-02: Closed as done by alice. Fixed by adding empty state check.
+- 2026-07-07: Comment added by alice.

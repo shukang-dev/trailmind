@@ -155,6 +155,8 @@ def list_issues(
         if owner and issue_owner != owner:
             continue
 
+        rel_path = path.relative_to(repo_root).as_posix()
+        epic_path = "/".join(rel_path.split("/")[:3])  # projects/<project>/<epic>
         issues.append({
             "id": str(frontmatter.get("id") or path.stem),
             "title": str(frontmatter.get("title") or path.stem),
@@ -163,7 +165,8 @@ def list_issues(
             "owner": issue_owner,
             "filer": str(frontmatter.get("filer") or ""),
             "created": str(frontmatter.get("created") or ""),
-            "path": path.relative_to(repo_root).as_posix(),
+            "epic": epic_path,
+            "path": rel_path,
         })
 
     # Sort
