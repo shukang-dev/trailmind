@@ -771,3 +771,106 @@ def move_task(
     task_path.unlink()
 
     return new_path
+
+
+def clone_task(
+    repo_root: Path,
+    *,
+    task_ref: str,
+    actor: str,
+    title: str | None = None,
+    owner: str | None = None,
+    target_epic: str | None = None,
+    note: str | None = None,
+) -> Path:
+    """Clone a task, preserving most fields with a new ID.
+
+    Copies: priority, code_paths, design_doc, deliverables, known_issues,
+            depends_on, soft_depends_on
+    Resets: status (to "created"), created date (to today)
+    Overridable: title, owner, target epic
+    """
+    from trailmind.log import action_activity_entry, append_activity_entry
+    from trailmind.scopes import resolve_epic_dir
+
+    source_path = resolve_entity(repo_root, raw=task_ref, entity="T")
+    source_fm, _source_body = read_entity_user_facing(source_path, label="task")
+
+    # Determine target epic
+    if target_epic:
+        target_epic_path = resolve_epic_dir(repo_root, target_epic)
+    else:
+        target_epic_path = source_path.parent.parent
+
+    source_epic_rel = source_path.parent.parent.relative_to(repo_root).as_posix()
+    target_epic_rel = target_epic_path.relative_to(repo_root).as_posix()
+
+    # Resolve actor from roster
+    roster = Roster.load(repo_root / "roster.yaml")
+    actor_shortname = roster.resolve_shortname(actor)
+    actor_uid = None
+    for dev in roster.developers:
+        if dev.shortname == actor_shortname:
+            actor_uid = dev.uid
+            break
+
+    # Resolve owner
+    owner_ref = owner or actor
+    owner_shortname = roster.resolve_shortname(owner_ref)
+
+    # New title or use source
+    new_title = title or str(source_fm.get("title") or source_path.stem)
+
+    # Ensure target tasks directory exists
+    target_tasks_dir = target_epic_path / "tasks"
+    _ensure_tasks_directory(target_tasks_dir)
+
+    # Generate new ID
+    new_task_id = next_entity_id(target_tasks_dir, entity="T", uid=actor_uid)
+    new_task_path = target_tasks_dir / f"{new_task_id}-{slugify(new_title)}.md"
+
+    if new_task_path.exists():
+        raise TrailmindError(f"a task with the same filename already exists in {target_epic_rel}")
+
+    # Build new frontmatter, preserving useful fields
+    source_id = str(source_fm.get("id") or source_path.stem)
+    new_fm = {
+        "id": new_task_id,
+        "title": new_title,
+        "filer": actor_shortname,
+        "owner": owner_shortname,
+        "status": "created",
+        "priority": str(source_fm.get("priority") or DEFAULT_PRIORITY),
+        "created": date.today().isoformat(),
+        "start": None,
+        "due": None,
+        "branches": {},
+        "verify": {},
+        "code_paths": list(source_fm.get("code_paths") or []),
+        "design_doc": source_fm.get("design_doc"),
+        "depends_on": list(source_fm.get("depends_on") or []),
+        "soft_depends_on": list(source_fm.get("soft_depends_on") or []),
+        "known_issues": list(source_fm.get("known_issues") or []),
+        "deliverables": list(source_fm.get("deliverables") or []),
+        "completed_deliverables": [],
+    }
+
+    # Build body with clone note
+    today = date.today().isoformat()
+    clone_note = f"Cloned from {source_id} ({source_epic_rel})"
+    if note:
+        clone_note += f". {note}"
+
+    new_body = (
+        f"# {new_title}\n\n"
+        "## Scope\n\n"
+        "TBD\n\n"
+        "## Acceptance\n\n"
+        "- TBD\n\n"
+        "## Activity Log\n\n"
+        f"- {today}: Created task by {actor_shortname}.\n"
+        f"- {today}: {clone_note} by {actor_shortname}.\n"
+    )
+
+    write_entity(new_task_path, frontmatter=new_fm, body=new_body)
+    return new_task_path

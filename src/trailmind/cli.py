@@ -84,6 +84,7 @@ from trailmind.task import (
     add_task_dependency,
     assign_task,
     close_task,
+    clone_task,
     complete_task,
     complete_task_deliverable,
     edit_task,
@@ -1630,6 +1631,37 @@ def task_move(
         task_ref=task_ref,
         target_epic=target_epic,
         actor=actor,
+        note=note,
+    )
+    _echo_touched(root, [touched])
+
+
+@task_group.command("clone")
+@click.argument("task_ref")
+@click.option("--title", default=None, help="New task title (defaults to source title).")
+@click.option("--owner", default=None, help="New owner email/shortname (defaults to actor).")
+@click.option("--to-epic", "target_epic", default=None, help="Target epic (defaults to source epic).")
+@click.option("--actor", required=True)
+@click.option("--note", default=None)
+@click.pass_context
+def task_clone(
+    ctx: click.Context,
+    task_ref: str,
+    title: str | None,
+    owner: str | None,
+    target_epic: str | None,
+    actor: str,
+    note: str | None,
+) -> None:
+    """Clone a task, preserving priority, code paths, deliverables, etc."""
+    root = find_repo_root(_cwd_from_context(ctx))
+    touched = clone_task(
+        root,
+        task_ref=task_ref,
+        actor=actor,
+        title=title,
+        owner=owner,
+        target_epic=target_epic,
         note=note,
     )
     _echo_touched(root, [touched])
