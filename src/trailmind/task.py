@@ -152,6 +152,7 @@ def list_tasks(
     repo_root: Path,
     *,
     epic_ref: str | None = None,
+    project_ref: str | None = None,
     status: str | None = None,
     owner: str | None = None,
     priority: str | None = None,
@@ -160,7 +161,7 @@ def list_tasks(
     overdue: bool = False,
     sort_by: str = "created",
 ) -> list[dict[str, Any]]:
-    """List tasks in an epic or across the repo, with optional filtering and sorting.
+    """List tasks in an epic, a project, or across the repo, with optional filtering and sorting.
 
     sort_by: "created" (default), "priority", "due", "status", "title"
     """
@@ -170,6 +171,12 @@ def list_tasks(
     if epic_ref:
         epic_path = resolve_epic_dir(repo_root, epic_ref)
         task_paths = sorted(epic_path.glob("tasks/T-*.md"))
+    elif project_ref:
+        project_dir = repo_root / "projects" / project_ref
+        if not project_dir.exists():
+            from trailmind.errors import TrailmindError
+            raise TrailmindError(f"project not found: {project_ref}")
+        task_paths = sorted(project_dir.glob("*/tasks/T-*.md"))
     else:
         task_paths = _iter_task_files(repo_root)
 

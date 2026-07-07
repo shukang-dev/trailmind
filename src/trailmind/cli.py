@@ -70,6 +70,7 @@ from trailmind.roster import Roster
 from trailmind.security_scan import scan_paths
 from trailmind.activity import collect_activity
 from trailmind.search import search_entities
+from trailmind.tree import build_tree, format_tree
 from trailmind.serve import serve_repo
 from trailmind.show import format_entity_show, show_entity
 from trailmind.stats import build_stats, format_stats
@@ -377,6 +378,19 @@ def stats_command(ctx: click.Context, json_output: bool) -> None:
         click.echo(json.dumps(data, ensure_ascii=False, indent=2, default=str))
     else:
         click.echo(format_stats(data), nl=False)
+
+
+@cli.command("tree")
+@click.option("--json", "json_output", is_flag=True, help="Print structured JSON.")
+@click.pass_context
+def tree_command(ctx: click.Context, json_output: bool) -> None:
+    """Show project structure as a tree with entity counts."""
+    root = find_repo_root(_cwd_from_context(ctx))
+    tree = build_tree(root)
+    if json_output:
+        click.echo(json.dumps(tree, ensure_ascii=False, indent=2, default=str))
+    else:
+        click.echo(format_tree(tree))
 
 
 @cli.command("doctor")
@@ -1188,6 +1202,7 @@ def task_group() -> None:
 
 @task_group.command("list")
 @click.option("--epic", "epic_ref", default=None)
+@click.option("--project", "project_ref", default=None, help="Filter by project slug.")
 @click.option("--status", default=None, type=click.Choice(TASK_STATUSES, case_sensitive=False),
               help="Filter by task status.")
 @click.option("--owner", default=None, help="Filter by owner shortname.")
@@ -1209,6 +1224,7 @@ def task_group() -> None:
 def task_list_cmd(
     ctx: click.Context,
     epic_ref: str | None,
+    project_ref: str | None,
     status: str | None,
     owner: str | None,
     priority: str | None,
@@ -1225,6 +1241,7 @@ def task_list_cmd(
     tasks = list_tasks(
         root,
         epic_ref=epic_ref,
+        project_ref=project_ref,
         status=status,
         owner=owner,
         priority=priority,
@@ -1758,6 +1775,7 @@ def issue_group() -> None:
 
 @issue_group.command("list")
 @click.option("--epic", "epic_ref", default=None)
+@click.option("--project", "project_ref", default=None, help="Filter by project slug.")
 @click.option("--status", default=None, type=click.Choice(("open", "done", "wontfix"), case_sensitive=False),
               help="Filter by issue status.")
 @click.option("--severity", default=None, type=click.Choice(ISSUE_SEVERITIES, case_sensitive=False),
@@ -1776,6 +1794,7 @@ def issue_group() -> None:
 def issue_list_cmd(
     ctx: click.Context,
     epic_ref: str | None,
+    project_ref: str | None,
     status: str | None,
     severity: str | None,
     owner: str | None,
@@ -1786,7 +1805,8 @@ def issue_list_cmd(
     json_output: bool,
 ) -> None:
     root = find_repo_root(_cwd_from_context(ctx))
-    issues = list_issues(root, epic_ref=epic_ref, status=status, severity=severity, owner=owner, sort_by=sort_by)
+    issues = list_issues(root, epic_ref=epic_ref, project_ref=project_ref,
+                          status=status, severity=severity, owner=owner, sort_by=sort_by)
 
     if csv_output:
         import csv

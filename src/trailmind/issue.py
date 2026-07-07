@@ -108,12 +108,13 @@ def list_issues(
     repo_root: Path,
     *,
     epic_ref: str | None = None,
+    project_ref: str | None = None,
     status: str | None = None,
     severity: str | None = None,
     owner: str | None = None,
     sort_by: str = "created",
 ) -> list[dict[str, str]]:
-    """List issues in an epic or across the repo, with optional filtering and sorting.
+    """List issues in an epic, a project, or across the repo, with optional filtering and sorting.
 
     sort_by: "created" (default), "severity", "status", "title"
     """
@@ -122,6 +123,12 @@ def list_issues(
     if epic_ref:
         epic_path = resolve_epic_dir(repo_root, epic_ref)
         issue_paths = sorted(epic_path.glob("issues/I-*.md"))
+    elif project_ref:
+        project_dir = repo_root / "projects" / project_ref
+        if not project_dir.exists():
+            from trailmind.errors import TrailmindError
+            raise TrailmindError(f"project not found: {project_ref}")
+        issue_paths = sorted(project_dir.glob("*/issues/I-*.md"))
     else:
         projects_path = repo_root / "projects"
         if not projects_path.exists() or not projects_path.is_dir():
