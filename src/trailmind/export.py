@@ -123,7 +123,7 @@ def _export_entities(
             "body": body.strip(),
         }
         # Add common optional fields
-        for field in ("filer", "owner", "severity", "date", "design_doc"):
+        for field in ("filer", "owner", "severity", "date", "design_doc", "priority", "due", "start", "target"):
             value = fm.get(field)
             if value is not None:
                 entity[field] = str(value)

@@ -421,19 +421,94 @@ def doctor_command(ctx: click.Context, json_output: bool) -> None:
 
 @cli.command("export")
 @click.option("--output", "-o", default=None, help="Write to file instead of stdout.")
+@click.option("--format", "fmt", default="json", type=click.Choice(("json", "csv"), case_sensitive=False),
+              help="Output format (default: json). CSV outputs tasks and issues as separate CSV blocks.")
 @click.pass_context
-def export_command(ctx: click.Context, output: str | None) -> None:
-    """Export all project data as JSON."""
+def export_command(ctx: click.Context, output: str | None, fmt: str) -> None:
+    """Export all project data as JSON or CSV."""
     root = find_repo_root(_cwd_from_context(ctx))
     data = export_repo(root)
-    rendered = format_export(data)
+
+    if fmt == "csv":
+        rendered = _format_export_csv(data)
+    else:
+        rendered = format_export(data)
+
     if output:
-        output_path = root / output
+        output_path = Path(output)
+        if not output_path.is_absolute():
+            output_path = root / output
         output_path.parent.mkdir(parents=True, exist_ok=True)
         output_path.write_text(rendered + "\n", encoding="utf-8")
-        click.echo(output_path.relative_to(root).as_posix())
+        try:
+            click.echo(output_path.relative_to(root).as_posix())
+        except ValueError:
+            click.echo(str(output_path))
     else:
         click.echo(rendered)
+
+
+def _format_export_csv(data: dict) -> str:
+    """Format exported data as CSV with separate sections for tasks and issues."""
+    import csv
+    import io
+
+    output = io.StringIO()
+
+    # Tasks CSV
+    tasks: list[dict] = []
+    for proj in data.get("projects", []):
+        for epic in proj.get("epics", []):
+            for task in epic.get("tasks", []):
+                row = {
+                    "project": proj.get("slug", ""),
+                    "epic": epic.get("slug", ""),
+                    "id": task.get("id", ""),
+                    "title": task.get("title", ""),
+                    "status": task.get("status", ""),
+                    "priority": task.get("priority", ""),
+                    "owner": task.get("owner", ""),
+                    "due": task.get("due", ""),
+                    "created": task.get("created", ""),
+                }
+                tasks.append(row)
+
+    if tasks:
+        output.write("# Tasks\n")
+        writer = csv.DictWriter(output, fieldnames=["project", "epic", "id", "title",
+                                                     "status", "priority", "owner", "due", "created"])
+        writer.writeheader()
+        for t in tasks:
+            writer.writerow(t)
+
+    # Issues CSV
+    issues: list[dict] = []
+    for proj in data.get("projects", []):
+        for epic in proj.get("epics", []):
+            for issue in epic.get("issues", []):
+                row = {
+                    "project": proj.get("slug", ""),
+                    "epic": epic.get("slug", ""),
+                    "id": issue.get("id", ""),
+                    "title": issue.get("title", ""),
+                    "status": issue.get("status", ""),
+                    "severity": issue.get("severity", ""),
+                    "owner": issue.get("owner", ""),
+                    "created": issue.get("created", ""),
+                }
+                issues.append(row)
+
+    if issues:
+        if tasks:
+            output.write("\n")
+        output.write("# Issues\n")
+        writer = csv.DictWriter(output, fieldnames=["project", "epic", "id", "title",
+                                                     "status", "severity", "owner", "created"])
+        writer.writeheader()
+        for i in issues:
+            writer.writerow(i)
+
+    return output.getvalue().rstrip()
 
 
 @cli.command("import")
@@ -1225,6 +1300,7 @@ def task_group() -> None:
 @click.option("--overdue", is_flag=True, help="Show only overdue tasks (not done/wontfix).")
 @click.option("--due-within", "due_within_days", default=None, type=click.IntRange(min=1),
               help="Show tasks due within N days (not done/wontfix, not overdue).")
+@click.option("--due-today", is_flag=True, help="Show tasks due today (shortcut for --due-within 0).")
 @click.option("--has-due", "has_due", flag_value=True, default=None,
               help="Show only tasks that have a due date.")
 @click.option("--no-due", "has_due", flag_value=False,
@@ -1251,6 +1327,7 @@ def task_list_cmd(
     due_after: str | None,
     overdue: bool,
     due_within_days: int | None,
+    due_today: bool,
     has_due: bool | None,
     sort_by: str,
     group_by: str | None,
@@ -1260,6 +1337,12 @@ def task_list_cmd(
     json_output: bool,
 ) -> None:
     root = find_repo_root(_cwd_from_context(ctx))
+
+    # --due-today is a shortcut for --due-within 0
+    effective_due_within = due_within_days
+    if due_today:
+        effective_due_within = 0
+
     tasks = list_tasks(
         root,
         epic_ref=epic_ref,
@@ -1270,7 +1353,7 @@ def task_list_cmd(
         due_before=due_before,
         due_after=due_after,
         overdue=overdue,
-        due_within_days=due_within_days,
+        due_within_days=effective_due_within,
         has_due=has_due,
         sort_by=sort_by,
     )

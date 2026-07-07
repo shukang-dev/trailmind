@@ -210,13 +210,18 @@ def list_tasks(
             continue
         if overdue and (not task_due or task_due >= today or task_status in ("done", "wontfix")):
             continue
-        if due_within_days is not None and due_within_days > 0:
+        if due_within_days is not None and due_within_days >= 0:
             from datetime import timedelta
             if not task_due or task_status in ("done", "wontfix"):
                 continue
-            cutoff = (date.today() + timedelta(days=due_within_days)).isoformat()
-            if task_due > cutoff or task_due < today:
-                continue
+            if due_within_days == 0:
+                # Due today only
+                if task_due != today:
+                    continue
+            else:
+                cutoff = (date.today() + timedelta(days=due_within_days)).isoformat()
+                if task_due > cutoff or task_due < today:
+                    continue
         if has_due is True and not task_due:
             continue
         if has_due is False and task_due:
