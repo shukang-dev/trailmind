@@ -1220,6 +1220,10 @@ def task_group() -> None:
 @click.option("--overdue", is_flag=True, help="Show only overdue tasks (not done/wontfix).")
 @click.option("--due-within", "due_within_days", default=None, type=click.IntRange(min=1),
               help="Show tasks due within N days (not done/wontfix, not overdue).")
+@click.option("--has-due", "has_due", flag_value=True, default=None,
+              help="Show only tasks that have a due date.")
+@click.option("--no-due", "has_due", flag_value=False,
+              help="Show only tasks without a due date.")
 @click.option("--sort", "sort_by", default="created",
               type=click.Choice(("created", "priority", "due", "status", "title"), case_sensitive=False),
               help="Sort tasks (default: created).")
@@ -1242,6 +1246,7 @@ def task_list_cmd(
     due_after: str | None,
     overdue: bool,
     due_within_days: int | None,
+    has_due: bool | None,
     sort_by: str,
     group_by: str | None,
     compact: bool,
@@ -1261,6 +1266,7 @@ def task_list_cmd(
         due_after=due_after,
         overdue=overdue,
         due_within_days=due_within_days,
+        has_due=has_due,
         sort_by=sort_by,
     )
     if limit:
@@ -1556,14 +1562,17 @@ def task_reopen(
 
 @task_group.command("next")
 @click.option("--owner", default=None, help="Filter by owner shortname.")
+@click.option("--epic", "epic_ref", default=None, help="Filter by epic path.")
+@click.option("--project", "project_ref", default=None, help="Filter by project slug.")
 @click.option("--limit", default=10, show_default=True, type=click.IntRange(min=1, max=50),
               help="Maximum tasks to show.")
 @click.option("--json", "json_output", is_flag=True, help="Print structured JSON.")
 @click.pass_context
-def task_next(ctx: click.Context, owner: str | None, limit: int, json_output: bool) -> None:
+def task_next(ctx: click.Context, owner: str | None, epic_ref: str | None, project_ref: str | None,
+              limit: int, json_output: bool) -> None:
     """Show the most actionable tasks next to work on (sorted by priority then due date)."""
     root = find_repo_root(_cwd_from_context(ctx))
-    tasks = next_tasks(root, owner=owner, limit=limit)
+    tasks = next_tasks(root, owner=owner, epic=epic_ref, project=project_ref, limit=limit)
 
     if json_output:
         # Remove internal sort keys

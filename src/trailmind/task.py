@@ -160,6 +160,7 @@ def list_tasks(
     due_after: str | None = None,
     overdue: bool = False,
     due_within_days: int | None = None,
+    has_due: bool | None = None,
     sort_by: str = "created",
 ) -> list[dict[str, Any]]:
     """List tasks in an epic, a project, or across the repo, with optional filtering and sorting.
@@ -216,6 +217,10 @@ def list_tasks(
             cutoff = (date.today() + timedelta(days=due_within_days)).isoformat()
             if task_due > cutoff or task_due < today:
                 continue
+        if has_due is True and not task_due:
+            continue
+        if has_due is False and task_due:
+            continue
 
         tasks.append({
             "id": str(frontmatter.get("id") or path.stem),
@@ -255,6 +260,8 @@ def next_tasks(
     repo_root: Path,
     *,
     owner: str | None = None,
+    epic: str | None = None,
+    project: str | None = None,
     limit: int = 10,
 ) -> list[dict[str, Any]]:
     """Return the most actionable tasks, sorted by priority then due date.
@@ -262,12 +269,12 @@ def next_tasks(
     Includes tasks in `ready` or `created` status (not done, wontfix, blocked, or in_progress).
     Sorted by: priority (critical first), then due date (earliest first), then created date.
     """
-    ready = list_tasks(repo_root, status="ready", owner=owner)
-    created = list_tasks(repo_root, status="created", owner=owner)
+    ready = list_tasks(repo_root, status="ready", owner=owner, epic_ref=epic, project_ref=project)
+    created = list_tasks(repo_root, status="created", owner=owner, epic_ref=epic, project_ref=project)
     candidates = ready + created
 
     # Also include in_progress tasks that might need attention
-    in_progress = list_tasks(repo_root, status="in_progress", owner=owner)
+    in_progress = list_tasks(repo_root, status="in_progress", owner=owner, epic_ref=epic, project_ref=project)
     # Mark in_progress tasks for display
     for t in in_progress:
         t["_in_progress"] = True
