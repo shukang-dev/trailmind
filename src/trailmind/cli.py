@@ -69,6 +69,7 @@ from trailmind.project import PROJECT_STATES, edit_project, init_project, set_pr
 from trailmind.roster import Roster
 from trailmind.security_scan import scan_paths
 from trailmind.activity import collect_activity
+from trailmind.search import search_entities
 from trailmind.serve import serve_repo
 from trailmind.show import format_entity_show, show_entity
 from trailmind.stats import build_stats, format_stats
@@ -2096,6 +2097,53 @@ def activity_command(
         note_str = f" — {e['note']}" if e["note"] else ""
         click.echo(f"  {e['date']}  {type_icon} {e['action']}")
         click.echo(f"          by {e['actor']} on {e['entity_type']} {e['entity_id']} {e['entity_title']}{note_str}")
+        click.echo()
+
+
+@cli.command("search")
+@click.argument("query")
+@click.option("--type", "entity_types", default=None,
+              help="Filter by entity type (comma-separated: task,issue,epic,project,milestone,inbox,spec,plan).")
+@click.option("--limit", default=30, show_default=True, type=click.IntRange(min=1, max=200),
+              help="Maximum results.")
+@click.option("--json", "json_output", is_flag=True, help="Print structured JSON.")
+@click.pass_context
+def search_command(
+    ctx: click.Context,
+    query: str,
+    entity_types: str | None,
+    limit: int,
+    json_output: bool,
+) -> None:
+    """Search across all entities by keyword."""
+    root = find_repo_root(_cwd_from_context(ctx))
+    type_list = [t.strip().lower() for t in entity_types.split(",")] if entity_types else None
+    results = search_entities(root, query=query, entity_types=type_list, limit=limit)
+
+    if json_output:
+        click.echo(json.dumps(results, ensure_ascii=False, indent=2))
+        return
+
+    if not results:
+        click.echo(f"No results found for {query!r}.")
+        return
+
+    type_icons = {
+        "project": "📦", "epic": "🎯", "task": "✅", "issue": "🐛",
+        "milestone": "🏁", "inbox": "📥", "spec": "📐", "plan": "📋",
+    }
+
+    click.echo(f"Found {len(results)} result(s) for {query!r}:\n")
+    for r in results:
+        icon = type_icons.get(r["entity_type"], "📄")
+        status_str = f" [{r['status']}]" if r["status"] else ""
+        click.echo(f"  {icon} {r['entity_type']:10s} {r['entity_id']:16s}{status_str}  {r['title']}")
+        if r["snippet"]:
+            snippet = r["snippet"]
+            if len(snippet) > 100:
+                snippet = snippet[:97] + "..."
+            click.echo(f"    {'':10s} {snippet}")
+        click.echo(f"    {'':10s} {r['path']}")
         click.echo()
 
 
