@@ -276,8 +276,8 @@
           {% set is_overdue = task.due and task.status not in ['done', 'wontfix'] and task.due < today %}
           <tr class="{% if is_overdue %}task-overdue{% endif %}">
             <td class="entity-title">
-              <strong><a href="{{ task.relative_path }}">{{ task.id }} {{ task.title }}</a></strong>
-              <p class="entity-path"><a href="{{ task.relative_path }}">{{ task.relative_path }}</a></p>
+              <strong><a href="{{ task.relative_from_epic }}">{{ task.id }} {{ task.title }}</a></strong>
+              <p class="entity-path"><a href="{{ task.relative_from_epic }}">{{ task.relative_path }}</a></p>
               {% if task.body %}<details><summary>Notes</summary><pre>{{ task.body }}</pre></details>{% endif %}
             </td>
             <td><span class="status-badge status-{{ task.status }}">{{ task.status }}</span></td>
@@ -303,8 +303,8 @@
           {% for issue in epic.issues %}
           <tr>
             <td class="entity-title">
-              <strong><a href="{{ issue.relative_path }}">{{ issue.id }} {{ issue.title }}</a></strong>
-              <p class="entity-path"><a href="{{ issue.relative_path }}">{{ issue.relative_path }}</a></p>
+              <strong><a href="{{ issue.relative_from_epic }}">{{ issue.id }} {{ issue.title }}</a></strong>
+              <p class="entity-path"><a href="{{ issue.relative_from_epic }}">{{ issue.relative_path }}</a></p>
               {% if issue.body %}<details><summary>Notes</summary><pre>{{ issue.body }}</pre></details>{% endif %}
             </td>
             <td><span class="status-badge status-{{ issue.status }}">{{ issue.status }}</span></td>
@@ -329,8 +329,8 @@
           {% for milestone in epic.milestones %}
           <tr>
             <td class="entity-title">
-              <strong><a href="{{ milestone.relative_path }}">{{ milestone.id }} {{ milestone.title }}</a></strong>
-              <p class="entity-path"><a href="{{ milestone.relative_path }}">{{ milestone.relative_path }}</a></p>
+              <strong><a href="{{ milestone.relative_from_epic }}">{{ milestone.id }} {{ milestone.title }}</a></strong>
+              <p class="entity-path"><a href="{{ milestone.relative_from_epic }}">{{ milestone.relative_path }}</a></p>
               {% if milestone.body %}<details><summary>Notes</summary><pre>{{ milestone.body }}</pre></details>{% endif %}
             </td>
             <td><span class="status-badge status-{{ milestone.status }}">{{ milestone.status }}</span></td>
@@ -357,8 +357,8 @@
           {% for spec in epic.specs %}
           <tr>
             <td class="entity-title">
-              <strong><a href="{{ spec.relative_path }}">{{ spec.title }}</a></strong>
-              <p class="entity-path"><a href="{{ spec.relative_path }}">{{ spec.relative_path }}</a></p>
+              <strong><a href="{{ spec.relative_from_epic }}">{{ spec.title }}</a></strong>
+              <p class="entity-path"><a href="{{ spec.relative_from_epic }}">{{ spec.relative_path }}</a></p>
             </td>
             <td><span class="status-badge status-{{ spec.status }}">{{ spec.status }}</span></td>
             <td>{{ spec.scope or '-' }}</td>
@@ -379,8 +379,8 @@
           {% for plan in epic.plans %}
           <tr>
             <td class="entity-title">
-              <strong><a href="{{ plan.relative_path }}">{{ plan.title }}</a></strong>
-              <p class="entity-path"><a href="{{ plan.relative_path }}">{{ plan.relative_path }}</a></p>
+              <strong><a href="{{ plan.relative_from_epic }}">{{ plan.title }}</a></strong>
+              <p class="entity-path"><a href="{{ plan.relative_from_epic }}">{{ plan.relative_path }}</a></p>
             </td>
             <td><span class="status-badge status-{{ plan.status }}">{{ plan.status }}</span></td>
             <td>{{ plan.scope or '-' }}</td>

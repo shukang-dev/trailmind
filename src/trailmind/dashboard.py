@@ -261,6 +261,26 @@ def _epic_summary(repo_root: Path, epic_path: Path, *, include_children: bool) -
         milestones = _entity_summaries(repo_root, epic_path / "milestones", label="milestone")
         specs = _doc_summaries(repo_root, epic_path / "docs" / "specs", label="spec")
         plans = _doc_summaries(repo_root, epic_path / "docs" / "plans", label="plan")
+
+        # Compute relative paths from epic directory for use in epic dashboard links
+        epic_rel = epic.get("relative_path", "")
+        for entity_list, subdir in [
+            (tasks, "tasks"), (issues, "issues"), (milestones, "milestones"),
+        ]:
+            for e in entity_list:
+                full = e.get("relative_path", "")
+                if full.startswith(epic_rel + "/"):
+                    e["relative_from_epic"] = full[len(epic_rel) + 1:]
+                else:
+                    e["relative_from_epic"] = f"{subdir}/{Path(full).name}" if full else ""
+        for entity_list, subdir in [(specs, "specs"), (plans, "plans")]:
+            for e in entity_list:
+                full = e.get("relative_path", "")
+                if full.startswith(epic_rel + "/"):
+                    e["relative_from_epic"] = full[len(epic_rel) + 1:]
+                else:
+                    e["relative_from_epic"] = f"docs/{subdir}/{Path(full).name}" if full else ""
+
         epic.update(
             {
                 "tasks": tasks,

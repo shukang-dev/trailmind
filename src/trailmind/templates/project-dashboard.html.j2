@@ -252,7 +252,7 @@
         {% set done_count = epic.task_done_count or 0 %}
         {% set total_t = epic.task_count or 0 %}
         {% set pct = (done_count / total_t * 100) if total_t > 0 else 0 %}
-        <a href="{{ epic.relative_path }}/dashboard.html" class="card">
+        <a href="{{ epic.slug }}/dashboard.html" class="card">
           <span class="card-arrow">→</span>
           <h2>{{ epic.title }}</h2>
           <p class="card-desc">{{ epic.goal }}</p>

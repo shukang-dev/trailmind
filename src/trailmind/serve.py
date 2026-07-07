@@ -295,7 +295,7 @@ def _render_index(repo_root: Path) -> str:
                 if epic_items:
                     epics_html = f'<div class="epic-list">{"".join(epic_items)}</div>'
 
-            proj_link = f"{proj['slug']}/dashboard.html" if proj["dashboard"] else "#"
+            proj_link = f"projects/{proj['slug']}/dashboard.html" if proj["dashboard"] else "#"
             cards_html.append(f"""
         <a href="{proj_link}" class="card">
           <span class="card-arrow">→</span>
