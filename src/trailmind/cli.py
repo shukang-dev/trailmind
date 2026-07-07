@@ -27,6 +27,7 @@ from trailmind.issue import (
     carry_issue,
     close_issue,
     clone_issue,
+    comment_issue,
     edit_issue,
     link_issue,
     list_issues,
@@ -86,6 +87,7 @@ from trailmind.task import (
     assign_task,
     close_task,
     clone_task,
+    comment_task,
     complete_task,
     complete_task_deliverable,
     edit_task,
@@ -1495,6 +1497,18 @@ def task_show(ctx: click.Context, task_ref: str, json_output: bool) -> None:
         click.echo(format_entity_show(data, entity_label="Task"), nl=False)
 
 
+@task_group.command("comment")
+@click.argument("task_ref")
+@click.option("--author", required=True, help="Author email or shortname.")
+@click.option("--text", required=True, help="Comment text.")
+@click.pass_context
+def task_comment(ctx: click.Context, task_ref: str, author: str, text: str) -> None:
+    """Add a dated, attributed comment to a task."""
+    root = find_repo_root(_cwd_from_context(ctx))
+    touched = comment_task(root, task_ref=task_ref, author=author, text=text)
+    _echo_touched(root, [touched])
+
+
 @task_group.command("start")
 @click.argument("task_ref")
 @click.option("--actor", required=True)
@@ -2109,6 +2123,18 @@ def issue_show(ctx: click.Context, issue_ref: str, json_output: bool) -> None:
         click.echo(json.dumps(data, ensure_ascii=False, indent=2, default=str))
     else:
         click.echo(format_entity_show(data, entity_label="Issue"), nl=False)
+
+
+@issue_group.command("comment")
+@click.argument("issue_ref")
+@click.option("--author", required=True, help="Author email or shortname.")
+@click.option("--text", required=True, help="Comment text.")
+@click.pass_context
+def issue_comment(ctx: click.Context, issue_ref: str, author: str, text: str) -> None:
+    """Add a dated, attributed comment to an issue."""
+    root = find_repo_root(_cwd_from_context(ctx))
+    touched = comment_issue(root, issue_ref=issue_ref, author=author, text=text)
+    _echo_touched(root, [touched])
 
 
 @issue_group.command("assign")

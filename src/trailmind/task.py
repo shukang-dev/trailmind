@@ -889,3 +889,49 @@ def clone_task(
 
     write_entity(new_task_path, frontmatter=new_fm, body=new_body)
     return new_task_path
+
+
+def comment_task(
+    repo_root: Path,
+    *,
+    task_ref: str,
+    author: str,
+    text: str,
+) -> Path:
+    """Add a comment/note to a task's body with date and author stamp."""
+    from datetime import datetime
+
+    task_path = resolve_entity(repo_root, raw=task_ref, entity="T")
+    _frontmatter, body = read_entity_user_facing(task_path, label="task")
+
+    # Resolve author shortname
+    roster = Roster.load(repo_root / "roster.yaml")
+    author_shortname = roster.resolve_shortname(author)
+
+    today = date.today().isoformat()
+    timestamp = datetime.now().strftime("%H:%M")
+
+    # Build comment block
+    comment = f"> **{author_shortname}** · {today} {timestamp}\n>\n> {text}\n"
+
+    # Insert comment before Activity Log section, or at the end
+    if "## Activity Log" in body:
+        body = body.replace("## Activity Log\n", f"## Comments\n\n{comment}\n## Activity Log\n", 1)
+    elif "## Comments" in body:
+        body = body.replace("## Comments\n", f"## Comments\n\n{comment}\n", 1)
+    else:
+        body = body.rstrip() + f"\n\n## Comments\n\n{comment}\n"
+
+    # Also add an activity entry
+    from trailmind.log import action_activity_entry, append_activity_entry
+    body = append_activity_entry(
+        body,
+        action_activity_entry(
+            action="Comment added",
+            actor_label="author",
+            actor=author_shortname,
+        ),
+    )
+
+    write_entity(task_path, frontmatter=_frontmatter, body=body)
+    return task_path

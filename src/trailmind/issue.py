@@ -580,3 +580,45 @@ def clone_issue(
 
     write_entity(new_issue_path, frontmatter=new_fm, body=new_body)
     return new_issue_path
+
+
+def comment_issue(
+    repo_root: Path,
+    *,
+    issue_ref: str,
+    author: str,
+    text: str,
+) -> Path:
+    """Add a comment/note to an issue's body with date and author stamp."""
+    from datetime import datetime
+
+    issue_path = resolve_entity(repo_root, raw=issue_ref, entity="I")
+    _frontmatter, body = read_entity_user_facing(issue_path, label="issue")
+
+    roster = Roster.load(repo_root / "roster.yaml")
+    author_shortname = roster.resolve_shortname(author)
+
+    today = date.today().isoformat()
+    timestamp = datetime.now().strftime("%H:%M")
+
+    comment = f"> **{author_shortname}** · {today} {timestamp}\n>\n> {text}\n"
+
+    if "## Activity Log" in body:
+        body = body.replace("## Activity Log\n", f"## Comments\n\n{comment}\n## Activity Log\n", 1)
+    elif "## Comments" in body:
+        body = body.replace("## Comments\n", f"## Comments\n\n{comment}\n", 1)
+    else:
+        body = body.rstrip() + f"\n\n## Comments\n\n{comment}\n"
+
+    from trailmind.log import action_activity_entry, append_activity_entry
+    body = append_activity_entry(
+        body,
+        action_activity_entry(
+            action="Comment added",
+            actor_label="author",
+            actor=author_shortname,
+        ),
+    )
+
+    write_entity(issue_path, frontmatter=_frontmatter, body=body)
+    return issue_path
