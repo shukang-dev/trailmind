@@ -1311,8 +1311,8 @@ def task_group() -> None:
               type=click.Choice(("created", "priority", "due", "status", "title"), case_sensitive=False),
               help="Sort tasks (default: created).")
 @click.option("--group-by", default=None,
-              type=click.Choice(("status", "owner", "priority", "epic"), case_sensitive=False),
-              help="Group tasks by status, owner, priority, or epic.")
+              type=click.Choice(("status", "owner", "priority", "epic", "tag"), case_sensitive=False),
+              help="Group tasks by status, owner, priority, epic, or tag.")
 @click.option("--compact", is_flag=True, help="Compact single-line output.")
 @click.option("--csv", "csv_output", is_flag=True, help="Output as CSV for spreadsheet import.")
 @click.option("--limit", default=None, type=click.IntRange(min=1), help="Limit number of results.")
@@ -1396,9 +1396,17 @@ def task_list_cmd(
         for t in tasks:
             if group_by == "epic":
                 key = t.get("epic", "") or "unknown"
+                groups[key].append(t)
+            elif group_by == "tag":
+                tags = t.get("tags") or []
+                if tags:
+                    for tag in tags:
+                        groups[str(tag)].append(t)
+                else:
+                    groups["untagged"].append(t)
             else:
                 key = t.get(group_by, "") or "unassigned"
-            groups[key].append(t)
+                groups[key].append(t)
 
         # Sort groups: by natural order for status/priority, alphabetical for owner/epic
         if group_by == "status":
@@ -2066,6 +2074,7 @@ def issue_group() -> None:
 @click.option("--project", "project_ref", default=None, help="Filter by project slug.")
 @click.option("--status", default=None, type=click.Choice(("open", "done", "wontfix"), case_sensitive=False),
               help="Filter by issue status.")
+@click.option("--active", is_flag=True, help="Show only active issues (not done or wontfix).")
 @click.option("--severity", default=None, type=click.Choice(ISSUE_SEVERITIES, case_sensitive=False),
               help="Filter by severity.")
 @click.option("--owner", default=None, help="Filter by owner shortname.")
@@ -2085,6 +2094,7 @@ def issue_list_cmd(
     epic_ref: str | None,
     project_ref: str | None,
     status: str | None,
+    active: bool,
     severity: str | None,
     owner: str | None,
     sort_by: str,
@@ -2097,6 +2107,8 @@ def issue_list_cmd(
     root = find_repo_root(_cwd_from_context(ctx))
     issues = list_issues(root, epic_ref=epic_ref, project_ref=project_ref,
                           status=status, severity=severity, owner=owner, sort_by=sort_by)
+    if active:
+        issues = [i for i in issues if i.get("status") not in ("done", "wontfix")]
     if limit:
         issues = issues[:limit]
 
@@ -2434,6 +2446,7 @@ def milestone_group() -> None:
 @click.option("--project", "project_ref", default=None, help="Filter by project slug.")
 @click.option("--status", default=None, type=click.Choice(("planned", "in_progress", "done"), case_sensitive=False),
               help="Filter by milestone status.")
+@click.option("--active", is_flag=True, help="Show only active milestones (not done).")
 @click.option("--sort", "sort_by", default="date",
               type=click.Choice(("date", "created", "status", "title"), case_sensitive=False),
               help="Sort milestones (default: date).")
@@ -2441,10 +2454,12 @@ def milestone_group() -> None:
 @click.option("--json", "json_output", is_flag=True, help="Print structured JSON instead of tabular output.")
 @click.pass_context
 def milestone_list_cmd(ctx: click.Context, epic_ref: str | None, project_ref: str | None,
-                        status: str | None, sort_by: str, limit: int | None, json_output: bool) -> None:
+                        status: str | None, active: bool, sort_by: str, limit: int | None, json_output: bool) -> None:
     root = find_repo_root(_cwd_from_context(ctx))
     milestones = list_milestones(root, epic_ref=epic_ref, project_ref=project_ref,
                                   status=status, sort_by=sort_by)
+    if active:
+        milestones = [m for m in milestones if m.get("status") != "done"]
     if limit:
         milestones = milestones[:limit]
     if json_output:
