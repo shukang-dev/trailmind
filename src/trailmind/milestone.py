@@ -61,16 +61,23 @@ def list_milestones(
     repo_root: Path,
     *,
     epic_ref: str | None = None,
+    project_ref: str | None = None,
     status: str | None = None,
     sort_by: str = "date",
 ) -> list[dict[str, str]]:
-    """List milestones in an epic or across the repo.
+    """List milestones in an epic, a project, or across the repo.
 
     sort_by: "date" (default), "created", "status", "title"
     """
     if epic_ref:
         epic_path = _resolve_epic(repo_root, epic_ref)
         milestone_paths = sorted(epic_path.glob("milestones/M-*.md"))
+    elif project_ref:
+        proj_dir = repo_root / "projects" / project_ref
+        if not proj_dir.exists():
+            from trailmind.errors import TrailmindError
+            raise TrailmindError(f"project not found: {project_ref}")
+        milestone_paths = sorted(proj_dir.glob("*/milestones/M-*.md"))
     else:
         projects_path = repo_root / "projects"
         if not projects_path.exists() or not projects_path.is_dir():
@@ -184,6 +191,42 @@ def edit_milestone(
         body,
         action_activity_entry(
             action=action,
+            actor_label="actor",
+            actor=actor,
+            note=note,
+        ),
+    )
+    write_entity(milestone_path, frontmatter=frontmatter, body=body)
+    return milestone_path
+
+
+def set_milestone_status(
+    repo_root: Path,
+    *,
+    milestone_ref: str,
+    status: str,
+    actor: str,
+    note: str | None = None,
+) -> Path:
+    """Change a milestone's status."""
+    from trailmind.resolver import resolve_entity
+
+    normalized = status.strip().lower()
+    if normalized not in MILESTONE_STATUSES:
+        raise TrailmindError(f"invalid milestone status {status!r}; expected one of: {', '.join(MILESTONE_STATUSES)}")
+
+    milestone_path = resolve_entity(repo_root, raw=milestone_ref, entity="M")
+    frontmatter, body = read_entity_user_facing(milestone_path, label="milestone")
+    old_status = str(frontmatter.get("status", "planned"))
+
+    if old_status == normalized:
+        raise TrailmindError(f"milestone is already in {normalized!r} status")
+
+    frontmatter["status"] = normalized
+    body = append_activity_entry(
+        body,
+        action_activity_entry(
+            action=f"Status changed from {old_status} to {normalized}",
             actor_label="actor",
             actor=actor,
             note=note,

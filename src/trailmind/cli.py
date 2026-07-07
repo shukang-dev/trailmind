@@ -35,7 +35,7 @@ from trailmind.issue import (
     set_issue_severity,
 )
 from trailmind.log import log_activity
-from trailmind.milestone import MILESTONE_STATUSES, add_milestone, edit_milestone, list_milestones
+from trailmind.milestone import MILESTONE_STATUSES, add_milestone, edit_milestone, list_milestones, set_milestone_status
 from trailmind.paths import find_repo_root
 from trailmind.pickup import (
     build_issue_pickup,
@@ -2240,6 +2240,7 @@ def milestone_group() -> None:
 
 @milestone_group.command("list")
 @click.option("--epic", "epic_ref", default=None)
+@click.option("--project", "project_ref", default=None, help="Filter by project slug.")
 @click.option("--status", default=None, type=click.Choice(("planned", "in_progress", "done"), case_sensitive=False),
               help="Filter by milestone status.")
 @click.option("--sort", "sort_by", default="date",
@@ -2248,10 +2249,11 @@ def milestone_group() -> None:
 @click.option("--limit", default=None, type=click.IntRange(min=1), help="Limit number of results.")
 @click.option("--json", "json_output", is_flag=True, help="Print structured JSON instead of tabular output.")
 @click.pass_context
-def milestone_list_cmd(ctx: click.Context, epic_ref: str | None, status: str | None,
-                        sort_by: str, limit: int | None, json_output: bool) -> None:
+def milestone_list_cmd(ctx: click.Context, epic_ref: str | None, project_ref: str | None,
+                        status: str | None, sort_by: str, limit: int | None, json_output: bool) -> None:
     root = find_repo_root(_cwd_from_context(ctx))
-    milestones = list_milestones(root, epic_ref=epic_ref, status=status, sort_by=sort_by)
+    milestones = list_milestones(root, epic_ref=epic_ref, project_ref=project_ref,
+                                  status=status, sort_by=sort_by)
     if limit:
         milestones = milestones[:limit]
     if json_output:
@@ -2263,6 +2265,19 @@ def milestone_list_cmd(ctx: click.Context, epic_ref: str | None, status: str | N
         for m in milestones:
             click.echo(f"{m['id']:12s} {m['status']:12s} {m['date']:12s} {m['title']}")
             click.echo(f"{'':12s} {'':12s} {'':12s} {m['path']}")
+
+
+@milestone_group.command("set-status")
+@click.argument("milestone_ref")
+@click.argument("status")
+@click.option("--actor", required=True)
+@click.option("--note", default=None)
+@click.pass_context
+def milestone_set_status(ctx: click.Context, milestone_ref: str, status: str, actor: str, note: str | None) -> None:
+    """Change a milestone's status (planned, in_progress, done)."""
+    root = find_repo_root(_cwd_from_context(ctx))
+    touched = set_milestone_status(root, milestone_ref=milestone_ref, status=status, actor=actor, note=note)
+    _echo_touched(root, [touched])
 
 
 @milestone_group.command("add")
