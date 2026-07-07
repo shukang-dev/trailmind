@@ -159,6 +159,7 @@ def list_tasks(
     due_before: str | None = None,
     due_after: str | None = None,
     overdue: bool = False,
+    due_within_days: int | None = None,
     sort_by: str = "created",
 ) -> list[dict[str, Any]]:
     """List tasks in an epic, a project, or across the repo, with optional filtering and sorting.
@@ -208,6 +209,13 @@ def list_tasks(
             continue
         if overdue and (not task_due or task_due >= today or task_status in ("done", "wontfix")):
             continue
+        if due_within_days is not None and due_within_days > 0:
+            from datetime import timedelta
+            if not task_due or task_status in ("done", "wontfix"):
+                continue
+            cutoff = (date.today() + timedelta(days=due_within_days)).isoformat()
+            if task_due > cutoff or task_due < today:
+                continue
 
         tasks.append({
             "id": str(frontmatter.get("id") or path.stem),

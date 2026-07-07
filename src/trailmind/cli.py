@@ -1218,6 +1218,8 @@ def task_group() -> None:
 @click.option("--due-before", default=None, help="Filter tasks due before YYYY-MM-DD.")
 @click.option("--due-after", default=None, help="Filter tasks due after YYYY-MM-DD.")
 @click.option("--overdue", is_flag=True, help="Show only overdue tasks (not done/wontfix).")
+@click.option("--due-within", "due_within_days", default=None, type=click.IntRange(min=1),
+              help="Show tasks due within N days (not done/wontfix, not overdue).")
 @click.option("--sort", "sort_by", default="created",
               type=click.Choice(("created", "priority", "due", "status", "title"), case_sensitive=False),
               help="Sort tasks (default: created).")
@@ -1239,6 +1241,7 @@ def task_list_cmd(
     due_before: str | None,
     due_after: str | None,
     overdue: bool,
+    due_within_days: int | None,
     sort_by: str,
     group_by: str | None,
     compact: bool,
@@ -1257,6 +1260,7 @@ def task_list_cmd(
         due_before=due_before,
         due_after=due_after,
         overdue=overdue,
+        due_within_days=due_within_days,
         sort_by=sort_by,
     )
     if limit:
