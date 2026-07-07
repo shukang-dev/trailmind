@@ -439,3 +439,49 @@ def carry_issue(
     write_entity(issue_path, frontmatter=issue_frontmatter, body=issue_body)
     write_entity(target_epic_path, frontmatter=target_frontmatter, body=target_body)
     return [issue_path, target_epic_path]
+
+
+def move_issue(
+    repo_root: Path,
+    *,
+    issue_ref: str,
+    target_epic: str,
+    actor: str,
+    note: str | None = None,
+) -> Path:
+    """Move an issue from its current epic to a different epic."""
+    from trailmind.log import action_activity_entry, append_activity_entry
+    from trailmind.scopes import resolve_epic_dir
+
+    issue_path = resolve_entity(repo_root, raw=issue_ref, entity="I")
+    frontmatter, body = read_entity_user_facing(issue_path, label="issue")
+
+    source_epic_path = issue_path.parent.parent
+    source_epic_rel = source_epic_path.relative_to(repo_root).as_posix()
+
+    target_epic_path = resolve_epic_dir(repo_root, target_epic)
+    target_epic_rel = target_epic_path.relative_to(repo_root).as_posix()
+
+    if source_epic_path == target_epic_path:
+        raise TrailmindError("issue is already in the target epic")
+
+    target_issues_dir = target_epic_path / "issues"
+    target_issues_dir.mkdir(parents=True, exist_ok=True)
+
+    new_path = target_issues_dir / issue_path.name
+    if new_path.exists():
+        raise TrailmindError(f"an issue with the same filename already exists in {target_epic_rel}")
+
+    body = append_activity_entry(
+        body,
+        action_activity_entry(
+            action=f"Moved from {source_epic_rel} to {target_epic_rel}",
+            actor_label="actor",
+            actor=actor,
+            note=note,
+        ),
+    )
+
+    write_entity(new_path, frontmatter=frontmatter, body=body)
+    issue_path.unlink()
+    return new_path

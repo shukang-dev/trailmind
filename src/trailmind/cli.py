@@ -29,6 +29,7 @@ from trailmind.issue import (
     edit_issue,
     link_issue,
     list_issues,
+    move_issue,
     reopen_issue,
     set_issue_severity,
 )
@@ -1946,6 +1947,31 @@ def issue_carry(ctx: click.Context, issue_ref: str, to_epic: str) -> None:
     root = find_repo_root(_cwd_from_context(ctx))
     touched = carry_issue(root, raw_issue=issue_ref, to_epic=to_epic)
     _echo_touched(root, touched)
+
+
+@issue_group.command("move")
+@click.argument("issue_ref")
+@click.argument("target_epic")
+@click.option("--actor", required=True)
+@click.option("--note", default=None)
+@click.pass_context
+def issue_move(
+    ctx: click.Context,
+    issue_ref: str,
+    target_epic: str,
+    actor: str,
+    note: str | None,
+) -> None:
+    """Move an issue to a different epic (e.g. projects/demo/new_epic)."""
+    root = find_repo_root(_cwd_from_context(ctx))
+    touched = move_issue(
+        root,
+        issue_ref=issue_ref,
+        target_epic=target_epic,
+        actor=actor,
+        note=note,
+    )
+    _echo_touched(root, [touched])
 
 
 @issue_group.command("show")
