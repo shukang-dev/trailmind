@@ -68,6 +68,7 @@ from trailmind.plan_artifact import (
 from trailmind.project import PROJECT_STATES, edit_project, init_project, set_project_status, validate_project_state
 from trailmind.roster import Roster
 from trailmind.security_scan import scan_paths
+from trailmind.activity import collect_activity
 from trailmind.serve import serve_repo
 from trailmind.show import format_entity_show, show_entity
 from trailmind.stats import build_stats, format_stats
@@ -2048,6 +2049,54 @@ def milestone_edit(
         note=note,
     )
     _echo_touched(root, [touched])
+
+
+@cli.command("activity")
+@click.option("--limit", default=20, show_default=True, type=click.IntRange(min=1, max=200),
+              help="Maximum entries to show.")
+@click.option("--type", "entity_type", default=None,
+              type=click.Choice(("project", "epic", "task", "issue", "milestone", "inbox", "spec", "plan"),
+                             case_sensitive=False),
+              help="Filter by entity type.")
+@click.option("--actor", default=None, help="Filter by actor shortname.")
+@click.option("--since", default=None, help="Show entries since YYYY-MM-DD.")
+@click.option("--json", "json_output", is_flag=True, help="Print structured JSON.")
+@click.pass_context
+def activity_command(
+    ctx: click.Context,
+    limit: int,
+    entity_type: str | None,
+    actor: str | None,
+    since: str | None,
+    json_output: bool,
+) -> None:
+    """Show recent activity across all entities."""
+    root = find_repo_root(_cwd_from_context(ctx))
+    entries = collect_activity(
+        root,
+        limit=limit,
+        entity_type=entity_type,
+        actor=actor,
+        since=since,
+    )
+
+    if json_output:
+        click.echo(json.dumps(entries, ensure_ascii=False, indent=2))
+        return
+
+    if not entries:
+        click.echo("No activity found.")
+        return
+
+    for e in entries:
+        type_icon = {
+            "project": "📦", "epic": "🎯", "task": "✅", "issue": "🐛",
+            "milestone": "🏁", "inbox": "📥", "spec": "📐", "plan": "📋",
+        }.get(e["entity_type"], "📄")
+        note_str = f" — {e['note']}" if e["note"] else ""
+        click.echo(f"  {e['date']}  {type_icon} {e['action']}")
+        click.echo(f"          by {e['actor']} on {e['entity_type']} {e['entity_id']} {e['entity_title']}{note_str}")
+        click.echo()
 
 
 @cli.command("log")
