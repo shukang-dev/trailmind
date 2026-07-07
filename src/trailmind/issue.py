@@ -485,3 +485,98 @@ def move_issue(
     write_entity(new_path, frontmatter=frontmatter, body=body)
     issue_path.unlink()
     return new_path
+
+
+def clone_issue(
+    repo_root: Path,
+    *,
+    issue_ref: str,
+    actor: str,
+    title: str | None = None,
+    owner: str | None = None,
+    target_epic: str | None = None,
+    note: str | None = None,
+) -> Path:
+    """Clone an issue, preserving severity and linked tasks with a new ID.
+
+    Copies: severity, linked_tasks
+    Resets: status (to "open"), created date (to today)
+    Overridable: title, owner, target epic
+    """
+    from trailmind.scopes import resolve_epic_dir
+
+    source_path = resolve_entity(repo_root, raw=issue_ref, entity="I")
+    source_fm, source_body = read_entity_user_facing(source_path, label="issue")
+
+    if target_epic:
+        target_epic_path = resolve_epic_dir(repo_root, target_epic)
+    else:
+        target_epic_path = source_path.parent.parent
+
+    source_epic_rel = source_path.parent.parent.relative_to(repo_root).as_posix()
+    target_epic_rel = target_epic_path.relative_to(repo_root).as_posix()
+
+    # Resolve actor from roster
+    roster = Roster.load(repo_root / "roster.yaml")
+    actor_shortname = roster.resolve_shortname(actor)
+    actor_uid = None
+    for dev in roster.developers:
+        if dev.shortname == actor_shortname:
+            actor_uid = dev.uid
+            break
+
+    # Resolve owner
+    owner_ref = owner or actor
+    owner_shortname = roster.resolve_shortname(owner_ref)
+
+    # New title or use source
+    new_title = title or str(source_fm.get("title") or source_path.stem)
+
+    # Ensure target issues directory exists
+    target_issues_dir = target_epic_path / "issues"
+    target_issues_dir.mkdir(parents=True, exist_ok=True)
+
+    # Generate new ID
+    new_issue_id = next_entity_id(target_issues_dir, entity="I", uid=actor_uid)
+    new_issue_path = target_issues_dir / f"{new_issue_id}-{slugify(new_title)}.md"
+
+    if new_issue_path.exists():
+        raise TrailmindError(f"an issue with the same filename already exists in {target_epic_rel}")
+
+    # Build new frontmatter
+    source_id = str(source_fm.get("id") or source_path.stem)
+    new_fm = {
+        "id": new_issue_id,
+        "title": new_title,
+        "filer": actor_shortname,
+        "owner": owner_shortname,
+        "status": "open",
+        "severity": str(source_fm.get("severity") or "medium"),
+        "created": date.today().isoformat(),
+        "linked_tasks": list(source_fm.get("linked_tasks") or []),
+        "carried_into": [],
+    }
+
+    # Build body with clone note
+    today = date.today().isoformat()
+    clone_note = f"Cloned from {source_id} ({source_epic_rel})"
+    if note:
+        clone_note += f". {note}"
+
+    # Extract description from source body (between H1 and Activity Log)
+    import re
+    source_desc = ""
+    body_match = re.search(r"^# .+\n\n(.+?)(?:\n## |\n## Activity Log)", source_body, re.DOTALL)
+    if body_match:
+        source_desc = body_match.group(1).strip()
+
+    new_body = (
+        f"# {new_title}\n\n"
+        f"{source_desc}\n\n"
+        "## Activity Log\n\n"
+        f"- {today}: Created issue by {actor_shortname}.\n"
+        f"- {today}: {clone_note} by {actor_shortname}.\n"
+    )
+
+    write_entity(new_issue_path, frontmatter=new_fm, body=new_body)
+    return new_issue_path

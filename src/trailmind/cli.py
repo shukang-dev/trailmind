@@ -26,6 +26,7 @@ from trailmind.issue import (
     assign_issue,
     carry_issue,
     close_issue,
+    clone_issue,
     edit_issue,
     link_issue,
     list_issues,
@@ -2001,6 +2002,37 @@ def issue_move(
         issue_ref=issue_ref,
         target_epic=target_epic,
         actor=actor,
+        note=note,
+    )
+    _echo_touched(root, [touched])
+
+
+@issue_group.command("clone")
+@click.argument("issue_ref")
+@click.option("--title", default=None, help="New issue title (defaults to source title).")
+@click.option("--owner", default=None, help="New owner email/shortname (defaults to actor).")
+@click.option("--to-epic", "target_epic", default=None, help="Target epic (defaults to source epic).")
+@click.option("--actor", required=True)
+@click.option("--note", default=None)
+@click.pass_context
+def issue_clone(
+    ctx: click.Context,
+    issue_ref: str,
+    title: str | None,
+    owner: str | None,
+    target_epic: str | None,
+    actor: str,
+    note: str | None,
+) -> None:
+    """Clone an issue, preserving severity and linked tasks."""
+    root = find_repo_root(_cwd_from_context(ctx))
+    touched = clone_issue(
+        root,
+        issue_ref=issue_ref,
+        actor=actor,
+        title=title,
+        owner=owner,
+        target_epic=target_epic,
         note=note,
     )
     _echo_touched(root, [touched])
