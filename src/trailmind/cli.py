@@ -479,11 +479,14 @@ def inbox_add(
 @inbox_group.command("list")
 @click.option("--project", "project_slug", default=None)
 @click.option("--epic", "epic_ref", default=None)
+@click.option("--limit", default=None, type=click.IntRange(min=1), help="Limit number of results.")
 @click.option("--json", "json_output", is_flag=True, help="Print structured JSON instead of Markdown.")
 @click.pass_context
-def inbox_list(ctx: click.Context, project_slug: str | None, epic_ref: str | None, json_output: bool) -> None:
+def inbox_list(ctx: click.Context, project_slug: str | None, epic_ref: str | None, limit: int | None, json_output: bool) -> None:
     root = find_repo_root(_cwd_from_context(ctx))
     items = list_inbox_items(root, project=project_slug, epic=epic_ref)
+    if limit:
+        items = items[:limit]
     if json_output:
         data = [
             {
@@ -1223,6 +1226,7 @@ def task_group() -> None:
               help="Group tasks by status, owner, or priority.")
 @click.option("--compact", is_flag=True, help="Compact single-line output.")
 @click.option("--csv", "csv_output", is_flag=True, help="Output as CSV for spreadsheet import.")
+@click.option("--limit", default=None, type=click.IntRange(min=1), help="Limit number of results.")
 @click.option("--json", "json_output", is_flag=True, help="Print structured JSON instead of tabular output.")
 @click.pass_context
 def task_list_cmd(
@@ -1239,6 +1243,7 @@ def task_list_cmd(
     group_by: str | None,
     compact: bool,
     csv_output: bool,
+    limit: int | None,
     json_output: bool,
 ) -> None:
     root = find_repo_root(_cwd_from_context(ctx))
@@ -1254,6 +1259,8 @@ def task_list_cmd(
         overdue=overdue,
         sort_by=sort_by,
     )
+    if limit:
+        tasks = tasks[:limit]
     if csv_output:
         import csv
         import io
@@ -1849,6 +1856,7 @@ def issue_group() -> None:
               help="Group issues by status, severity, or owner.")
 @click.option("--compact", is_flag=True, help="Compact single-line output.")
 @click.option("--csv", "csv_output", is_flag=True, help="Output as CSV for spreadsheet import.")
+@click.option("--limit", default=None, type=click.IntRange(min=1), help="Limit number of results.")
 @click.option("--json", "json_output", is_flag=True, help="Print structured JSON instead of tabular output.")
 @click.pass_context
 def issue_list_cmd(
@@ -1862,11 +1870,14 @@ def issue_list_cmd(
     group_by: str | None,
     compact: bool,
     csv_output: bool,
+    limit: int | None,
     json_output: bool,
 ) -> None:
     root = find_repo_root(_cwd_from_context(ctx))
     issues = list_issues(root, epic_ref=epic_ref, project_ref=project_ref,
                           status=status, severity=severity, owner=owner, sort_by=sort_by)
+    if limit:
+        issues = issues[:limit]
 
     if csv_output:
         import csv
@@ -2181,11 +2192,14 @@ def milestone_group() -> None:
 
 @milestone_group.command("list")
 @click.option("--epic", "epic_ref", default=None)
+@click.option("--limit", default=None, type=click.IntRange(min=1), help="Limit number of results.")
 @click.option("--json", "json_output", is_flag=True, help="Print structured JSON instead of tabular output.")
 @click.pass_context
-def milestone_list_cmd(ctx: click.Context, epic_ref: str | None, json_output: bool) -> None:
+def milestone_list_cmd(ctx: click.Context, epic_ref: str | None, limit: int | None, json_output: bool) -> None:
     root = find_repo_root(_cwd_from_context(ctx))
     milestones = list_milestones(root, epic_ref=epic_ref)
+    if limit:
+        milestones = milestones[:limit]
     if json_output:
         click.echo(json.dumps(milestones, ensure_ascii=False, indent=2))
     else:
