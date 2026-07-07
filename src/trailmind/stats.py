@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 from collections import Counter
-from datetime import date
+from datetime import date, timedelta
 from pathlib import Path
 from typing import Any
 
@@ -37,7 +37,12 @@ def build_stats(repo_root: Path) -> dict[str, Any]:
     spec_status_counter: Counter[str] = Counter()
     plan_status_counter: Counter[str] = Counter()
     overdue_tasks = 0
+    due_within_7 = 0
+    due_within_30 = 0
+    active_tasks = 0
     today = date.today().isoformat()
+    within_7 = (date.today() + timedelta(days=7)).isoformat()
+    within_30 = (date.today() + timedelta(days=30)).isoformat()
 
     for project_dir in sorted(projects_path.iterdir()):
         if not project_dir.is_dir():
@@ -76,6 +81,12 @@ def build_stats(repo_root: Path) -> dict[str, Any]:
                         task_owner_counter[owner] += 1
                     if due and due < today and status not in ("done", "wontfix"):
                         overdue_tasks += 1
+                    if status not in ("done", "wontfix"):
+                        active_tasks += 1
+                        if due and today <= due <= within_7:
+                            due_within_7 += 1
+                        if due and today <= due <= within_30:
+                            due_within_30 += 1
 
             # Issues
             issues_dir = epic_dir / "issues"
@@ -174,6 +185,9 @@ def build_stats(repo_root: Path) -> dict[str, Any]:
             "by_status": dict(plan_status_counter),
         },
         "overdue_tasks": overdue_tasks,
+        "due_within_7_days": due_within_7,
+        "due_within_30_days": due_within_30,
+        "active_tasks": active_tasks,
     }
 
 
@@ -201,8 +215,18 @@ def format_stats(stats: dict[str, Any]) -> str:
         lines.append("    By owner:")
         for owner, count in sorted(tasks["by_owner"].items(), key=lambda x: -x[1]):
             lines.append(f"      {owner:14s} {count}")
-    if stats["overdue_tasks"]:
+    if stats.get("overdue_tasks"):
         lines.append(f"    Overdue:    {stats['overdue_tasks']}")
+    if stats.get("due_within_7_days"):
+        lines.append(f"    Due in 7d:  {stats['due_within_7_days']}")
+    if stats.get("due_within_30_days"):
+        lines.append(f"    Due in 30d: {stats['due_within_30_days']}")
+    if stats.get("active_tasks") or tasks["total"] > 0:
+        done = tasks["by_status"].get("done", 0)
+        total = tasks["total"]
+        if total > 0:
+            pct = round(done / total * 100)
+            lines.append(f"    Progress:   {done}/{total} done ({pct}%)")
     lines.append("")
 
     issues = stats["issues"]
