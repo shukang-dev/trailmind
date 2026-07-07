@@ -479,12 +479,15 @@ def inbox_add(
 @inbox_group.command("list")
 @click.option("--project", "project_slug", default=None)
 @click.option("--epic", "epic_ref", default=None)
+@click.option("--status", default=None, type=click.Choice(("open", "resolved"), case_sensitive=False),
+              help="Filter by inbox item status.")
 @click.option("--limit", default=None, type=click.IntRange(min=1), help="Limit number of results.")
 @click.option("--json", "json_output", is_flag=True, help="Print structured JSON instead of Markdown.")
 @click.pass_context
-def inbox_list(ctx: click.Context, project_slug: str | None, epic_ref: str | None, limit: int | None, json_output: bool) -> None:
+def inbox_list(ctx: click.Context, project_slug: str | None, epic_ref: str | None,
+               status: str | None, limit: int | None, json_output: bool) -> None:
     root = find_repo_root(_cwd_from_context(ctx))
-    items = list_inbox_items(root, project=project_slug, epic=epic_ref)
+    items = list_inbox_items(root, project=project_slug, epic=epic_ref, status=status)
     if limit:
         items = items[:limit]
     if json_output:
@@ -1688,6 +1691,38 @@ def task_clone(
     _echo_touched(root, [touched])
 
 
+@task_group.command("bulk-status")
+@click.argument("task_refs", nargs=-1, required=True)
+@click.argument("status")
+@click.option("--actor", required=True)
+@click.option("--note", default=None)
+@click.pass_context
+def task_bulk_status(
+    ctx: click.Context,
+    task_refs: tuple[str, ...],
+    status: str,
+    actor: str,
+    note: str | None,
+) -> None:
+    """Bulk-update task status for multiple tasks (e.g. T-001 T-002 T-003 ready)."""
+    root = find_repo_root(_cwd_from_context(ctx))
+    touched = []
+    for task_ref in task_refs:
+        try:
+            path, _warning = set_task_status(
+                root,
+                task_ref=task_ref,
+                status=status,
+                actor=actor,
+                note=note,
+            )
+            touched.append(path)
+        except Exception as exc:
+            click.echo(f"  ⚠ {task_ref}: {exc}", err=True)
+    if touched:
+        _echo_touched(root, touched)
+
+
 @task_group.group("depend")
 def task_depend_group() -> None:
     """Manage task dependencies."""
@@ -2205,12 +2240,18 @@ def milestone_group() -> None:
 
 @milestone_group.command("list")
 @click.option("--epic", "epic_ref", default=None)
+@click.option("--status", default=None, type=click.Choice(("planned", "in_progress", "done"), case_sensitive=False),
+              help="Filter by milestone status.")
+@click.option("--sort", "sort_by", default="date",
+              type=click.Choice(("date", "created", "status", "title"), case_sensitive=False),
+              help="Sort milestones (default: date).")
 @click.option("--limit", default=None, type=click.IntRange(min=1), help="Limit number of results.")
 @click.option("--json", "json_output", is_flag=True, help="Print structured JSON instead of tabular output.")
 @click.pass_context
-def milestone_list_cmd(ctx: click.Context, epic_ref: str | None, limit: int | None, json_output: bool) -> None:
+def milestone_list_cmd(ctx: click.Context, epic_ref: str | None, status: str | None,
+                        sort_by: str, limit: int | None, json_output: bool) -> None:
     root = find_repo_root(_cwd_from_context(ctx))
-    milestones = list_milestones(root, epic_ref=epic_ref)
+    milestones = list_milestones(root, epic_ref=epic_ref, status=status, sort_by=sort_by)
     if limit:
         milestones = milestones[:limit]
     if json_output:
@@ -2220,8 +2261,8 @@ def milestone_list_cmd(ctx: click.Context, epic_ref: str | None, limit: int | No
             click.echo("No milestones.")
             return
         for m in milestones:
-            click.echo(f"{m['id']:12s} {m['status']:10s} {m['date']:12s} {m['title']}")
-            click.echo(f"{'':12s} {'':10s} {'':12s} {m['path']}")
+            click.echo(f"{m['id']:12s} {m['status']:12s} {m['date']:12s} {m['title']}")
+            click.echo(f"{'':12s} {'':12s} {'':12s} {m['path']}")
 
 
 @milestone_group.command("add")

@@ -57,8 +57,17 @@ def _initial_body(title: str, milestone_date: str) -> str:
     return f"# {title}\n\nDate: {milestone_date}\n"
 
 
-def list_milestones(repo_root: Path, *, epic_ref: str | None = None) -> list[dict[str, str]]:
-    """List milestones in an epic or across the repo."""
+def list_milestones(
+    repo_root: Path,
+    *,
+    epic_ref: str | None = None,
+    status: str | None = None,
+    sort_by: str = "date",
+) -> list[dict[str, str]]:
+    """List milestones in an epic or across the repo.
+
+    sort_by: "date" (default), "created", "status", "title"
+    """
     if epic_ref:
         epic_path = _resolve_epic(repo_root, epic_ref)
         milestone_paths = sorted(epic_path.glob("milestones/M-*.md"))
@@ -74,16 +83,31 @@ def list_milestones(repo_root: Path, *, epic_ref: str | None = None) -> list[dic
             continue
         try:
             frontmatter, _body = read_entity_user_facing(path, label="milestone")
-            milestones.append({
+            ms = {
                 "id": str(frontmatter.get("id") or path.stem),
                 "title": str(frontmatter.get("title") or path.stem),
                 "status": str(frontmatter.get("status") or "created"),
                 "date": str(frontmatter.get("date") or ""),
                 "created": str(frontmatter.get("created") or ""),
                 "path": path.relative_to(repo_root).as_posix(),
-            })
+            }
+            if status and ms["status"] != status:
+                continue
+            milestones.append(ms)
         except TrailmindError:
             continue
+
+    # Sort
+    STATUS_ORDER = {"in_progress": 0, "planned": 1, "done": 2, "": 3}
+    if sort_by == "status":
+        milestones.sort(key=lambda m: (STATUS_ORDER.get(m["status"], 3), m.get("date", "")))
+    elif sort_by == "title":
+        milestones.sort(key=lambda m: m.get("title", "").lower())
+    elif sort_by == "created":
+        milestones.sort(key=lambda m: m.get("created", ""), reverse=True)
+    else:  # date
+        milestones.sort(key=lambda m: m.get("date", "9999-99-99"))
+
     return milestones
 
 

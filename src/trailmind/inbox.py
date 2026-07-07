@@ -157,7 +157,13 @@ def add_inbox_item(
     return item_path
 
 
-def list_inbox_items(repo_root: Path, *, project: str | None, epic: str | None) -> list[InboxItem]:
+def list_inbox_items(
+    repo_root: Path,
+    *,
+    project: str | None,
+    epic: str | None,
+    status: str | None = None,
+) -> list[InboxItem]:
     scope_path, _scope = resolve_project_or_epic_scope(repo_root, project=project, epic=epic)
     inbox_path = scope_path / "inbox"
     if not inbox_path.exists():
@@ -167,14 +173,15 @@ def list_inbox_items(repo_root: Path, *, project: str | None, epic: str | None) 
     items: list[InboxItem] = []
     for path in sorted(inbox_path.glob("IN-*.md")):
         frontmatter, _body = read_entity_user_facing(path, label="inbox")
-        items.append(
-            InboxItem(
-                path=path,
-                item_id=str(frontmatter.get("id") or path.stem),
-                title=str(frontmatter.get("title") or path.stem),
-                status=str(frontmatter.get("status") or "open"),
-            )
+        item = InboxItem(
+            path=path,
+            item_id=str(frontmatter.get("id") or path.stem),
+            title=str(frontmatter.get("title") or path.stem),
+            status=str(frontmatter.get("status") or "open"),
         )
+        if status and item.status != status:
+            continue
+        items.append(item)
     return items
 
 
