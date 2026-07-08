@@ -4368,6 +4368,104 @@ def task_edit(
     _echo_touched(root, [touched])
 
 
+@task_group.command("bulk-edit")
+@click.option("--input-file", "input_file", required=True,
+              help="CSV or JSON file with task edits (must have 'id' column; optional: title, due, tags, known_issues, deliverables, code_paths).")
+@click.option("--format", "fmt", default="csv", type=click.Choice(("csv", "json"), case_sensitive=False),
+              help="Input file format (default: csv).")
+@click.option("--actor", required=True)
+@click.option("--note", default=None)
+@click.option("--dry-run", is_flag=True, help="Preview without applying.")
+@click.pass_context
+def task_bulk_edit(
+    ctx: click.Context,
+    input_file: str,
+    fmt: str,
+    actor: str,
+    note: str | None,
+    dry_run: bool,
+) -> None:
+    """Bulk-edit tasks from a CSV or JSON file (identified by 'id' column)."""
+    import csv
+    import json as _json
+    root = find_repo_root(_cwd_from_context(ctx))
+
+    path = Path(input_file)
+    if not path.is_absolute():
+        path = Path.cwd() / path
+    if not path.exists():
+        raise TrailmindError(f"input file not found: {input_file}")
+
+    content = path.read_text(encoding="utf-8")
+
+    edit_specs: list[dict] = []
+    if fmt == "json":
+        data = _json.loads(content)
+        if isinstance(data, list):
+            edit_specs = data
+        elif isinstance(data, dict) and "tasks" in data:
+            edit_specs = data["tasks"]
+        else:
+            raise TrailmindError("JSON must be a list or object with 'tasks' key.")
+    else:
+        reader = csv.DictReader(content.splitlines())
+        for row in reader:
+            edit_specs.append(dict(row))
+
+    if not edit_specs:
+        raise TrailmindError("no task edits found in input file")
+
+    if dry_run:
+        click.echo(f"[DRY RUN] Would edit {len(edit_specs)} task(s):")
+        for i, spec in enumerate(edit_specs):
+            task_id = spec.get("id", "(no id)")
+            changes = []
+            for key in ("title", "due", "tags", "known_issues", "deliverables", "code_paths"):
+                if key in spec and spec[key]:
+                    changes.append(f"{key}={spec[key]}")
+            click.echo(f"  {i+1}. {task_id}: {', '.join(changes) if changes else '(no changes)'}")
+        return
+
+    touched = []
+    for i, spec in enumerate(edit_specs):
+        task_id = spec.get("id", "").strip()
+        if not task_id:
+            click.echo(f"  ⚠ edit {i+1}: missing id, skipping", err=True)
+            continue
+
+        title = spec.get("title") or None
+        due = spec.get("due") or None
+        tags_str = spec.get("tags")
+        tags = split_csv(tags_str) if tags_str is not None else None
+        ki_str = spec.get("known_issues")
+        known_issues = split_csv(ki_str) if ki_str is not None else None
+        del_str = spec.get("deliverables")
+        deliverables = split_csv(del_str) if del_str is not None else None
+        cp_str = spec.get("code_paths")
+        code_paths = split_csv(cp_str) if cp_str is not None else None
+
+        try:
+            path = edit_task(
+                root,
+                task_ref=task_id,
+                actor=actor,
+                title=title,
+                code_paths=code_paths,
+                due=due,
+                tags=tags,
+                known_issues=known_issues,
+                deliverables=deliverables,
+                note=note,
+            )
+            touched.append(path)
+        except Exception as exc:
+            click.echo(f"  ⚠ {task_id}: {exc}", err=True)
+
+    if touched:
+        _echo_touched(root, touched)
+        click.echo(f"\nEdited {len(touched)}/{len(edit_specs)} tasks.")
+
+
 @task_group.command("move")
 @click.argument("task_ref")
 @click.argument("target_epic")
@@ -5504,6 +5602,99 @@ def issue_edit(
         note=note,
     )
     _echo_touched(root, [touched])
+
+
+@issue_group.command("bulk-edit")
+@click.option("--input-file", "input_file", required=True,
+              help="CSV or JSON file with issue edits (must have 'id' column; optional: title, description, severity, owner, linked_tasks).")
+@click.option("--format", "fmt", default="csv", type=click.Choice(("csv", "json"), case_sensitive=False),
+              help="Input file format (default: csv).")
+@click.option("--actor", required=True)
+@click.option("--note", default=None)
+@click.option("--dry-run", is_flag=True, help="Preview without applying.")
+@click.pass_context
+def issue_bulk_edit(
+    ctx: click.Context,
+    input_file: str,
+    fmt: str,
+    actor: str,
+    note: str | None,
+    dry_run: bool,
+) -> None:
+    """Bulk-edit issues from a CSV or JSON file (identified by 'id' column)."""
+    import csv
+    import json as _json
+    root = find_repo_root(_cwd_from_context(ctx))
+
+    path = Path(input_file)
+    if not path.is_absolute():
+        path = Path.cwd() / path
+    if not path.exists():
+        raise TrailmindError(f"input file not found: {input_file}")
+
+    content = path.read_text(encoding="utf-8")
+
+    edit_specs: list[dict] = []
+    if fmt == "json":
+        data = _json.loads(content)
+        if isinstance(data, list):
+            edit_specs = data
+        elif isinstance(data, dict) and "issues" in data:
+            edit_specs = data["issues"]
+        else:
+            raise TrailmindError("JSON must be a list or object with 'issues' key.")
+    else:
+        reader = csv.DictReader(content.splitlines())
+        for row in reader:
+            edit_specs.append(dict(row))
+
+    if not edit_specs:
+        raise TrailmindError("no issue edits found in input file")
+
+    if dry_run:
+        click.echo(f"[DRY RUN] Would edit {len(edit_specs)} issue(s):")
+        for i, spec in enumerate(edit_specs):
+            issue_id = spec.get("id", "(no id)")
+            changes = []
+            for key in ("title", "description", "severity", "owner", "linked_tasks"):
+                if key in spec and spec[key]:
+                    changes.append(f"{key}={spec[key]}")
+            click.echo(f"  {i+1}. {issue_id}: {', '.join(changes) if changes else '(no changes)'}")
+        return
+
+    touched = []
+    for i, spec in enumerate(edit_specs):
+        issue_id = spec.get("id", "").strip()
+        if not issue_id:
+            click.echo(f"  ⚠ edit {i+1}: missing id, skipping", err=True)
+            continue
+
+        title = spec.get("title") or None
+        description = spec.get("description") or None
+        severity = spec.get("severity") or None
+        owner = spec.get("owner") or None
+        linked_str = spec.get("linked_tasks")
+        linked = split_csv(linked_str) if linked_str is not None else None
+
+        try:
+            path = edit_issue(
+                root,
+                issue_ref=issue_id,
+                actor=actor,
+                title=title,
+                description=description,
+                severity=severity,
+                owner=owner,
+                linked_tasks=linked,
+                note=note,
+            )
+            touched.append(path)
+        except Exception as exc:
+            click.echo(f"  ⚠ {issue_id}: {exc}", err=True)
+
+    if touched:
+        _echo_touched(root, touched)
+        click.echo(f"\nEdited {len(touched)}/{len(edit_specs)} issues.")
 
 
 @issue_group.command("reopen")
