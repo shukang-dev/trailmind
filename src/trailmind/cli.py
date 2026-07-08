@@ -1394,6 +1394,7 @@ def task_group() -> None:
               type=click.Choice(("status", "owner", "priority", "epic", "project", "tag", "due"), case_sensitive=False),
               help="Group tasks by status, owner, priority, epic, project, tag, or due date.")
 @click.option("--compact", is_flag=True, help="Compact single-line output.")
+@click.option("--count", "count_only", is_flag=True, help="Show only the count of matching tasks.")
 @click.option("--csv", "csv_output", is_flag=True, help="Output as CSV for spreadsheet import.")
 @click.option("--limit", default=None, type=click.IntRange(min=1), help="Limit number of results.")
 @click.option("--json", "json_output", is_flag=True, help="Print structured JSON instead of tabular output.")
@@ -1421,6 +1422,7 @@ def task_list_cmd(
     sort_by: str,
     group_by: str | None,
     compact: bool,
+    count_only: bool,
     csv_output: bool,
     limit: int | None,
     json_output: bool,
@@ -1459,6 +1461,9 @@ def task_list_cmd(
         tasks = [t for t in tasks if t.get("deliverables")]
     if has_deps:
         tasks = [t for t in tasks if t.get("depends_on") or t.get("soft_depends_on")]
+    if count_only:
+        click.echo(f"{len(tasks)} task{'s' if len(tasks) != 1 else ''}")
+        return
     if limit:
         tasks = tasks[:limit]
     if csv_output:
@@ -2237,6 +2242,7 @@ def issue_group() -> None:
               type=click.Choice(("status", "severity", "owner", "epic", "project"), case_sensitive=False),
               help="Group issues by status, severity, owner, epic, or project.")
 @click.option("--compact", is_flag=True, help="Compact single-line output.")
+@click.option("--count", "count_only", is_flag=True, help="Show only the count of matching issues.")
 @click.option("--csv", "csv_output", is_flag=True, help="Output as CSV for spreadsheet import.")
 @click.option("--limit", default=None, type=click.IntRange(min=1), help="Limit number of results.")
 @click.option("--json", "json_output", is_flag=True, help="Print structured JSON instead of tabular output.")
@@ -2252,6 +2258,7 @@ def issue_list_cmd(
     sort_by: str,
     group_by: str | None,
     compact: bool,
+    count_only: bool,
     csv_output: bool,
     limit: int | None,
     json_output: bool,
@@ -2261,6 +2268,9 @@ def issue_list_cmd(
                           status=status, severity=severity, owner=owner, sort_by=sort_by)
     if active:
         issues = [i for i in issues if i.get("status") not in ("done", "wontfix")]
+    if count_only:
+        click.echo(f"{len(issues)} issue{'s' if len(issues) != 1 else ''}")
+        return
     if limit:
         issues = issues[:limit]
 
