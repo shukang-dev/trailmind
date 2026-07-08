@@ -5399,6 +5399,104 @@ def task_depend_bulk_remove(
         _echo_touched(root, touched)
 
 
+@task_group.command("bulk-add-known-issue")
+@click.argument("task_refs", nargs=-1)
+@click.argument("issue_id")
+@click.option("--actor", required=True)
+@click.option("--from-file", "from_file", default=None,
+              help="Read task IDs from file (one per line), or '-' for stdin.")
+@click.option("--dry-run", is_flag=True, help="Preview without applying.")
+@click.pass_context
+def task_bulk_add_known_issue(
+    ctx: click.Context,
+    task_refs: tuple[str, ...],
+    issue_id: str,
+    actor: str,
+    from_file: str | None,
+    dry_run: bool,
+) -> None:
+    """Bulk-add a known issue to multiple tasks."""
+    from trailmind.resolver import resolve_entity
+    from trailmind.log import read_entity_user_facing
+    from trailmind.entity_io import write_entity
+
+    root = find_repo_root(_cwd_from_context(ctx))
+    refs = list(task_refs)
+    if from_file:
+        refs.extend(_read_ids_from_file(from_file))
+    if not refs:
+        raise TrailmindError("no task IDs provided (pass as args or use --from-file)")
+    if dry_run:
+        click.echo(f"[DRY RUN] Would add known issue {issue_id!r} to {len(refs)} task(s):")
+        for r in refs:
+            click.echo(f"  - {r}")
+        return
+    touched = []
+    for task_ref in refs:
+        try:
+            path = resolve_entity(root, raw=task_ref, entity="T")
+            fm, body = read_entity_user_facing(path, label="task")
+            known = list(fm.get("known_issues") or [])
+            if issue_id not in known:
+                known.append(issue_id)
+                fm["known_issues"] = known
+                write_entity(path, frontmatter=fm, body=body)
+                touched.append(path)
+        except Exception as exc:
+            click.echo(f"  ⚠ {task_ref}: {exc}", err=True)
+    if touched:
+        _echo_touched(root, touched)
+
+
+@task_group.command("bulk-remove-known-issue")
+@click.argument("task_refs", nargs=-1)
+@click.argument("issue_id")
+@click.option("--actor", required=True)
+@click.option("--from-file", "from_file", default=None,
+              help="Read task IDs from file (one per line), or '-' for stdin.")
+@click.option("--dry-run", is_flag=True, help="Preview without applying.")
+@click.pass_context
+def task_bulk_remove_known_issue(
+    ctx: click.Context,
+    task_refs: tuple[str, ...],
+    issue_id: str,
+    actor: str,
+    from_file: str | None,
+    dry_run: bool,
+) -> None:
+    """Bulk-remove a known issue from multiple tasks."""
+    from trailmind.resolver import resolve_entity
+    from trailmind.log import read_entity_user_facing
+    from trailmind.entity_io import write_entity
+
+    root = find_repo_root(_cwd_from_context(ctx))
+    refs = list(task_refs)
+    if from_file:
+        refs.extend(_read_ids_from_file(from_file))
+    if not refs:
+        raise TrailmindError("no task IDs provided (pass as args or use --from-file)")
+    if dry_run:
+        click.echo(f"[DRY RUN] Would remove known issue {issue_id!r} from {len(refs)} task(s):")
+        for r in refs:
+            click.echo(f"  - {r}")
+        return
+    touched = []
+    for task_ref in refs:
+        try:
+            path = resolve_entity(root, raw=task_ref, entity="T")
+            fm, body = read_entity_user_facing(path, label="task")
+            known = list(fm.get("known_issues") or [])
+            if issue_id in known:
+                known.remove(issue_id)
+                fm["known_issues"] = known
+                write_entity(path, frontmatter=fm, body=body)
+                touched.append(path)
+        except Exception as exc:
+            click.echo(f"  ⚠ {task_ref}: {exc}", err=True)
+    if touched:
+        _echo_touched(root, touched)
+
+
 @task_group.command("normalize-statuses")
 @click.option("--write", "write_changes", is_flag=True, help="Rewrite legacy statuses in task files.")
 @click.pass_context
