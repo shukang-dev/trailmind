@@ -1349,8 +1349,8 @@ def task_group() -> None:
               type=click.Choice(("created", "priority", "due", "status", "title"), case_sensitive=False),
               help="Sort tasks (default: created).")
 @click.option("--group-by", default=None,
-              type=click.Choice(("status", "owner", "priority", "epic", "project", "tag"), case_sensitive=False),
-              help="Group tasks by status, owner, priority, epic, project, or tag.")
+              type=click.Choice(("status", "owner", "priority", "epic", "project", "tag", "due"), case_sensitive=False),
+              help="Group tasks by status, owner, priority, epic, project, tag, or due date.")
 @click.option("--compact", is_flag=True, help="Compact single-line output.")
 @click.option("--csv", "csv_output", is_flag=True, help="Output as CSV for spreadsheet import.")
 @click.option("--limit", default=None, type=click.IntRange(min=1), help="Limit number of results.")
@@ -1445,7 +1445,9 @@ def task_list_cmd(
 
     if group_by:
         from collections import defaultdict
+        from datetime import date, timedelta
         groups: dict[str, list[dict]] = defaultdict(list)
+        today = date.today()
         for t in tasks:
             if group_by == "epic":
                 key = t.get("epic", "") or "unknown"
@@ -1462,17 +1464,48 @@ def task_list_cmd(
                         groups[str(tag)].append(t)
                 else:
                     groups["untagged"].append(t)
+            elif group_by == "due":
+                due_str = t.get("due", "")
+                status = t.get("status", "")
+                if not due_str:
+                    groups["📅 No due date"].append(t)
+                elif status in ("done", "wontfix"):
+                    groups["✅ Done"].append(t)
+                else:
+                    try:
+                        due_date = date.fromisoformat(due_str)
+                        delta = (due_date - today).days
+                        if delta < 0:
+                            groups["⚠️ Overdue"].append(t)
+                        elif delta == 0:
+                            groups["📍 Today"].append(t)
+                        elif delta <= 7:
+                            groups["📆 This week"].append(t)
+                        elif delta <= 14:
+                            groups["📆 Next week"].append(t)
+                        elif delta <= 30:
+                            groups["🗓️ This month"].append(t)
+                        else:
+                            groups["🔮 Later"].append(t)
+                    except ValueError:
+                        groups["📅 No due date"].append(t)
             else:
                 key = t.get(group_by, "") or "unassigned"
                 groups[key].append(t)
 
-        # Sort groups: by natural order for status/priority, alphabetical for owner/epic
+        # Sort groups: by natural order for status/priority, custom for due, alphabetical for rest
         if group_by == "status":
             order = {s: i for i, s in enumerate(TASK_STATUSES)}
             sorted_keys = sorted(groups.keys(), key=lambda k: order.get(k, 99))
         elif group_by == "priority":
             from trailmind.task import PRIORITY_ORDER
             sorted_keys = sorted(groups.keys(), key=lambda k: PRIORITY_ORDER.get(k, 99))
+        elif group_by == "due":
+            # Custom order for due buckets
+            due_order = ["⚠️ Overdue", "📍 Today", "📆 This week", "📆 Next week",
+                         "🗓️ This month", "🔮 Later", "✅ Done", "📅 No due date"]
+            due_rank = {k: i for i, k in enumerate(due_order)}
+            sorted_keys = sorted(groups.keys(), key=lambda k: due_rank.get(k, 99))
         else:
             sorted_keys = sorted(groups.keys())
 
