@@ -2581,13 +2581,16 @@ def milestone_group() -> None:
 @click.option("--sort", "sort_by", default="date",
               type=click.Choice(("date", "created", "status", "title"), case_sensitive=False),
               help="Sort milestones (default: date).")
+@click.option("--group-by", default=None,
+              type=click.Choice(("status", "epic", "project"), case_sensitive=False),
+              help="Group milestones by status, epic, or project.")
 @click.option("--limit", default=None, type=click.IntRange(min=1), help="Limit number of results.")
 @click.option("--csv", "csv_output", is_flag=True, help="Output as CSV.")
 @click.option("--json", "json_output", is_flag=True, help="Print structured JSON instead of tabular output.")
 @click.pass_context
 def milestone_list_cmd(ctx: click.Context, epic_ref: str | None, project_ref: str | None,
-                        status: str | None, active: bool, sort_by: str, limit: int | None,
-                        csv_output: bool, json_output: bool) -> None:
+                        status: str | None, active: bool, sort_by: str, group_by: str | None,
+                        limit: int | None, csv_output: bool, json_output: bool) -> None:
     root = find_repo_root(_cwd_from_context(ctx))
     milestones = list_milestones(root, epic_ref=epic_ref, project_ref=project_ref,
                                   status=status, sort_by=sort_by)
@@ -2600,18 +2603,51 @@ def milestone_list_cmd(ctx: click.Context, epic_ref: str | None, project_ref: st
         import io
         output = io.StringIO()
         writer = csv.writer(output)
-        writer.writerow(["id", "title", "status", "date", "created", "path"])
+        writer.writerow(["id", "title", "status", "date", "created", "epic", "path"])
         for m in milestones:
             writer.writerow([m.get("id", ""), m.get("title", ""), m.get("status", ""),
-                            m.get("date", ""), m.get("created", ""), m.get("path", "")])
+                            m.get("date", ""), m.get("created", ""), m.get("epic", ""), m.get("path", "")])
         click.echo(output.getvalue(), nl=False)
         return
     if json_output:
         click.echo(json.dumps(milestones, ensure_ascii=False, indent=2))
+        return
+
+    if not milestones:
+        click.echo("No milestones.")
+        return
+
+    if group_by:
+        from collections import defaultdict
+        groups: dict[str, list[dict]] = defaultdict(list)
+        for m in milestones:
+            if group_by == "epic":
+                key = m.get("epic", "") or "unknown"
+            elif group_by == "project":
+                epic = m.get("epic", "") or ""
+                parts = epic.split("/")
+                key = parts[1] if len(parts) > 1 else "unknown"
+            else:
+                key = m.get(group_by, "") or "unknown"
+            groups[key].append(m)
+
+        if group_by == "status":
+            st_order = {"in_progress": 0, "planned": 1, "done": 2}
+            sorted_keys = sorted(groups.keys(), key=lambda k: st_order.get(k, 99))
+        else:
+            sorted_keys = sorted(groups.keys())
+
+        for key in sorted_keys:
+            group_ms = groups[key]
+            display_key = key
+            if group_by == "epic":
+                display_key = key.split("/")[-1] if "/" in key else key
+            click.echo(f"\n{display_key.upper()} ({len(group_ms)})")
+            click.echo("─" * 60)
+            for m in group_ms:
+                click.echo(f"  {m['id']:12s} {m['status']:12s} {m['date']:12s} {m['title']}")
+                click.echo(f"  {'':12s} {'':12s} {'':12s} {m['path']}")
     else:
-        if not milestones:
-            click.echo("No milestones.")
-            return
         for m in milestones:
             click.echo(f"{m['id']:12s} {m['status']:12s} {m['date']:12s} {m['title']}")
             click.echo(f"{'':12s} {'':12s} {'':12s} {m['path']}")

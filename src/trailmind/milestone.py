@@ -90,13 +90,17 @@ def list_milestones(
             continue
         try:
             frontmatter, _body = read_entity_user_facing(path, label="milestone")
+            rel = path.relative_to(repo_root).as_posix()
+            parts = rel.split("/")
+            epic = f"projects/{parts[1]}/{parts[2]}" if len(parts) > 2 else ""
             ms = {
                 "id": str(frontmatter.get("id") or path.stem),
                 "title": str(frontmatter.get("title") or path.stem),
                 "status": str(frontmatter.get("status") or "created"),
                 "date": str(frontmatter.get("date") or ""),
                 "created": str(frontmatter.get("created") or ""),
-                "path": path.relative_to(repo_root).as_posix(),
+                "epic": epic,
+                "path": rel,
             }
             if status and ms["status"] != status:
                 continue
