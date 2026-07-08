@@ -423,6 +423,176 @@ def doctor_command(ctx: click.Context, json_output: bool) -> None:
             raise TrailmindError(f"doctor found {errors} error(s)")
 
 
+@cli.command("summary")
+@click.option("--project", default=None, help="Show summary for a specific project.")
+@click.option("--epic", default=None, help="Show summary for a specific epic.")
+@click.option("--owner", default=None, help="Show summary for a specific owner.")
+@click.option("--json", "json_output", is_flag=True, help="Print structured JSON instead of text report.")
+@click.pass_context
+def summary_command(ctx: click.Context, project: str | None, epic: str | None,
+                     owner: str | None, json_output: bool) -> None:
+    """Show a quick daily summary of work status."""
+    from datetime import date, timedelta
+    root = find_repo_root(_cwd_from_context(ctx))
+
+    # Collect tasks
+    all_tasks = list_tasks(root, epic_ref=epic, project_ref=project, owner=owner)
+    today = date.today().isoformat()
+    within_7 = (date.today() + timedelta(days=7)).isoformat()
+    within_30 = (date.today() + timedelta(days=30)).isoformat()
+
+    active_tasks = [t for t in all_tasks if t.get("status") not in ("done", "wontfix")]
+    overdue_tasks = [t for t in active_tasks if t.get("due") and t["due"] < today]
+    due_today_tasks = [t for t in active_tasks if t.get("due") == today]
+    due_week_tasks = [t for t in active_tasks if t.get("due") and today < t["due"] <= within_7]
+    blocked_tasks = [t for t in active_tasks if t.get("status") == "blocked"]
+    in_progress_tasks = [t for t in active_tasks if t.get("status") == "in_progress"]
+    ready_tasks = [t for t in active_tasks if t.get("status") in ("ready", "created")]
+    done_tasks = [t for t in all_tasks if t.get("status") == "done"]
+
+    # Collect issues
+    all_issues = list_issues(root, epic_ref=epic, project_ref=project)
+    open_issues = [i for i in all_issues if i.get("status") not in ("done", "wontfix")]
+    critical_issues = [i for i in open_issues if i.get("severity") == "critical"]
+    high_issues = [i for i in open_issues if i.get("severity") == "high"]
+
+    # Collect inbox
+    from trailmind.inbox import list_inbox_items
+    if project or epic:
+        inbox_items = list_inbox_items(root, project=project, epic=epic)
+    else:
+        inbox_items = []
+        projects_dir = root / "projects"
+        if projects_dir.exists():
+            for proj_dir in sorted(projects_dir.iterdir()):
+                if not proj_dir.is_dir():
+                    continue
+                try:
+                    inbox_items.extend(list_inbox_items(root, project=proj_dir.name, epic=None))
+                except TrailmindError:
+                    pass
+    open_inbox = [i for i in inbox_items if i.status == "open"]
+
+    # Collect milestones
+    milestones = list_milestones(root, epic_ref=epic, project_ref=project)
+    active_milestones = [m for m in milestones if m.get("status") != "done"]
+    upcoming_milestones = sorted(
+        [m for m in active_milestones if m.get("date") and m["date"] >= today],
+        key=lambda m: m.get("date", "")
+    )[:3]
+
+    # Next tasks
+    next_task_list = next_tasks(root, owner=owner, epic=epic, project=project, limit=5)
+
+    if json_output:
+        data = {
+            "tasks": {
+                "total": len(all_tasks),
+                "active": len(active_tasks),
+                "done": len(done_tasks),
+                "in_progress": len(in_progress_tasks),
+                "blocked": len(blocked_tasks),
+                "ready": len(ready_tasks),
+                "overdue": len(overdue_tasks),
+                "due_today": len(due_today_tasks),
+                "due_this_week": len(due_week_tasks),
+            },
+            "issues": {
+                "total": len(all_issues),
+                "open": len(open_issues),
+                "critical": len(critical_issues),
+                "high": len(high_issues),
+            },
+            "inbox": {
+                "total": len(inbox_items),
+                "open": len(open_inbox),
+            },
+            "milestones": {
+                "total": len(milestones),
+                "active": len(active_milestones),
+                "upcoming": [{"title": m["title"], "date": m["date"]} for m in upcoming_milestones],
+            },
+            "next_tasks": [
+                {"id": t["id"], "title": t["title"], "priority": t.get("priority", ""),
+                 "due": t.get("due", ""), "owner": t.get("owner", "")}
+                for t in next_task_list
+            ],
+        }
+        click.echo(json.dumps(data, ensure_ascii=False, indent=2))
+        return
+
+    # Text report
+    lines = []
+    scope = ""
+    if epic:
+        scope = f" for {epic}"
+    elif project:
+        scope = f" for {project}"
+
+    lines.append(f"📊 Trailmind Summary{scope}")
+    lines.append(f"   {date.today().isoformat()}")
+    lines.append("")
+
+    # Tasks section
+    lines.append(f"📋 Tasks: {len(active_tasks)} active / {len(all_tasks)} total")
+    if done_tasks:
+        pct = round(len(done_tasks) / len(all_tasks) * 100) if all_tasks else 0
+        lines.append(f"   ✅ {len(done_tasks)} done ({pct}%)")
+    if in_progress_tasks:
+        lines.append(f"   🔧 {len(in_progress_tasks)} in progress")
+    if blocked_tasks:
+        lines.append(f"   🚧 {len(blocked_tasks)} blocked")
+    if ready_tasks:
+        lines.append(f"   ⏳ {len(ready_tasks)} ready to start")
+    if overdue_tasks:
+        lines.append(f"   ⚠️  {len(overdue_tasks)} overdue")
+    if due_today_tasks:
+        lines.append(f"   📍 {len(due_today_tasks)} due today")
+    if due_week_tasks:
+        lines.append(f"   📆 {len(due_week_tasks)} due this week")
+    lines.append("")
+
+    # Issues section
+    if open_issues:
+        lines.append(f"🐛 Issues: {len(open_issues)} open")
+        if critical_issues:
+            lines.append(f"   🔥 {len(critical_issues)} critical")
+        if high_issues:
+            lines.append(f"   ⚡ {len(high_issues)} high")
+        lines.append("")
+
+    # Inbox section
+    if open_inbox:
+        lines.append(f"📥 Inbox: {len(open_inbox)} open items")
+        lines.append("")
+
+    # Milestones section
+    if upcoming_milestones:
+        lines.append("🏁 Upcoming milestones:")
+        for m in upcoming_milestones:
+            lines.append(f"   {m['date']}  {m['title']}")
+        lines.append("")
+
+    # Next tasks section
+    if next_task_list:
+        lines.append("🎯 Next tasks:")
+        for i, t in enumerate(next_task_list[:5], 1):
+            pri = f"[{t.get('priority', '').upper()}]" if t.get('priority') else ""
+            due = f"due:{t.get('due', '')}" if t.get('due') else ""
+            owner_str = f"@{t.get('owner', '')}" if t.get('owner') else ""
+            lines.append(f"   {i}. {t['id']} {pri} {owner_str} {due}  {t['title']}")
+        lines.append("")
+
+    # Quick stats
+    lines.append("💡 Quick commands:")
+    lines.append("   trailmind task next          — what to work on")
+    lines.append("   trailmind task list --overdue — overdue tasks")
+    lines.append("   trailmind inbox list         — review inbox")
+    lines.append("   trailmind stats              — full statistics")
+
+    click.echo("\n".join(lines))
+
+
 @cli.command("export")
 @click.option("--output", "-o", default=None, help="Write to file instead of stdout.")
 @click.option("--format", "fmt", default="json", type=click.Choice(("json", "csv"), case_sensitive=False),
@@ -566,14 +736,18 @@ def inbox_add(
               type=click.Choice(("status", "epic", "project"), case_sensitive=False),
               help="Group inbox items by status, epic, or project.")
 @click.option("--limit", default=None, type=click.IntRange(min=1), help="Limit number of results.")
+@click.option("--count", "count_only", is_flag=True, help="Show only the count of matching inbox items.")
 @click.option("--csv", "csv_output", is_flag=True, help="Output as CSV.")
 @click.option("--json", "json_output", is_flag=True, help="Print structured JSON instead of Markdown.")
 @click.pass_context
 def inbox_list(ctx: click.Context, project_slug: str | None, epic_ref: str | None,
                status: str | None, group_by: str | None, limit: int | None,
-               csv_output: bool, json_output: bool) -> None:
+               count_only: bool, csv_output: bool, json_output: bool) -> None:
     root = find_repo_root(_cwd_from_context(ctx))
     items = list_inbox_items(root, project=project_slug, epic=epic_ref, status=status)
+    if count_only:
+        click.echo(f"{len(items)} inbox item{'s' if len(items) != 1 else ''}")
+        return
     if limit:
         items = items[:limit]
     if csv_output:
@@ -2637,17 +2811,21 @@ def milestone_group() -> None:
               type=click.Choice(("status", "epic", "project"), case_sensitive=False),
               help="Group milestones by status, epic, or project.")
 @click.option("--limit", default=None, type=click.IntRange(min=1), help="Limit number of results.")
+@click.option("--count", "count_only", is_flag=True, help="Show only the count of matching milestones.")
 @click.option("--csv", "csv_output", is_flag=True, help="Output as CSV.")
 @click.option("--json", "json_output", is_flag=True, help="Print structured JSON instead of tabular output.")
 @click.pass_context
 def milestone_list_cmd(ctx: click.Context, epic_ref: str | None, project_ref: str | None,
                         status: str | None, active: bool, sort_by: str, group_by: str | None,
-                        limit: int | None, csv_output: bool, json_output: bool) -> None:
+                        limit: int | None, count_only: bool, csv_output: bool, json_output: bool) -> None:
     root = find_repo_root(_cwd_from_context(ctx))
     milestones = list_milestones(root, epic_ref=epic_ref, project_ref=project_ref,
                                   status=status, sort_by=sort_by)
     if active:
         milestones = [m for m in milestones if m.get("status") != "done"]
+    if count_only:
+        click.echo(f"{len(milestones)} milestone{'s' if len(milestones) != 1 else ''}")
+        return
     if limit:
         milestones = milestones[:limit]
     if csv_output:
