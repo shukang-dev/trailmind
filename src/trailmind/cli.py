@@ -804,6 +804,159 @@ def today_command(ctx: click.Context, owner: str | None, project: str | None,
     click.echo("\n".join(lines))
 
 
+@cli.command("focus")
+@click.argument("owner")
+@click.option("--project", default=None, help="Focus on a specific project.")
+@click.option("--epic", default=None, help="Focus on a specific epic.")
+@click.option("--json", "json_output", is_flag=True, help="Print structured JSON.")
+@click.pass_context
+def focus_command(ctx: click.Context, owner: str, project: str | None,
+                   epic: str | None, json_output: bool) -> None:
+    """Focus view: what a specific person should work on today."""
+    from datetime import date, timedelta
+    root = find_repo_root(_cwd_from_context(ctx))
+    today = date.today().isoformat()
+    within_7 = (date.today() + timedelta(days=7)).isoformat()
+
+    # Get this person's tasks
+    all_tasks = list_tasks(root, epic_ref=epic, project_ref=project, owner=owner)
+    active_tasks = [t for t in all_tasks if t.get("status") not in ("done", "wontfix")]
+    overdue = [t for t in active_tasks if t.get("due") and t["due"] < today]
+    due_today = [t for t in active_tasks if t.get("due") == today]
+    due_week = [t for t in active_tasks if t.get("due") and today < t["due"] <= within_7]
+    in_progress = [t for t in active_tasks if t.get("status") == "in_progress"]
+    blocked = [t for t in active_tasks if t.get("status") == "blocked"]
+    ready = [t for t in active_tasks if t.get("status") in ("ready", "created")]
+    done = [t for t in all_tasks if t.get("status") == "done"]
+
+    # Get this person's issues
+    all_issues = list_issues(root, epic_ref=epic, project_ref=project)
+    my_issues = [i for i in all_issues if i.get("owner") == owner and i.get("status") not in ("done", "wontfix")]
+
+    # Get next tasks
+    next_task_list = next_tasks(root, owner=owner, epic=epic, project=project, limit=10)
+
+    # Get linked open issues for my tasks
+    from trailmind.task_rules import linked_open_issues_for_task
+    linked_issues = []
+    for t in in_progress + blocked + due_today[:3]:
+        try:
+            linked = linked_open_issues_for_task(root, t.get("path", ""))
+            linked_issues.extend(linked)
+        except Exception:
+            pass
+
+    if json_output:
+        data = {
+            "owner": owner,
+            "date": today,
+            "tasks": {
+                "active": len(active_tasks),
+                "done": len(done),
+                "in_progress": [{"id": t["id"], "title": t["title"], "due": t.get("due", ""), "epic": t.get("epic", "")} for t in in_progress],
+                "blocked": [{"id": t["id"], "title": t["title"], "due": t.get("due", ""), "epic": t.get("epic", "")} for t in blocked],
+                "overdue": [{"id": t["id"], "title": t["title"], "due": t.get("due", ""), "epic": t.get("epic", "")} for t in overdue],
+                "due_today": [{"id": t["id"], "title": t["title"], "epic": t.get("epic", "")} for t in due_today],
+                "due_this_week": [{"id": t["id"], "title": t["title"], "due": t.get("due", ""), "epic": t.get("epic", "")} for t in due_week],
+                "ready": len(ready),
+            },
+            "issues": {
+                "assigned": len(my_issues),
+                "linked_to_active_tasks": len(linked_issues),
+            },
+            "next_tasks": [
+                {"id": t["id"], "title": t["title"], "priority": t.get("priority", ""),
+                 "due": t.get("due", ""), "epic": t.get("epic", "")}
+                for t in next_task_list
+            ],
+        }
+        click.echo(json.dumps(data, ensure_ascii=False, indent=2))
+        return
+
+    lines = []
+    lines.append(f"🎯 Focus: @{owner}")
+    lines.append(f"   {today}")
+    lines.append("")
+
+    # In progress — most important
+    if in_progress:
+        lines.append(f"🔧 In progress ({len(in_progress)}):")
+        for t in in_progress:
+            due = f" due:{t.get('due', '')}" if t.get('due') else ""
+            epic = f" [{t.get('epic', '').split('/')[-1]}]" if t.get('epic') else ""
+            lines.append(f"   {t['id']}{epic}{due}  {t['title']}")
+        lines.append("")
+
+    # Blocked
+    if blocked:
+        lines.append(f"🚧 Blocked ({len(blocked)}):")
+        for t in blocked:
+            due = f" due:{t.get('due', '')}" if t.get('due') else ""
+            epic = f" [{t.get('epic', '').split('/')[-1]}]" if t.get('epic') else ""
+            lines.append(f"   {t['id']}{epic}{due}  {t['title']}")
+        lines.append("")
+
+    # Overdue
+    if overdue:
+        lines.append(f"⚠️  Overdue ({len(overdue)}):")
+        for t in overdue:
+            pri = f"[{t.get('priority', '').upper()}]" if t.get('priority') else ""
+            epic = f" [{t.get('epic', '').split('/')[-1]}]" if t.get('epic') else ""
+            lines.append(f"   {t['id']} {pri}{epic} due:{t.get('due', '')}  {t['title']}")
+        lines.append("")
+
+    # Due today
+    if due_today:
+        lines.append(f"📍 Due today ({len(due_today)}):")
+        for t in due_today:
+            pri = f"[{t.get('priority', '').upper()}]" if t.get('priority') else ""
+            epic = f" [{t.get('epic', '').split('/')[-1]}]" if t.get('epic') else ""
+            lines.append(f"   {t['id']} {pri}{epic}  {t['title']}")
+        lines.append("")
+
+    # Due this week
+    if due_week:
+        lines.append(f"📆 This week ({len(due_week)}):")
+        for t in due_week:
+            pri = f"[{t.get('priority', '').upper()}]" if t.get('priority') else ""
+            epic = f" [{t.get('epic', '').split('/')[-1]}]" if t.get('epic') else ""
+            lines.append(f"   {t['id']} {pri}{epic} due:{t.get('due', '')}  {t['title']}")
+        lines.append("")
+
+    # My issues
+    if my_issues:
+        lines.append(f"🐛 My issues ({len(my_issues)}):")
+        for i in my_issues:
+            sev = f"[{i.get('severity', '').upper()}]" if i.get('severity') else ""
+            lines.append(f"   {i['id']} {sev} {i['title']}")
+        lines.append("")
+
+    # Linked issues warning
+    if linked_issues:
+        lines.append(f"🔗 Linked open issues on active tasks: {len(linked_issues)}")
+        lines.append("")
+
+    # Next to pick up
+    if ready and not in_progress:
+        lines.append(f"⏳ Ready to start ({len(ready)}):")
+        for t in ready[:5]:
+            pri = f"[{t.get('priority', '').upper()}]" if t.get('priority') else ""
+            epic = f" [{t.get('epic', '').split('/')[-1]}]" if t.get('epic') else ""
+            lines.append(f"   {t['id']} {pri}{epic}  {t['title']}")
+        lines.append("")
+
+    # Stats
+    total = len(all_tasks)
+    pct = round(len(done) / total * 100) if total else 0
+    lines.append(f"📊 Stats: {len(done)}/{total} done ({pct}%) · {len(active_tasks)} active")
+
+    if not active_tasks and not my_issues:
+        lines.append("")
+        lines.append("All clear! ☀️")
+
+    click.echo("\n".join(lines))
+
+
 @cli.command("weekly")
 @click.option("--project", default=None, help="Show weekly review for a specific project.")
 @click.option("--epic", default=None, help="Show weekly review for a specific epic.")
@@ -3871,6 +4024,11 @@ def activity_command(
               help="Filter by entity type (comma-separated: task,issue,epic,project,milestone,inbox,spec,plan).")
 @click.option("--project", default=None, help="Filter by project slug.")
 @click.option("--epic", default=None, help="Filter by epic path or slug.")
+@click.option("--group-by", default=None,
+              type=click.Choice(("entity_type", "status"), case_sensitive=False),
+              help="Group results by entity type or status.")
+@click.option("--compact", is_flag=True, help="Compact single-line output.")
+@click.option("--count", "count_only", is_flag=True, help="Show only the count.")
 @click.option("--limit", default=30, show_default=True, type=click.IntRange(min=1, max=200),
               help="Maximum results.")
 @click.option("--json", "json_output", is_flag=True, help="Print structured JSON.")
@@ -3881,6 +4039,9 @@ def search_command(
     entity_types: str | None,
     project: str | None,
     epic: str | None,
+    group_by: str | None,
+    compact: bool,
+    count_only: bool,
     limit: int,
     json_output: bool,
 ) -> None:
@@ -3889,6 +4050,10 @@ def search_command(
     type_list = [t.strip().lower() for t in entity_types.split(",")] if entity_types else None
     results = search_entities(root, query=query, entity_types=type_list,
                                project=project, epic=epic, limit=limit)
+
+    if count_only:
+        click.echo(f"{len(results)} result{'s' if len(results) != 1 else ''}")
+        return
 
     if json_output:
         click.echo(json.dumps(results, ensure_ascii=False, indent=2))
@@ -3903,18 +4068,56 @@ def search_command(
         "milestone": "🏁", "inbox": "📥", "spec": "📐", "plan": "📋",
     }
 
-    click.echo(f"Found {len(results)} result(s) for {query!r}:\n")
-    for r in results:
-        icon = type_icons.get(r["entity_type"], "📄")
-        status_str = f" [{r['status']}]" if r["status"] else ""
-        click.echo(f"  {icon} {r['entity_type']:10s} {r['entity_id']:16s}{status_str}  {r['title']}")
-        if r["snippet"]:
-            snippet = r["snippet"]
-            if len(snippet) > 100:
-                snippet = snippet[:97] + "..."
-            click.echo(f"    {'':10s} {snippet}")
-        click.echo(f"    {'':10s} {r['path']}")
-        click.echo()
+    if group_by:
+        from collections import defaultdict
+        groups: dict[str, list] = defaultdict(list)
+        for r in results:
+            if group_by == "entity_type":
+                key = r["entity_type"]
+            else:
+                key = r.get("status") or "unknown"
+            groups[key].append(r)
+
+        if group_by == "entity_type":
+            et_order = {"task": 0, "issue": 1, "milestone": 2, "inbox": 3, "epic": 4, "project": 5, "spec": 6, "plan": 7}
+            sorted_keys = sorted(groups.keys(), key=lambda k: et_order.get(k, 99))
+        else:
+            sorted_keys = sorted(groups.keys())
+
+        click.echo(f"Found {len(results)} result(s) for {query!r}:\n")
+        for key in sorted_keys:
+            group_results = groups[key]
+            display_key = key
+            if group_by == "entity_type":
+                icon = type_icons.get(key, "📄")
+                display_key = f"{icon} {key}"
+            click.echo(f"{display_key.upper()} ({len(group_results)})")
+            click.echo("─" * 60)
+            for r in group_results:
+                icon = type_icons.get(r["entity_type"], "📄")
+                status_str = f" [{r['status']}]" if r["status"] else ""
+                if compact:
+                    click.echo(f"  {r['entity_id']:16s}{status_str}  {r['title']}")
+                else:
+                    click.echo(f"  {r['entity_id']:16s}{status_str}  {r['title']}")
+                    click.echo(f"  {'':16s}  {r['path']}")
+            click.echo()
+    else:
+        click.echo(f"Found {len(results)} result(s) for {query!r}:\n")
+        for r in results:
+            icon = type_icons.get(r["entity_type"], "📄")
+            status_str = f" [{r['status']}]" if r["status"] else ""
+            if compact:
+                click.echo(f"  {icon} {r['entity_type']:10s} {r['entity_id']:16s}{status_str}  {r['title']}")
+            else:
+                click.echo(f"  {icon} {r['entity_type']:10s} {r['entity_id']:16s}{status_str}  {r['title']}")
+                if r["snippet"]:
+                    snippet = r["snippet"]
+                    if len(snippet) > 100:
+                        snippet = snippet[:97] + "..."
+                    click.echo(f"    {'':10s} {snippet}")
+                click.echo(f"    {'':10s} {r['path']}")
+                click.echo()
 
 
 @cli.command("log")
