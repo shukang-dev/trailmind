@@ -166,6 +166,7 @@ def list_issues(
             "owner": issue_owner,
             "filer": str(frontmatter.get("filer") or ""),
             "created": str(frontmatter.get("created") or ""),
+            "linked_tasks": list(frontmatter.get("linked_tasks") or []),
             "epic": epic_path,
             "path": rel_path,
         })

@@ -2426,6 +2426,8 @@ def issue_group() -> None:
               help="Filter by severity.")
 @click.option("--owner", default=None, help="Filter by owner shortname.")
 @click.option("--unassigned", is_flag=True, help="Show only issues without an owner.")
+@click.option("--has-linked-tasks", is_flag=True, help="Show only issues that have linked tasks.")
+@click.option("--no-linked-tasks", is_flag=True, help="Show only issues without linked tasks.")
 @click.option("--sort", "sort_by", default="created",
               type=click.Choice(("created", "severity", "status", "title"), case_sensitive=False),
               help="Sort issues (default: created).")
@@ -2447,6 +2449,8 @@ def issue_list_cmd(
     severity: str | None,
     owner: str | None,
     unassigned: bool,
+    has_linked_tasks: bool,
+    no_linked_tasks: bool,
     sort_by: str,
     group_by: str | None,
     compact: bool,
@@ -2462,6 +2466,10 @@ def issue_list_cmd(
         issues = [i for i in issues if i.get("status") not in ("done", "wontfix")]
     if unassigned:
         issues = [i for i in issues if not i.get("owner")]
+    if has_linked_tasks:
+        issues = [i for i in issues if i.get("linked_tasks")]
+    if no_linked_tasks:
+        issues = [i for i in issues if not i.get("linked_tasks")]
     if count_only:
         click.echo(f"{len(issues)} issue{'s' if len(issues) != 1 else ''}")
         return
