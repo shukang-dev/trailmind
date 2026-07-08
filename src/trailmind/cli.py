@@ -5172,6 +5172,620 @@ def task_start_next(ctx: click.Context, owner: str | None, epic_ref: str | None,
         click.echo(warning)
 
 
+@task_group.command("tree")
+@click.argument("task_ref", required=False)
+@click.option("--epic", "epic_ref", default=None, help="Show dependency tree for an epic.")
+@click.option("--project", "project_ref", default=None, help="Show dependency tree for a project.")
+@click.option("--owner", default=None, help="Filter by owner.")
+@click.option("--max-depth", default=5, show_default=True, type=click.IntRange(min=1, max=10),
+              help="Maximum depth to display.")
+@click.option("--json", "json_output", is_flag=True, help="Print structured JSON.")
+@click.pass_context
+def task_tree(ctx: click.Context, task_ref: str | None, epic_ref: str | None,
+              project_ref: str | None, owner: str | None, max_depth: int,
+              json_output: bool) -> None:
+    """Show task dependency tree (blocking relationships)."""
+    root = find_repo_root(_cwd_from_context(ctx))
+
+    # Get all tasks
+    all_tasks = list_tasks(root, epic_ref=epic_ref, project_ref=project_ref, owner=owner)
+    task_map: dict[str, dict] = {}
+    for t in all_tasks:
+        tid = t.get("id", "")
+        if tid:
+            task_map[tid] = t
+
+    def build_tree(task_id: str, depth: int = 0, visited: set | None = None) -> dict:
+        if visited is None:
+            visited = set()
+        if task_id in visited or depth >= max_depth:
+            return {"id": task_id, "cycle": task_id in visited, "children": []}
+        visited.add(task_id)
+        task = task_map.get(task_id, {"id": task_id, "title": "(not found)", "status": "?"})
+        deps = task.get("depends_on") or []
+        soft_deps = task.get("soft_depends_on") or []
+        children = []
+        for dep_id in deps:
+            # Resolve dep ID to full task ID
+            resolved = dep_id
+            for tid in task_map:
+                if tid.endswith(dep_id) or dep_id in tid:
+                    resolved = tid
+                    break
+            children.append(build_tree(resolved, depth + 1, visited.copy()))
+        return {
+            "id": task_id,
+            "title": task.get("title", ""),
+            "status": task.get("status", "?"),
+            "owner": task.get("owner", ""),
+            "priority": task.get("priority", ""),
+            "due": task.get("due", ""),
+            "soft_deps": list(soft_deps),
+            "children": children,
+        }
+
+    if json_output:
+        if task_ref:
+            tree = build_tree(task_ref)
+            click.echo(json.dumps(tree, ensure_ascii=False, indent=2, default=str))
+        else:
+            # Find root tasks (those that are not depended on by others)
+            all_dep_ids = set()
+            for t in all_tasks:
+                for dep in (t.get("depends_on") or []):
+                    all_dep_ids.add(dep)
+            root_tasks = [t for t in all_tasks
+                          if t.get("id") not in all_dep_ids
+                          and t.get("status") not in ("done", "wontfix")]
+            forest = [build_tree(t["id"]) for t in root_tasks]
+            click.echo(json.dumps(forest, ensure_ascii=False, indent=2, default=str))
+        return
+
+    # Text output
+    STATUS_ICONS = {
+        "done": "✅", "in_progress": "🔧", "blocked": "🚧",
+        "ready": "⏳", "created": "📝", "wontfix": "❌",
+    }
+
+    def render_tree(node: dict, prefix: str = "", is_last: bool = True, is_root: bool = True) -> list[str]:
+        lines = []
+        status_icon = STATUS_ICONS.get(node.get("status", "?"), "❓")
+        title = node.get("title", "(unknown)")
+        owner = f" @{node['owner']}" if node.get("owner") else ""
+        due = f" due:{node['due']}" if node.get("due") else ""
+        pri = f" [{node['priority'].upper()}]" if node.get("priority") else ""
+        soft = f" (soft: {', '.join(node['soft_deps'])})" if node.get("soft_deps") else ""
+
+        if is_root:
+            connector = ""
+        else:
+            connector = "└── " if is_last else "├── "
+
+        line = f"{prefix}{connector}{status_icon} {node['id']}{pri}{owner}{due}  {title}{soft}"
+        if node.get("cycle"):
+            line += " 🔄 (cycle)"
+        lines.append(line)
+
+        children = node.get("children", [])
+        for i, child in enumerate(children):
+            if is_root:
+                child_prefix = prefix
+            else:
+                child_prefix = prefix + ("    " if is_last else "│   ")
+            lines.extend(render_tree(child, child_prefix, i == len(children) - 1, is_root=False))
+        return lines
+
+    if task_ref:
+        tree = build_tree(task_ref)
+        lines = render_tree(tree)
+        click.echo("\n".join(lines))
+    else:
+        # Find root tasks (those not depended on)
+        all_dep_ids = set()
+        for t in all_tasks:
+            for dep in (t.get("depends_on") or []):
+                all_dep_ids.add(dep)
+        root_tasks = [t for t in all_tasks
+                      if t.get("id") not in all_dep_ids
+                      and t.get("status") not in ("done", "wontfix")]
+
+        if not root_tasks:
+            click.echo("No root tasks found. All tasks are either done or depended on.")
+            return
+
+        lines = [f"🌳 Task Dependency Tree ({len(all_tasks)} tasks, {len(root_tasks)} root(s))"]
+        lines.append("")
+        for t in root_tasks:
+            tree = build_tree(t["id"])
+            lines.extend(render_tree(tree))
+            lines.append("")
+
+        # Summary
+        blocked = [t for t in all_tasks if t.get("status") == "blocked"]
+        done = [t for t in all_tasks if t.get("status") == "done"]
+        in_progress = [t for t in all_tasks if t.get("status") == "in_progress"]
+        lines.append(f"📊 Summary: {len(all_tasks)} total, {len(done)} done, "
+                     f"{len(in_progress)} in progress, {len(blocked)} blocked")
+
+        click.echo("\n".join(lines))
+
+
+@task_group.command("impact")
+@click.argument("task_ref")
+@click.option("--json", "json_output", is_flag=True, help="Print structured JSON.")
+@click.pass_context
+def task_impact(ctx: click.Context, task_ref: str, json_output: bool) -> None:
+    """Analyze the impact of a task: which tasks depend on it (reverse dependency analysis)."""
+    root = find_repo_root(_cwd_from_context(ctx))
+    all_tasks = list_tasks(root)
+
+    # Find the target task
+    target = None
+    for t in all_tasks:
+        if t.get("id") == task_ref or task_ref in t.get("path", ""):
+            target = t
+            break
+
+    if not target:
+        raise TrailmindError(f"task not found: {task_ref}")
+
+    target_id = target.get("id", "")
+
+    # Find all tasks that depend on this task (directly or indirectly)
+    direct_dependents = []
+    soft_dependents = []
+    for t in all_tasks:
+        deps = t.get("depends_on") or []
+        soft_deps = t.get("soft_depends_on") or []
+        for dep in deps:
+            if dep == target_id or target_id.endswith(dep) or dep in target_id:
+                direct_dependents.append(t)
+                break
+        for dep in soft_deps:
+            if dep == target_id or target_id.endswith(dep) or dep in target_id:
+                if t not in direct_dependents:
+                    soft_dependents.append(t)
+                break
+
+    # Calculate indirect dependents (BFS from direct dependents)
+    all_dependents = set()
+    queue = [t.get("id") for t in direct_dependents]
+    visited = set()
+    while queue:
+        current_id = queue.pop(0)
+        if current_id in visited:
+            continue
+        visited.add(current_id)
+        all_dependents.add(current_id)
+        for t in all_tasks:
+            deps = t.get("depends_on") or []
+            for dep in deps:
+                if dep == current_id or current_id.endswith(dep) or dep in current_id:
+                    if t.get("id") not in visited:
+                        queue.append(t.get("id"))
+
+    # Remove the target itself from dependents
+    all_dependents.discard(target_id)
+
+    # Get full task objects for dependents
+    dependent_tasks = [t for t in all_tasks if t.get("id") in all_dependents]
+    active_dependents = [t for t in dependent_tasks if t.get("status") not in ("done", "wontfix")]
+
+    if json_output:
+        data = {
+            "task": {
+                "id": target_id,
+                "title": target.get("title", ""),
+                "status": target.get("status", ""),
+                "owner": target.get("owner", ""),
+            },
+            "impact": {
+                "direct_dependents": len(direct_dependents),
+                "soft_dependents": len(soft_dependents),
+                "total_dependents": len(dependent_tasks),
+                "active_dependents": len(active_dependents),
+            },
+            "dependents": [
+                {"id": t["id"], "title": t["title"], "status": t.get("status", ""),
+                 "owner": t.get("owner", ""), "type": "direct" if t in direct_dependents else "indirect"}
+                for t in dependent_tasks
+            ],
+        }
+        click.echo(json.dumps(data, ensure_ascii=False, indent=2, default=str))
+        return
+
+    # Text output
+    lines = []
+    lines.append(f"🎯 Impact Analysis: {target_id}")
+    lines.append(f"   Title: {target.get('title', '')}")
+    lines.append(f"   Status: {target.get('status', '')}")
+    lines.append(f"   Owner: @{target.get('owner', 'unassigned')}")
+    lines.append("")
+
+    lines.append(f"📊 Impact Summary")
+    lines.append(f"   Direct dependents: {len(direct_dependents)}")
+    lines.append(f"   Soft dependents: {len(soft_dependents)}")
+    lines.append(f"   Total (including transitive): {len(dependent_tasks)}")
+    lines.append(f"   Active (not done): {len(active_dependents)}")
+    lines.append("")
+
+    if len(active_dependents) == 0:
+        lines.append("✅ No active tasks depend on this task. Safe to close.")
+    elif len(active_dependents) <= 3:
+        lines.append("🟡 Low impact — only a few active tasks depend on this.")
+    elif len(active_dependents) <= 10:
+        lines.append("🟠 Medium impact — several active tasks depend on this.")
+    else:
+        lines.append("🔴 HIGH IMPACT — many active tasks depend on this task!")
+    lines.append("")
+
+    if direct_dependents:
+        lines.append(f"🔗 Direct Dependents ({len(direct_dependents)}):")
+        for t in direct_dependents:
+            status = t.get("status", "")
+            owner = f" @{t.get('owner', '')}" if t.get("owner") else ""
+            lines.append(f"   - {t['id']}{owner} [{status}]  {t['title']}")
+        lines.append("")
+
+    if soft_dependents:
+        lines.append(f"📎 Soft Dependents ({len(soft_dependents)}):")
+        for t in soft_dependents:
+            owner = f" @{t.get('owner', '')}" if t.get("owner") else ""
+            lines.append(f"   - {t['id']}{owner}  {t['title']}")
+        lines.append("")
+
+    indirect = [t for t in dependent_tasks if t not in direct_dependents and t not in soft_dependents]
+    if indirect:
+        lines.append(f"🌐 Indirect/Transitive Dependents ({len(indirect)}):")
+        for t in indirect[:10]:
+            owner = f" @{t.get('owner', '')}" if t.get("owner") else ""
+            lines.append(f"   - {t['id']}{owner}  {t['title']}")
+        if len(indirect) > 10:
+            lines.append(f"   ... and {len(indirect) - 10} more")
+        lines.append("")
+
+    click.echo("\n".join(lines))
+
+
+@task_group.command("critical-path")
+@click.option("--epic", "epic_ref", default=None, help="Analyze critical path for an epic.")
+@click.option("--project", "project_ref", default=None, help="Analyze critical path for a project.")
+@click.option("--json", "json_output", is_flag=True, help="Print structured JSON.")
+@click.pass_context
+def task_critical_path(ctx: click.Context, epic_ref: str | None, project_ref: str | None,
+                        json_output: bool) -> None:
+    """Analyze the critical path: longest chain of blocking dependencies."""
+    from datetime import date, timedelta
+    root = find_repo_root(_cwd_from_context(ctx))
+    today = date.today()
+
+    all_tasks = list_tasks(root, epic_ref=epic_ref, project_ref=project_ref)
+    active_tasks = [t for t in all_tasks if t.get("status") not in ("done", "wontfix")]
+
+    # Build dependency graph
+    task_map: dict[str, dict] = {}
+    for t in active_tasks:
+        tid = t.get("id", "")
+        if tid:
+            task_map[tid] = t
+
+    # Find longest path using DFS with memoization
+    memo: dict[str, int] = {}
+    path_memo: dict[str, list[str]] = {}
+
+    def get_longest_path(task_id: str, visited: set | None = None) -> tuple[int, list[str]]:
+        if visited is None:
+            visited = set()
+        if task_id in memo and task_id not in visited:
+            return memo[task_id], path_memo[task_id]
+        if task_id in visited:
+            return 0, [task_id]  # cycle
+        visited.add(task_id)
+
+        task = task_map.get(task_id)
+        if not task:
+            return 0, [task_id]
+
+        deps = task.get("depends_on") or []
+        if not deps:
+            memo[task_id] = 1
+            path_memo[task_id] = [task_id]
+            return 1, [task_id]
+
+        max_len = 0
+        best_path = [task_id]
+        for dep_id in deps:
+            # Resolve dep ID
+            resolved = dep_id
+            for tid in task_map:
+                if tid.endswith(dep_id) or dep_id in tid:
+                    resolved = tid
+                    break
+            dep_len, dep_path = get_longest_path(resolved, visited.copy())
+            if dep_len + 1 > max_len:
+                max_len = dep_len + 1
+                best_path = [task_id] + dep_path
+
+        memo[task_id] = max_len
+        path_memo[task_id] = best_path
+        return max_len, best_path
+
+    # Find the critical path (longest chain)
+    critical_length = 0
+    critical_path_ids = []
+    critical_root = ""
+
+    for tid in task_map:
+        length, path = get_longest_path(tid)
+        if length > critical_length:
+            critical_length = length
+            critical_path_ids = path
+            critical_root = tid
+
+    # Get full task objects for critical path
+    critical_path_tasks = []
+    for tid in critical_path_ids:
+        if tid in task_map:
+            critical_path_tasks.append(task_map[tid])
+
+    # Calculate estimated completion (rough: 1 day per task on critical path)
+    est_completion = today + timedelta(days=critical_length)
+
+    if json_output:
+        data = {
+            "critical_path_length": critical_length,
+            "estimated_completion": est_completion.isoformat(),
+            "root_task": critical_root,
+            "path": [
+                {"id": t["id"], "title": t["title"], "status": t.get("status", ""),
+                 "owner": t.get("owner", ""), "due": t.get("due", ""),
+                 "priority": t.get("priority", "")}
+                for t in critical_path_tasks
+            ],
+            "total_active_tasks": len(active_tasks),
+        }
+        click.echo(json.dumps(data, ensure_ascii=False, indent=2, default=str))
+        return
+
+    # Text output
+    lines = []
+    lines.append(f"🔑 Critical Path Analysis")
+    lines.append(f"   Active tasks: {len(active_tasks)}")
+    lines.append(f"   Critical path length: {critical_length} tasks")
+    lines.append(f"   Estimated completion: {est_completion.isoformat()} (~{critical_length} days)")
+    lines.append("")
+
+    if critical_length == 0:
+        lines.append("No dependencies found. All tasks are independent.")
+        click.echo("\n".join(lines))
+        return
+
+    lines.append(f"🛤️  Critical Path ({critical_length} tasks):")
+    lines.append("")
+
+    STATUS_ICONS = {
+        "done": "✅", "in_progress": "🔧", "blocked": "🚧",
+        "ready": "⏳", "created": "📝", "wontfix": "❌",
+    }
+
+    for i, t in enumerate(critical_path_tasks):
+        status_icon = STATUS_ICONS.get(t.get("status", "?"), "❓")
+        owner = f" @{t.get('owner', '')}" if t.get("owner") else ""
+        due = f" due:{t.get('due', '')}" if t.get("due") else ""
+        pri = f" [{t.get('priority', '').upper()}]" if t.get("priority") else ""
+        prefix = "  " if i == 0 else "  ↓ "
+        lines.append(f"{prefix}{status_icon} {t['id']}{pri}{owner}{due}  {t['title']}")
+
+    # Check if any critical path tasks are overdue
+    overdue_critical = [t for t in critical_path_tasks
+                        if t.get("due") and t["due"] < today.isoformat()]
+    if overdue_critical:
+        lines.append("")
+        lines.append(f"⚠️  {len(overdue_critical)} critical path task(s) are overdue!")
+        for t in overdue_critical:
+            lines.append(f"   - {t['id']} due:{t.get('due', '')}  {t['title']}")
+
+    # Show bottlenecks (tasks that many others depend on)
+    dep_count: dict[str, int] = {}
+    for t in active_tasks:
+        for dep in (t.get("depends_on") or []):
+            resolved = dep
+            for tid in task_map:
+                if tid.endswith(dep) or dep in tid:
+                    resolved = tid
+                    break
+            dep_count[resolved] = dep_count.get(resolved, 0) + 1
+
+    top_bottlenecks = sorted(dep_count.items(), key=lambda x: -x[1])[:3]
+    if top_bottlenecks:
+        lines.append("")
+        lines.append(f"🎯 Top Bottlenecks:")
+        for tid, count in top_bottlenecks:
+            task = task_map.get(tid, {})
+            title = task.get("title", "(unknown)")
+            lines.append(f"   {tid} ({count} dependents): {title}")
+
+    click.echo("\n".join(lines))
+
+
+@task_group.command("what-if")
+@click.argument("task_ref")
+@click.option("--complete", "scenario", flag_value="complete", default=True,
+              help="Simulate completing this task (default).")
+@click.option("--block", "scenario", flag_value="block",
+              help="Simulate this task being blocked.")
+@click.option("--remove", "scenario", flag_value="remove",
+              help="Simulate removing this task.")
+@click.option("--epic", "epic_ref", default=None, help="Scope to a specific epic.")
+@click.option("--json", "json_output", is_flag=True, help="Print structured JSON.")
+@click.pass_context
+def task_what_if(ctx: click.Context, task_ref: str, scenario: str, epic_ref: str | None,
+                 json_output: bool) -> None:
+    """What-if analysis: simulate completing, blocking, or removing a task."""
+    from datetime import date, timedelta
+    root = find_repo_root(_cwd_from_context(ctx))
+    today = date.today()
+
+    all_tasks = list_tasks(root, epic_ref=epic_ref)
+    active_tasks = [t for t in all_tasks if t.get("status") not in ("done", "wontfix")]
+
+    # Find target task
+    target = None
+    for t in all_tasks:
+        if t.get("id") == task_ref or task_ref in t.get("path", ""):
+            target = t
+            break
+
+    if not target:
+        raise TrailmindError(f"task not found: {task_ref}")
+
+    target_id = target.get("id", "")
+
+    # Find all tasks that depend on this task
+    direct_dependents = []
+    for t in active_tasks:
+        deps = t.get("depends_on") or []
+        for dep in deps:
+            if dep == target_id or target_id.endswith(dep) or dep in target_id:
+                direct_dependents.append(t)
+                break
+
+    # Calculate transitive dependents
+    all_dep_ids = set()
+    queue = [t.get("id") for t in direct_dependents]
+    visited = set()
+    while queue:
+        current_id = queue.pop(0)
+        if current_id in visited:
+            continue
+        visited.add(current_id)
+        all_dep_ids.add(current_id)
+        for t in active_tasks:
+            deps = t.get("depends_on") or []
+            for dep in deps:
+                if dep == current_id or current_id.endswith(dep) or dep in current_id:
+                    if t.get("id") not in visited:
+                        queue.append(t.get("id"))
+
+    all_dep_ids.discard(target_id)
+    all_dependents = [t for t in active_tasks if t.get("id") in all_dep_ids]
+
+    # Analyze scenario
+    if scenario == "complete":
+        # What tasks become unblocked?
+        newly_ready = []
+        for t in direct_dependents:
+            deps = t.get("depends_on") or []
+            other_deps_done = True
+            for dep in deps:
+                if dep == target_id or target_id.endswith(dep) or dep in target_id:
+                    continue
+                # Check if other dep is done
+                dep_task = None
+                for dt in all_tasks:
+                    if dt.get("id") == dep or dep in dt.get("path", ""):
+                        dep_task = dt
+                        break
+                if dep_task and dep_task.get("status") not in ("done", "wontfix"):
+                    other_deps_done = False
+                    break
+            if other_deps_done and t.get("status") in ("created", "ready"):
+                newly_ready.append(t)
+
+        impact = {
+            "scenario": "complete",
+            "description": f"Simulate completing {target_id}",
+            "tasks_unblocked": len(newly_ready),
+            "newly_ready": newly_ready,
+            "total_dependents": len(all_dependents),
+            "dependents": all_dependents,
+        }
+
+    elif scenario == "block":
+        # What tasks become blocked?
+        newly_blocked = []
+        for t in direct_dependents:
+            if t.get("status") not in ("blocked", "done", "wontfix"):
+                newly_blocked.append(t)
+
+        impact = {
+            "scenario": "block",
+            "description": f"Simulate blocking {target_id}",
+            "tasks_blocked": len(newly_blocked),
+            "newly_blocked": newly_blocked,
+            "total_dependents": len(all_dependents),
+            "dependents": all_dependents,
+            "cascade_risk": len(all_dependents),
+        }
+
+    else:  # remove
+        impact = {
+            "scenario": "remove",
+            "description": f"Simulate removing {target_id}",
+            "dependents_orphaned": len(all_dependents),
+            "orphaned": all_dependents,
+        }
+
+    if json_output:
+        clean_impact = {}
+        for k, v in impact.items():
+            if isinstance(v, list) and v and isinstance(v[0], dict):
+                clean_impact[k] = [
+                    {"id": t.get("id", ""), "title": t.get("title", ""),
+                     "status": t.get("status", ""), "owner": t.get("owner", "")}
+                    for t in v
+                ]
+            else:
+                clean_impact[k] = v
+        click.echo(json.dumps(clean_impact, ensure_ascii=False, indent=2, default=str))
+        return
+
+    # Text output
+    lines = []
+    lines.append(f"🔮 What-If Analysis: {impact['description']}")
+    lines.append(f"   Target: {target_id} — {target.get('title', '')}")
+    lines.append(f"   Status: {target.get('status', '')}")
+    lines.append("")
+
+    if scenario == "complete":
+        lines.append(f"✅ If completed:")
+        lines.append(f"   Direct dependents: {len(direct_dependents)}")
+        lines.append(f"   Total (transitive): {len(all_dependents)}")
+        lines.append(f"   Newly ready to start: {len(newly_ready)}")
+        if newly_ready:
+            for t in newly_ready:
+                owner = f" @{t.get('owner', '')}" if t.get("owner") else ""
+                lines.append(f"     + {t['id']}{owner}  {t['title']}")
+        lines.append("")
+        if len(newly_ready) == 0 and len(direct_dependents) > 0:
+            lines.append("   💡 No tasks become ready (dependents have other unmet deps).")
+
+    elif scenario == "block":
+        lines.append(f"🚧 If blocked:")
+        lines.append(f"   Directly blocked: {len(direct_dependents)}")
+        lines.append(f"   Total cascade: {len(all_dependents)}")
+        if newly_blocked:
+            lines.append(f"   Newly blocked: {len(newly_blocked)}")
+            for t in newly_blocked:
+                owner = f" @{t.get('owner', '')}" if t.get("owner") else ""
+                lines.append(f"     - {t['id']}{owner}  {t['title']}")
+        lines.append("")
+        if len(all_dependents) > 5:
+            lines.append(f"   ⚠️  HIGH CASCADE RISK: {len(all_dependents)} tasks affected!")
+
+    else:  # remove
+        lines.append(f"🗑️  If removed:")
+        lines.append(f"   Orphaned dependents: {len(all_dependents)}")
+        if all_dependents:
+            for t in all_dependents[:5]:
+                owner = f" @{t.get('owner', '')}" if t.get("owner") else ""
+                lines.append(f"     - {t['id']}{owner}  {t['title']}")
+            if len(all_dependents) > 5:
+                lines.append(f"     ... and {len(all_dependents) - 5} more")
+
+    click.echo("\n".join(lines))
+
+
 @task_group.command("edit")
 @click.argument("task_ref")
 @click.option("--title", default=None, help="New task title.")
