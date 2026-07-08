@@ -593,6 +593,141 @@ def summary_command(ctx: click.Context, project: str | None, epic: str | None,
     click.echo("\n".join(lines))
 
 
+@cli.command("today")
+@click.option("--owner", default=None, help="Show today's view for a specific owner.")
+@click.option("--project", default=None, help="Show today's view for a specific project.")
+@click.option("--epic", default=None, help="Show today's view for a specific epic.")
+@click.option("--json", "json_output", is_flag=True, help="Print structured JSON.")
+@click.pass_context
+def today_command(ctx: click.Context, owner: str | None, project: str | None,
+                   epic: str | None, json_output: bool) -> None:
+    """Quick daily view: due today, overdue, in-progress, and next tasks."""
+    from datetime import date, timedelta
+    root = find_repo_root(_cwd_from_context(ctx))
+    today = date.today().isoformat()
+
+    all_tasks = list_tasks(root, epic_ref=epic, project_ref=project, owner=owner)
+    active_tasks = [t for t in all_tasks if t.get("status") not in ("done", "wontfix")]
+    overdue_tasks = [t for t in active_tasks if t.get("due") and t["due"] < today]
+    due_today_tasks = [t for t in active_tasks if t.get("due") == today]
+    in_progress_tasks = [t for t in active_tasks if t.get("status") == "in_progress"]
+    blocked_tasks = [t for t in active_tasks if t.get("status") == "blocked"]
+    ready_tasks = [t for t in active_tasks if t.get("status") in ("ready", "created")]
+    done_today = [t for t in all_tasks if t.get("status") == "done"]
+
+    # Issues
+    all_issues = list_issues(root, epic_ref=epic, project_ref=project)
+    open_issues = [i for i in all_issues if i.get("status") not in ("done", "wontfix")]
+
+    # Inbox
+    from trailmind.inbox import list_inbox_items
+    inbox_items = []
+    if project or epic:
+        try:
+            inbox_items = list_inbox_items(root, project=project, epic=epic)
+        except TrailmindError:
+            pass
+    open_inbox = [i for i in inbox_items if i.status == "open"]
+
+    # Next tasks
+    next_task_list = next_tasks(root, owner=owner, epic=epic, project=project, limit=5)
+
+    if json_output:
+        data = {
+            "date": today,
+            "tasks": {
+                "overdue": [{"id": t["id"], "title": t["title"], "due": t.get("due", ""), "owner": t.get("owner", "")} for t in overdue_tasks],
+                "due_today": [{"id": t["id"], "title": t["title"], "owner": t.get("owner", "")} for t in due_today_tasks],
+                "in_progress": [{"id": t["id"], "title": t["title"], "owner": t.get("owner", "")} for t in in_progress_tasks],
+                "blocked": [{"id": t["id"], "title": t["title"], "owner": t.get("owner", "")} for t in blocked_tasks],
+                "ready": len(ready_tasks),
+                "done_today": len(done_today),
+            },
+            "issues": {
+                "open": len(open_issues),
+            },
+            "inbox": {
+                "open": len(open_inbox),
+            },
+            "next_tasks": [
+                {"id": t["id"], "title": t["title"], "priority": t.get("priority", ""), "due": t.get("due", ""), "owner": t.get("owner", "")}
+                for t in next_task_list
+            ],
+        }
+        click.echo(json.dumps(data, ensure_ascii=False, indent=2))
+        return
+
+    lines = []
+    lines.append(f"☀️  Today — {today}")
+    lines.append("")
+
+    # Due today
+    if due_today_tasks:
+        lines.append(f"📍 Due today ({len(due_today_tasks)}):")
+        for t in due_today_tasks:
+            pri = f"[{t.get('priority', '').upper()}]" if t.get('priority') else ""
+            owner_str = f"@{t.get('owner', '')}" if t.get('owner') else ""
+            lines.append(f"   {t['id']} {pri} {owner_str}  {t['title']}")
+        lines.append("")
+
+    # Overdue
+    if overdue_tasks:
+        lines.append(f"⚠️  Overdue ({len(overdue_tasks)}):")
+        for t in overdue_tasks:
+            pri = f"[{t.get('priority', '').upper()}]" if t.get('priority') else ""
+            owner_str = f"@{t.get('owner', '')}" if t.get('owner') else ""
+            lines.append(f"   {t['id']} {pri} {owner_str} due:{t.get('due', '')}  {t['title']}")
+        lines.append("")
+
+    # In progress
+    if in_progress_tasks:
+        lines.append(f"🔧 In progress ({len(in_progress_tasks)}):")
+        for t in in_progress_tasks:
+            owner_str = f"@{t.get('owner', '')}" if t.get('owner') else ""
+            lines.append(f"   {t['id']} {owner_str}  {t['title']}")
+        lines.append("")
+
+    # Blocked
+    if blocked_tasks:
+        lines.append(f"🚧 Blocked ({len(blocked_tasks)}):")
+        for t in blocked_tasks:
+            owner_str = f"@{t.get('owner', '')}" if t.get('owner') else ""
+            lines.append(f"   {t['id']} {owner_str}  {t['title']}")
+        lines.append("")
+
+    # Open issues
+    if open_issues:
+        lines.append(f"🐛 Open issues: {len(open_issues)}")
+        lines.append("")
+
+    # Open inbox
+    if open_inbox:
+        lines.append(f"📥 Inbox items: {len(open_inbox)}")
+        lines.append("")
+
+    # Next tasks
+    if next_task_list:
+        lines.append("🎯 Pick up next:")
+        for i, t in enumerate(next_task_list[:5], 1):
+            pri = f"[{t.get('priority', '').upper()}]" if t.get('priority') else ""
+            due = f"due:{t.get('due', '')}" if t.get('due') else ""
+            owner_str = f"@{t.get('owner', '')}" if t.get('owner') else ""
+            lines.append(f"   {i}. {t['id']} {pri} {owner_str} {due}  {t['title']}")
+        lines.append("")
+
+    # Summary line
+    lines.append(f"💡 {len(active_tasks)} active tasks · {len(ready_tasks)} ready to start")
+    if done_today:
+        lines.append(f"   ✅ {len(done_today)} completed")
+
+    # If nothing at all
+    if not (due_today_tasks or overdue_tasks or in_progress_tasks or blocked_tasks or
+            open_issues or open_inbox or next_task_list):
+        lines.append("All caught up! 🎉")
+
+    click.echo("\n".join(lines))
+
+
 @cli.command("export")
 @click.option("--output", "-o", default=None, help="Write to file instead of stdout.")
 @click.option("--format", "fmt", default="json", type=click.Choice(("json", "csv"), case_sensitive=False),
@@ -2832,6 +2967,7 @@ def milestone_group() -> None:
 @click.option("--status", default=None, type=click.Choice(("planned", "in_progress", "done"), case_sensitive=False),
               help="Filter by milestone status.")
 @click.option("--active", is_flag=True, help="Show only active milestones (not done).")
+@click.option("--upcoming", is_flag=True, help="Show only upcoming milestones (date >= today, not done).")
 @click.option("--sort", "sort_by", default="date",
               type=click.Choice(("date", "created", "status", "title"), case_sensitive=False),
               help="Sort milestones (default: date).")
@@ -2844,13 +2980,18 @@ def milestone_group() -> None:
 @click.option("--json", "json_output", is_flag=True, help="Print structured JSON instead of tabular output.")
 @click.pass_context
 def milestone_list_cmd(ctx: click.Context, epic_ref: str | None, project_ref: str | None,
-                        status: str | None, active: bool, sort_by: str, group_by: str | None,
+                        status: str | None, active: bool, upcoming: bool, sort_by: str, group_by: str | None,
                         limit: int | None, count_only: bool, csv_output: bool, json_output: bool) -> None:
     root = find_repo_root(_cwd_from_context(ctx))
     milestones = list_milestones(root, epic_ref=epic_ref, project_ref=project_ref,
                                   status=status, sort_by=sort_by)
     if active:
         milestones = [m for m in milestones if m.get("status") != "done"]
+    if upcoming:
+        from datetime import date
+        today = date.today().isoformat()
+        milestones = [m for m in milestones
+                      if m.get("date") and m["date"] >= today and m.get("status") != "done"]
     if count_only:
         click.echo(f"{len(milestones)} milestone{'s' if len(milestones) != 1 else ''}")
         return
@@ -2992,6 +3133,7 @@ def milestone_edit(
 @click.option("--since", default=None, help="Show entries since YYYY-MM-DD.")
 @click.option("--project", default=None, help="Filter by project slug.")
 @click.option("--epic", default=None, help="Filter by epic path or slug.")
+@click.option("--compact", is_flag=True, help="Compact single-line output.")
 @click.option("--json", "json_output", is_flag=True, help="Print structured JSON.")
 @click.pass_context
 def activity_command(
@@ -3002,6 +3144,7 @@ def activity_command(
     since: str | None,
     project: str | None,
     epic: str | None,
+    compact: bool,
     json_output: bool,
 ) -> None:
     """Show recent activity across all entities."""
@@ -3029,10 +3172,14 @@ def activity_command(
             "project": "📦", "epic": "🎯", "task": "✅", "issue": "🐛",
             "milestone": "🏁", "inbox": "📥", "spec": "📐", "plan": "📋",
         }.get(e["entity_type"], "📄")
-        note_str = f" — {e['note']}" if e["note"] else ""
-        click.echo(f"  {e['date']}  {type_icon} {e['action']}")
-        click.echo(f"          by {e['actor']} on {e['entity_type']} {e['entity_id']} {e['entity_title']}{note_str}")
-        click.echo()
+        if compact:
+            note_str = f" — {e['note']}" if e["note"] else ""
+            click.echo(f"{e['date']} {type_icon} {e['entity_type']:10s} {e['entity_id']:14s} {e['actor']:10s} {e['action']}{note_str}")
+        else:
+            note_str = f" — {e['note']}" if e["note"] else ""
+            click.echo(f"  {e['date']}  {type_icon} {e['action']}")
+            click.echo(f"          by {e['actor']} on {e['entity_type']} {e['entity_id']} {e['entity_title']}{note_str}")
+            click.echo()
 
 
 @cli.command("search")
