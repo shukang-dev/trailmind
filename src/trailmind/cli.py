@@ -479,6 +479,27 @@ def open_command(ctx: click.Context, entity_ref: str, entity_type: str) -> None:
         raise TrailmindError(f"editor not found: {editor}; set $EDITOR")
 
 
+@cli.command("comment")
+@click.argument("entity_ref")
+@click.argument("text")
+@click.option("--type", "entity_type", default="task",
+              type=click.Choice(("task", "issue"), case_sensitive=False),
+              help="Entity type (default: task).")
+@click.option("--author", required=True, help="Author shortname.")
+@click.pass_context
+def comment_command(ctx: click.Context, entity_ref: str, text: str,
+                     entity_type: str, author: str) -> None:
+    """Add a comment to a task or issue."""
+    root = find_repo_root(_cwd_from_context(ctx))
+    if entity_type == "task":
+        from trailmind.task import comment_task
+        touched = comment_task(root, task_ref=entity_ref, author=author, text=text)
+    else:  # issue
+        from trailmind.issue import comment_issue
+        touched = comment_issue(root, issue_ref=entity_ref, author=author, text=text)
+    _echo_touched(root, [touched])
+
+
 @cli.command("doctor")
 @click.option("--json", "json_output", is_flag=True, help="Print structured JSON instead of text report.")
 @click.pass_context
@@ -497,6 +518,148 @@ def doctor_command(ctx: click.Context, json_output: bool) -> None:
         errors = sum(1 for f in findings if f.severity == "error")
         if errors:
             raise TrailmindError(f"doctor found {errors} error(s)")
+
+
+@cli.command("health")
+@click.option("--json", "json_output", is_flag=True, help="Print structured JSON.")
+@click.pass_context
+def health_command(ctx: click.Context, json_output: bool) -> None:
+    """Quick health check: doctor findings + key stats in one view."""
+    from datetime import date
+    root = find_repo_root(_cwd_from_context(ctx))
+    today = date.today().isoformat()
+
+    # Doctor findings
+    findings = run_doctor(root)
+    errors = [f for f in findings if f.severity == "error"]
+    warnings = [f for f in findings if f.severity == "warning"]
+
+    # Stats
+    all_tasks = list_tasks(root)
+    all_issues = list_issues(root)
+    all_milestones = list_milestones(root)
+
+    active_tasks = [t for t in all_tasks if t.get("status") not in ("done", "wontfix")]
+    done_tasks = [t for t in all_tasks if t.get("status") == "done"]
+    overdue = [t for t in active_tasks if t.get("due") and t["due"] < today]
+    blocked = [t for t in active_tasks if t.get("status") == "blocked"]
+    unassigned = [t for t in active_tasks if not t.get("owner")]
+
+    open_issues = [i for i in all_issues if i.get("status") not in ("done", "wontfix")]
+    critical_issues = [i for i in open_issues if i.get("severity") == "critical"]
+
+    upcoming_milestones = sorted(
+        [m for m in all_milestones if m.get("date") and m["date"] >= today and m.get("status") != "done"],
+        key=lambda m: m.get("date", "")
+    )[:3]
+
+    # Health score
+    score = 100
+    score -= len(errors) * 15
+    score -= len(warnings) * 5
+    score -= len(overdue) * 3
+    score -= len(blocked) * 2
+    score -= len(unassigned) * 1
+    score -= len(critical_issues) * 10
+    score = max(0, min(100, score))
+
+    if score >= 80:
+        health_emoji = "🟢"
+        health_label = "Good"
+    elif score >= 60:
+        health_emoji = "🟡"
+        health_label = "Fair"
+    elif score >= 40:
+        health_emoji = "🟠"
+        health_label = "Needs attention"
+    else:
+        health_emoji = "🔴"
+        health_label = "Critical"
+
+    if json_output:
+        data = {
+            "score": score,
+            "status": health_label.lower(),
+            "doctor": {
+                "errors": len(errors),
+                "warnings": len(warnings),
+            },
+            "tasks": {
+                "total": len(all_tasks),
+                "active": len(active_tasks),
+                "done": len(done_tasks),
+                "overdue": len(overdue),
+                "blocked": len(blocked),
+                "unassigned": len(unassigned),
+            },
+            "issues": {
+                "total": len(all_issues),
+                "open": len(open_issues),
+                "critical": len(critical_issues),
+            },
+            "milestones": {
+                "upcoming": len(upcoming_milestones),
+            },
+        }
+        click.echo(json.dumps(data, ensure_ascii=False, indent=2))
+        return
+
+    lines = []
+    lines.append(f"{health_emoji} Health Score: {score}/100 ({health_label})")
+    lines.append("")
+
+    # Doctor
+    lines.append(f"🩺 Doctor: {len(errors)} errors, {len(warnings)} warnings")
+    if errors:
+        for f in errors[:3]:
+            lines.append(f"  ❌ {f.message}")
+    if warnings:
+        for f in warnings[:3]:
+            lines.append(f"  ⚠️  {f.message}")
+    lines.append("")
+
+    # Tasks
+    pct = round(len(done_tasks) / len(all_tasks) * 100) if all_tasks else 0
+    lines.append(f"📋 Tasks: {len(done_tasks)}/{len(all_tasks)} done ({pct}%)")
+    if overdue:
+        lines.append(f"  ⚠️  {len(overdue)} overdue")
+    if blocked:
+        lines.append(f"  🚧 {len(blocked)} blocked")
+    if unassigned:
+        lines.append(f"  👤 {len(unassigned)} unassigned")
+    lines.append("")
+
+    # Issues
+    lines.append(f"🐛 Issues: {len(open_issues)} open")
+    if critical_issues:
+        lines.append(f"  🔥 {len(critical_issues)} critical")
+    lines.append("")
+
+    # Milestones
+    if upcoming_milestones:
+        lines.append("🏁 Upcoming:")
+        for m in upcoming_milestones:
+            lines.append(f"  {m['date']}  {m['title']}")
+        lines.append("")
+
+    # Recommendations
+    recs = []
+    if errors:
+        recs.append("Fix doctor errors")
+    if overdue:
+        recs.append("Address overdue tasks")
+    if blocked:
+        recs.append("Unblock blocked tasks")
+    if unassigned:
+        recs.append("Assign unassigned tasks")
+    if critical_issues:
+        recs.append("Triage critical issues")
+    if recs:
+        lines.append("💡 Recommendations:")
+        for r in recs:
+            lines.append(f"  - {r}")
+
+    click.echo("\n".join(lines))
 
 
 @cli.command("summary")
@@ -1644,6 +1807,185 @@ def velocity_command(ctx: click.Context, project: str | None, epic: str | None,
             delta = round((recent - prev) / prev * 100)
             arrow = "↑" if delta > 0 else ("↓" if delta < 0 else "→")
             lines.append(f"📈 Trend: {arrow} {abs(delta)}% vs last week")
+
+    click.echo("\n".join(lines))
+
+
+@cli.command("sprint")
+@click.option("--project", default=None, help="Filter by project.")
+@click.option("--epic", default=None, help="Filter by epic.")
+@click.option("--owner", default=None, help="Filter by owner.")
+@click.option("--start", "sprint_start", default=None, help="Sprint start date YYYY-MM-DD (default: today).")
+@click.option("--length", default=14, show_default=True, type=click.IntRange(min=1, max=90),
+              help="Sprint length in days.")
+@click.option("--json", "json_output", is_flag=True, help="Print structured JSON.")
+@click.pass_context
+def sprint_command(ctx: click.Context, project: str | None, epic: str | None,
+                    owner: str | None, sprint_start: str | None, length: int,
+                    json_output: bool) -> None:
+    """Sprint planning view: tasks due within sprint window, capacity, and suggestions."""
+    from datetime import date, timedelta
+    from collections import defaultdict
+    root = find_repo_root(_cwd_from_context(ctx))
+
+    # Determine sprint window
+    if sprint_start:
+        start = date.fromisoformat(sprint_start)
+    else:
+        start = date.today()
+    end = start + timedelta(days=length - 1)
+    start_str = start.isoformat()
+    end_str = end.isoformat()
+    today = date.today().isoformat()
+
+    # Get all tasks
+    all_tasks = list_tasks(root, epic_ref=epic, project_ref=project, owner=owner)
+    active = [t for t in all_tasks if t.get("status") not in ("done", "wontfix")]
+
+    # Tasks due within sprint
+    in_sprint = [t for t in active
+                 if t.get("due") and start_str <= t["due"] <= end_str]
+
+    # Tasks already in progress
+    in_progress = [t for t in in_sprint if t.get("status") == "in_progress"]
+
+    # Tasks ready to start
+    ready = [t for t in in_sprint if t.get("status") in ("ready", "created")]
+
+    # Blocked tasks
+    blocked = [t for t in in_sprint if t.get("status") == "blocked"]
+
+    # Overdue (before sprint start)
+    overdue = [t for t in active if t.get("due") and t["due"] < start_str]
+
+    # By owner breakdown
+    by_owner: dict[str, list] = defaultdict(list)
+    for t in in_sprint:
+        o = t.get("owner") or "unassigned"
+        by_owner[o].append(t)
+
+    # Capacity estimate (assume ~1 task per person per 2 days as rough)
+    working_days = length
+    capacity_per_person = max(1, working_days // 2)
+    total_capacity = len(by_owner) * capacity_per_person
+
+    # Suggestions: ready tasks not yet in sprint but could be pulled in
+    not_in_sprint_ready = [t for t in active
+                           if t.get("status") in ("ready", "created")
+                           and (not t.get("due") or t["due"] > end_str)]
+
+    if json_output:
+        data = {
+            "sprint": {"start": start_str, "end": end_str, "length_days": length},
+            "tasks": {
+                "in_sprint": len(in_sprint),
+                "in_progress": [{"id": t["id"], "title": t["title"], "owner": t.get("owner", ""),
+                                 "due": t.get("due", ""), "priority": t.get("priority", "")}
+                                for t in in_progress],
+                "ready": [{"id": t["id"], "title": t["title"], "owner": t.get("owner", ""),
+                           "due": t.get("due", ""), "priority": t.get("priority", "")}
+                          for t in ready],
+                "blocked": [{"id": t["id"], "title": t["title"], "owner": t.get("owner", "")}
+                            for t in blocked],
+                "overdue": [{"id": t["id"], "title": t["title"], "owner": t.get("owner", ""),
+                             "due": t.get("due", "")} for t in overdue],
+            },
+            "by_owner": {
+                owner: {"count": len(tasks), "capacity": capacity_per_person}
+                for owner, tasks in sorted(by_owner.items())
+            },
+            "capacity": {
+                "estimated": total_capacity,
+                "committed": len(in_sprint),
+                "available": max(0, total_capacity - len(in_sprint)),
+            },
+            "suggestions": {
+                "pull_in": [{"id": t["id"], "title": t["title"], "priority": t.get("priority", "")}
+                            for t in not_in_sprint_ready[:5]],
+            },
+        }
+        click.echo(json.dumps(data, ensure_ascii=False, indent=2))
+        return
+
+    lines = []
+    lines.append(f"🏃 Sprint: {start_str} → {end_str} ({length} days)")
+    lines.append("")
+
+    # Summary
+    lines.append(f"📊 Sprint Summary")
+    lines.append(f"   Tasks in sprint: {len(in_sprint)}")
+    lines.append(f"   In progress: {len(in_progress)}")
+    lines.append(f"   Ready: {len(ready)}")
+    if blocked:
+        lines.append(f"   Blocked: {len(blocked)}")
+    if overdue:
+        lines.append(f"   Overdue (carry-in): {len(overdue)}")
+    lines.append("")
+
+    # Capacity
+    lines.append(f"👥 Capacity ({len(by_owner)} owners, ~{capacity_per_person} tasks/person)")
+    lines.append(f"   Estimated capacity: {total_capacity} tasks")
+    lines.append(f"   Committed: {len(in_sprint)}")
+    avail = max(0, total_capacity - len(in_sprint))
+    if avail > 0:
+        lines.append(f"   Available: {avail} slots ↓")
+    elif avail == 0:
+        lines.append(f"   At capacity ✅")
+    else:
+        lines.append(f"   Overcommitted by {-avail} tasks ⚠️")
+    lines.append("")
+
+    # By owner
+    if by_owner:
+        lines.append("By owner:")
+        for o in sorted(by_owner.keys()):
+            tasks = by_owner[o]
+            done = len([t for t in tasks if t.get("status") == "done"])
+            lines.append(f"  @{o}: {len(tasks)} tasks")
+
+    # In progress
+    if in_progress:
+        lines.append("")
+        lines.append(f"🔧 In Progress ({len(in_progress)}):")
+        for t in in_progress:
+            due = f" due:{t.get('due', '')}" if t.get('due') else ""
+            owner = f" @{t.get('owner', '')}" if t.get('owner') else ""
+            lines.append(f"  - {t['id']}{owner}{due}  {t['title']}")
+
+    # Ready to start
+    if ready:
+        lines.append("")
+        lines.append(f"⏳ Ready to Start ({len(ready)}):")
+        for t in ready:
+            pri = f"[{t.get('priority', '').upper()}]" if t.get('priority') else ""
+            due = f" due:{t.get('due', '')}" if t.get('due') else ""
+            owner = f" @{t.get('owner', '')}" if t.get('owner') else ""
+            lines.append(f"  - {t['id']} {pri}{owner}{due}  {t['title']}")
+
+    # Blocked
+    if blocked:
+        lines.append("")
+        lines.append(f"🚧 Blocked ({len(blocked)}):")
+        for t in blocked:
+            owner = f" @{t.get('owner', '')}" if t.get('owner') else ""
+            lines.append(f"  - {t['id']}{owner}  {t['title']}")
+
+    # Overdue
+    if overdue:
+        lines.append("")
+        lines.append(f"⚠️  Overdue / Carry-in ({len(overdue)}):")
+        for t in overdue:
+            pri = f"[{t.get('priority', '').upper()}]" if t.get('priority') else ""
+            owner = f" @{t.get('owner', '')}" if t.get('owner') else ""
+            lines.append(f"  - {t['id']} {pri}{owner} due:{t.get('due', '')}  {t['title']}")
+
+    # Suggestions
+    if not_in_sprint_ready and avail > 0:
+        lines.append("")
+        lines.append(f"💡 Suggest to pull in ({min(avail, len(not_in_sprint_ready))}):")
+        for t in not_in_sprint_ready[:avail]:
+            pri = f"[{t.get('priority', '').upper()}]" if t.get('priority') else ""
+            lines.append(f"  + {t['id']} {pri} {t['title']}")
 
     click.echo("\n".join(lines))
 
@@ -3140,6 +3482,7 @@ def task_list_cmd(
               help="Task priority level.")
 @click.option("--due", default=None, help="Due date (YYYY-MM-DD).")
 @click.option("--tags", default=None, help="Comma-separated tags.")
+@click.option("--dry-run", is_flag=True, help="Preview without creating.")
 @click.pass_context
 def task_add(
     ctx: click.Context,
@@ -3156,9 +3499,18 @@ def task_add(
     priority: str,
     due: str | None,
     tags: str | None,
+    dry_run: bool,
 ) -> None:
     root = find_repo_root(_cwd_from_context(ctx))
     tag_list = split_csv(tags) if tags else []
+    if dry_run:
+        click.echo(f"[DRY RUN] Would create task in {epic}:")
+        click.echo(f"  Title: {title}")
+        click.echo(f"  Filer: {filer}, Owner: {owner}")
+        click.echo(f"  Priority: {priority}, Due: {due or '(none)'}")
+        if tag_list:
+            click.echo(f"  Tags: {', '.join(tag_list)}")
+        return
     touched = add_task(
         root,
         epic=epic,
@@ -3594,6 +3946,7 @@ def task_clone(
 @click.option("--note", default=None)
 @click.option("--from-file", "from_file", default=None,
               help="Read task IDs from file (one per line), or '-' for stdin.")
+@click.option("--dry-run", is_flag=True, help="Preview changes without applying them.")
 @click.pass_context
 def task_bulk_status(
     ctx: click.Context,
@@ -3602,6 +3955,7 @@ def task_bulk_status(
     actor: str,
     note: str | None,
     from_file: str | None,
+    dry_run: bool,
 ) -> None:
     """Bulk-update task status (e.g. T-001 T-002 ready, or --from-file ids.txt)."""
     root = find_repo_root(_cwd_from_context(ctx))
@@ -3610,6 +3964,11 @@ def task_bulk_status(
         refs.extend(_read_ids_from_file(from_file))
     if not refs:
         raise TrailmindError("no task IDs provided (pass as args or use --from-file)")
+    if dry_run:
+        click.echo(f"[DRY RUN] Would set status to {status!r} for {len(refs)} task(s):")
+        for r in refs:
+            click.echo(f"  - {r}")
+        return
     touched = []
     for task_ref in refs:
         try:
@@ -3634,6 +3993,7 @@ def task_bulk_status(
 @click.option("--note", default=None)
 @click.option("--from-file", "from_file", default=None,
               help="Read task IDs from file (one per line), or '-' for stdin.")
+@click.option("--dry-run", is_flag=True, help="Preview changes without applying them.")
 @click.pass_context
 def task_bulk_assign(
     ctx: click.Context,
@@ -3642,6 +4002,7 @@ def task_bulk_assign(
     actor: str,
     note: str | None,
     from_file: str | None,
+    dry_run: bool,
 ) -> None:
     """Bulk-assign tasks to an owner (e.g. T-001 T-002 alice, or --from-file ids.txt)."""
     root = find_repo_root(_cwd_from_context(ctx))
@@ -3650,6 +4011,11 @@ def task_bulk_assign(
         refs.extend(_read_ids_from_file(from_file))
     if not refs:
         raise TrailmindError("no task IDs provided (pass as args or use --from-file)")
+    if dry_run:
+        click.echo(f"[DRY RUN] Would assign {len(refs)} task(s) to @{owner}:")
+        for r in refs:
+            click.echo(f"  - {r}")
+        return
     touched = []
     for task_ref in refs:
         try:
@@ -3674,6 +4040,7 @@ def task_bulk_assign(
 @click.option("--note", default=None)
 @click.option("--from-file", "from_file", default=None,
               help="Read task IDs from file (one per line), or '-' for stdin.")
+@click.option("--dry-run", is_flag=True, help="Preview changes without applying them.")
 @click.pass_context
 def task_bulk_due(
     ctx: click.Context,
@@ -3682,6 +4049,7 @@ def task_bulk_due(
     actor: str,
     note: str | None,
     from_file: str | None,
+    dry_run: bool,
 ) -> None:
     """Bulk-set due date for tasks (e.g. T-001 T-002 2026-08-01, or --from-file ids.txt)."""
     root = find_repo_root(_cwd_from_context(ctx))
@@ -3690,6 +4058,11 @@ def task_bulk_due(
         refs.extend(_read_ids_from_file(from_file))
     if not refs:
         raise TrailmindError("no task IDs provided (pass as args or use --from-file)")
+    if dry_run:
+        click.echo(f"[DRY RUN] Would set due date to {due} for {len(refs)} task(s):")
+        for r in refs:
+            click.echo(f"  - {r}")
+        return
     touched = []
     for task_ref in refs:
         try:
@@ -4067,6 +4440,7 @@ def issue_list_cmd(
 @click.option("--description", default="TBD", help="Issue description (default: TBD).")
 @click.option("--severity", required=True)
 @click.option("--linked-tasks", default=None, help="Comma-separated linked task IDs or refs.")
+@click.option("--dry-run", is_flag=True, help="Preview without creating.")
 @click.pass_context
 def issue_add(
     ctx: click.Context,
@@ -4077,8 +4451,17 @@ def issue_add(
     description: str,
     severity: str,
     linked_tasks: str | None,
+    dry_run: bool,
 ) -> None:
     root = find_repo_root(_cwd_from_context(ctx))
+    if dry_run:
+        click.echo(f"[DRY RUN] Would create issue in {epic}:")
+        click.echo(f"  Title: {title}")
+        click.echo(f"  Filer: {filer}, Owner: {owner or filer}")
+        click.echo(f"  Severity: {severity}")
+        if linked_tasks:
+            click.echo(f"  Linked tasks: {linked_tasks}")
+        return
     linked = split_csv(linked_tasks) if linked_tasks else None
     touched = add_issue(root, epic=epic, filer=filer, owner=owner, title=title,
                          description=description, severity=severity, linked_tasks=linked)
@@ -4269,6 +4652,7 @@ def issue_set_severity(
 @click.option("--note", default=None)
 @click.option("--from-file", "from_file", default=None,
               help="Read issue IDs from file (one per line), or '-' for stdin.")
+@click.option("--dry-run", is_flag=True, help="Preview changes without applying them.")
 @click.pass_context
 def issue_bulk_status(
     ctx: click.Context,
@@ -4277,6 +4661,7 @@ def issue_bulk_status(
     actor: str,
     note: str | None,
     from_file: str | None,
+    dry_run: bool,
 ) -> None:
     """Bulk-update issue status (e.g. I-001 I-002 done, or --from-file ids.txt)."""
     root = find_repo_root(_cwd_from_context(ctx))
@@ -4285,6 +4670,11 @@ def issue_bulk_status(
         refs.extend(_read_ids_from_file(from_file))
     if not refs:
         raise TrailmindError("no issue IDs provided (pass as args or use --from-file)")
+    if dry_run:
+        click.echo(f"[DRY RUN] Would set status to {status!r} for {len(refs)} issue(s):")
+        for r in refs:
+            click.echo(f"  - {r}")
+        return
     root = find_repo_root(_cwd_from_context(ctx))
     touched = []
     for issue_ref in refs:
@@ -4318,6 +4708,7 @@ def issue_bulk_status(
 @click.option("--note", default=None)
 @click.option("--from-file", "from_file", default=None,
               help="Read issue IDs from file (one per line), or '-' for stdin.")
+@click.option("--dry-run", is_flag=True, help="Preview changes without applying them.")
 @click.pass_context
 def issue_bulk_assign(
     ctx: click.Context,
@@ -4326,9 +4717,20 @@ def issue_bulk_assign(
     actor: str,
     note: str | None,
     from_file: str | None,
+    dry_run: bool,
 ) -> None:
     """Bulk-assign issues to an owner (e.g. I-001 I-002 alice, or --from-file ids.txt)."""
     root = find_repo_root(_cwd_from_context(ctx))
+    refs = list(issue_refs)
+    if from_file:
+        refs.extend(_read_ids_from_file(from_file))
+    if not refs:
+        raise TrailmindError("no issue IDs provided (pass as args or use --from-file)")
+    if dry_run:
+        click.echo(f"[DRY RUN] Would assign {len(refs)} issue(s) to @{owner}:")
+        for r in refs:
+            click.echo(f"  - {r}")
+        return
     refs = list(issue_refs)
     if from_file:
         refs.extend(_read_ids_from_file(from_file))
