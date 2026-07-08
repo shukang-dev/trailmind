@@ -5056,6 +5056,51 @@ def task_clone(
     _echo_touched(root, [touched])
 
 
+@task_group.command("bulk-clone")
+@click.argument("task_refs", nargs=-1)
+@click.option("--to-epic", "target_epic", default=None, help="Target epic (defaults to source epic).")
+@click.option("--owner", default=None, help="New owner (defaults to actor).")
+@click.option("--actor", required=True)
+@click.option("--note", default=None)
+@click.option("--from-file", "from_file", default=None,
+              help="Read task IDs from file (one per line), or '-' for stdin.")
+@click.option("--dry-run", is_flag=True, help="Preview without applying.")
+@click.pass_context
+def task_bulk_clone(
+    ctx: click.Context,
+    task_refs: tuple[str, ...],
+    target_epic: str | None,
+    owner: str | None,
+    actor: str,
+    note: str | None,
+    from_file: str | None,
+    dry_run: bool,
+) -> None:
+    """Bulk-clone tasks (e.g. T-001 T-002, or --from-file ids.txt)."""
+    root = find_repo_root(_cwd_from_context(ctx))
+    refs = list(task_refs)
+    if from_file:
+        refs.extend(_read_ids_from_file(from_file))
+    if not refs:
+        raise TrailmindError("no task IDs provided (pass as args or use --from-file)")
+    if dry_run:
+        target = target_epic or "(same epic)"
+        click.echo(f"[DRY RUN] Would clone {len(refs)} task(s) to {target}:")
+        for r in refs:
+            click.echo(f"  - {r}")
+        return
+    touched = []
+    for task_ref in refs:
+        try:
+            path = clone_task(root, task_ref=task_ref, actor=actor,
+                              target_epic=target_epic, owner=owner, note=note)
+            touched.append(path)
+        except Exception as exc:
+            click.echo(f"  ⚠ {task_ref}: {exc}", err=True)
+    if touched:
+        _echo_touched(root, touched)
+
+
 @task_group.command("bulk-status")
 @click.argument("task_refs", nargs=-1)
 @click.argument("status")
@@ -6248,6 +6293,51 @@ def issue_clone(
         note=note,
     )
     _echo_touched(root, [touched])
+
+
+@issue_group.command("bulk-clone")
+@click.argument("issue_refs", nargs=-1)
+@click.option("--to-epic", "target_epic", default=None, help="Target epic (defaults to source epic).")
+@click.option("--owner", default=None, help="New owner (defaults to actor).")
+@click.option("--actor", required=True)
+@click.option("--note", default=None)
+@click.option("--from-file", "from_file", default=None,
+              help="Read issue IDs from file (one per line), or '-' for stdin.")
+@click.option("--dry-run", is_flag=True, help="Preview without applying.")
+@click.pass_context
+def issue_bulk_clone(
+    ctx: click.Context,
+    issue_refs: tuple[str, ...],
+    target_epic: str | None,
+    owner: str | None,
+    actor: str,
+    note: str | None,
+    from_file: str | None,
+    dry_run: bool,
+) -> None:
+    """Bulk-clone issues (e.g. I-001 I-002, or --from-file ids.txt)."""
+    root = find_repo_root(_cwd_from_context(ctx))
+    refs = list(issue_refs)
+    if from_file:
+        refs.extend(_read_ids_from_file(from_file))
+    if not refs:
+        raise TrailmindError("no issue IDs provided (pass as args or use --from-file)")
+    if dry_run:
+        target = target_epic or "(same epic)"
+        click.echo(f"[DRY RUN] Would clone {len(refs)} issue(s) to {target}:")
+        for r in refs:
+            click.echo(f"  - {r}")
+        return
+    touched = []
+    for issue_ref in refs:
+        try:
+            path = clone_issue(root, issue_ref=issue_ref, actor=actor,
+                               target_epic=target_epic, owner=owner, note=note)
+            touched.append(path)
+        except Exception as exc:
+            click.echo(f"  ⚠ {issue_ref}: {exc}", err=True)
+    if touched:
+        _echo_touched(root, touched)
 
 
 @issue_group.command("show")
