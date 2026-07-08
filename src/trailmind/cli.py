@@ -1464,6 +1464,98 @@ def export_command(ctx: click.Context, output: str | None, fmt: str,
         click.echo(rendered)
 
 
+@cli.command("burndown")
+@click.option("--project", default=None, help="Filter by project.")
+@click.option("--epic", default=None, help="Filter by epic.")
+@click.option("--owner", default=None, help="Filter by owner.")
+@click.option("--start", default=None, help="Start date YYYY-MM-DD (default: earliest task created).")
+@click.option("--end", default=None, help="End date YYYY-MM-DD (default: today).")
+@click.option("--json", "json_output", is_flag=True, help="Print structured JSON.")
+@click.pass_context
+def burndown_command(ctx: click.Context, project: str | None, epic: str | None,
+                      owner: str | None, start: str | None, end: str | None,
+                      json_output: bool) -> None:
+    """Generate burndown chart data (remaining tasks over time)."""
+    from datetime import date, timedelta
+    root = find_repo_root(_cwd_from_context(ctx))
+    today = date.today()
+
+    all_tasks = list_tasks(root, epic_ref=epic, project_ref=project, owner=owner)
+
+    if not all_tasks:
+        if json_output:
+            click.echo("[]")
+        else:
+            click.echo("No tasks found.")
+        return
+
+    # Determine date range
+    created_dates = [t.get("created") for t in all_tasks if t.get("created")]
+    if start:
+        start_date = date.fromisoformat(start)
+    elif created_dates:
+        start_date = date.fromisoformat(min(created_dates))
+    else:
+        start_date = today - timedelta(days=30)
+
+    if end:
+        end_date = date.fromisoformat(end)
+    else:
+        end_date = today
+
+    # Generate daily data points
+    data_points = []
+    current = start_date
+    while current <= end_date:
+        current_str = current.isoformat()
+        # Tasks created by this date
+        total_created = len([t for t in all_tasks
+                             if t.get("created") and t["created"] <= current_str])
+        # Tasks done by this date (approximate: done status)
+        # We don't have completed date, so use status == done as "done by now"
+        # For historical accuracy, we'd need activity log; this is a snapshot
+        done_count = len([t for t in all_tasks if t.get("status") == "done"])
+        remaining = total_created - done_count if current == end_date else total_created
+
+        data_points.append({
+            "date": current_str,
+            "total_created": total_created,
+            "remaining": remaining,
+            "done": done_count,
+        })
+        current += timedelta(days=1)
+
+    if json_output:
+        click.echo(json.dumps(data_points, ensure_ascii=False, indent=2))
+        return
+
+    # Text output: ASCII chart
+    lines = []
+    lines.append(f"📉 Burndown: {start_date.isoformat()} → {end_date.isoformat()}")
+    lines.append(f"   Tasks: {len(all_tasks)} total")
+    lines.append("")
+
+    max_remaining = max(d["remaining"] for d in data_points) if data_points else 1
+    chart_width = 40
+
+    # Show every Nth day to fit
+    step = max(1, len(data_points) // 15)
+    shown = data_points[::step]
+    if shown[-1] != data_points[-1]:
+        shown.append(data_points[-1])
+
+    for d in shown:
+        bar_len = int(d["remaining"] / max(max_remaining, 1) * chart_width)
+        bar = "█" * bar_len
+        lines.append(f"  {d['date']}  {bar} {d['remaining']}")
+
+    lines.append("")
+    lines.append(f"💡 Start: {data_points[0]['remaining'] if data_points else 0} tasks")
+    lines.append(f"💡 End:   {data_points[-1]['remaining'] if data_points else 0} tasks remaining")
+
+    click.echo("\n".join(lines))
+
+
 def _format_export_csv(data: dict) -> str:
     """Format exported data as CSV with separate sections for tasks and issues."""
     import csv
@@ -1580,6 +1672,8 @@ def inbox_add(
 @click.option("--sort", "sort_by", default="created",
               type=click.Choice(("created", "title", "status"), case_sensitive=False),
               help="Sort inbox items (default: created).")
+@click.option("--created-since", default=None, help="Filter inbox items created on or after YYYY-MM-DD.")
+@click.option("--created-before", default=None, help="Filter inbox items created before YYYY-MM-DD.")
 @click.option("--limit", default=None, type=click.IntRange(min=1), help="Limit number of results.")
 @click.option("--compact", is_flag=True, help="Compact single-line output.")
 @click.option("--ids", "ids_only", is_flag=True, help="Output only entity IDs (one per line, for piping).")
@@ -1588,7 +1682,9 @@ def inbox_add(
 @click.option("--json", "json_output", is_flag=True, help="Print structured JSON instead of Markdown.")
 @click.pass_context
 def inbox_list(ctx: click.Context, project_slug: str | None, epic_ref: str | None,
-               status: str | None, group_by: str | None, sort_by: str, limit: int | None,
+               status: str | None, group_by: str | None, sort_by: str,
+               created_since: str | None, created_before: str | None,
+               limit: int | None,
                compact: bool, ids_only: bool, count_only: bool, csv_output: bool, json_output: bool) -> None:
     root = find_repo_root(_cwd_from_context(ctx))
     items = list_inbox_items(root, project=project_slug, epic=epic_ref, status=status)
@@ -1598,6 +1694,10 @@ def inbox_list(ctx: click.Context, project_slug: str | None, epic_ref: str | Non
     elif sort_by == "status":
         items.sort(key=lambda i: (0 if i.status == "open" else 1, i.title.lower()))
     # else: created (default order from list_inbox_items)
+    if created_since:
+        items = [i for i in items if i.created and i.created >= created_since]
+    if created_before:
+        items = [i for i in items if i.created and i.created < created_before]
     if ids_only:
         for item in items:
             click.echo(item.item_id)
@@ -2495,6 +2595,8 @@ def task_group() -> None:
 @click.option("--due-within", "due_within_days", default=None, type=click.IntRange(min=1),
               help="Show tasks due within N days (not done/wontfix, not overdue).")
 @click.option("--due-today", is_flag=True, help="Show tasks due today (shortcut for --due-within 0).")
+@click.option("--created-since", default=None, help="Filter tasks created on or after YYYY-MM-DD.")
+@click.option("--created-before", default=None, help="Filter tasks created before YYYY-MM-DD.")
 @click.option("--active", is_flag=True, help="Show only active tasks (not done or wontfix).")
 @click.option("--blocked", is_flag=True, help="Show only blocked tasks.")
 @click.option("--ready-only", is_flag=True, help="Show only ready tasks (ready to start).")
@@ -2535,6 +2637,8 @@ def task_list_cmd(
     overdue: bool,
     due_within_days: int | None,
     due_today: bool,
+    created_since: str | None,
+    created_before: str | None,
     active: bool,
     blocked: bool,
     ready_only: bool,
@@ -2598,6 +2702,10 @@ def task_list_cmd(
         tasks = [t for t in tasks if not t.get("tags")]
     if unassigned:
         tasks = [t for t in tasks if not t.get("owner")]
+    if created_since:
+        tasks = [t for t in tasks if t.get("created") and t["created"] >= created_since]
+    if created_before:
+        tasks = [t for t in tasks if t.get("created") and t["created"] < created_before]
     if ids_only:
         for t in tasks:
             click.echo(t.get("id", ""))
@@ -3404,6 +3512,8 @@ def issue_group() -> None:
 @click.option("--unassigned", is_flag=True, help="Show only issues without an owner.")
 @click.option("--has-linked-tasks", is_flag=True, help="Show only issues that have linked tasks.")
 @click.option("--no-linked-tasks", is_flag=True, help="Show only issues without linked tasks.")
+@click.option("--created-since", default=None, help="Filter issues created on or after YYYY-MM-DD.")
+@click.option("--created-before", default=None, help="Filter issues created before YYYY-MM-DD.")
 @click.option("--sort", "sort_by", default="created",
               type=click.Choice(("created", "severity", "status", "title"), case_sensitive=False),
               help="Sort issues (default: created).")
@@ -3428,6 +3538,8 @@ def issue_list_cmd(
     unassigned: bool,
     has_linked_tasks: bool,
     no_linked_tasks: bool,
+    created_since: str | None,
+    created_before: str | None,
     sort_by: str,
     group_by: str | None,
     compact: bool,
@@ -3448,6 +3560,10 @@ def issue_list_cmd(
         issues = [i for i in issues if i.get("linked_tasks")]
     if no_linked_tasks:
         issues = [i for i in issues if not i.get("linked_tasks")]
+    if created_since:
+        issues = [i for i in issues if i.get("created") and i["created"] >= created_since]
+    if created_before:
+        issues = [i for i in issues if i.get("created") and i["created"] < created_before]
     if ids_only:
         for i in issues:
             click.echo(i.get("id", ""))

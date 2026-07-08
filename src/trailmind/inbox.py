@@ -21,6 +21,7 @@ class InboxItem:
     item_id: str
     title: str
     status: str
+    created: str = ""
 
 
 def _parse_inbox_stem(stem: str) -> re.Match[str] | None:
@@ -178,6 +179,7 @@ def list_inbox_items(
             item_id=str(frontmatter.get("id") or path.stem),
             title=str(frontmatter.get("title") or path.stem),
             status=str(frontmatter.get("status") or "open"),
+            created=str(frontmatter.get("created") or ""),
         )
         if status and item.status != status:
             continue
@@ -203,6 +205,7 @@ def open_inbox_items_under(scope_path: Path) -> list[InboxItem]:
                 item_id=str(frontmatter.get("id") or path.stem),
                 title=str(frontmatter.get("title") or path.stem),
                 status=status,
+                created=str(frontmatter.get("created") or ""),
             )
         )
     return items
