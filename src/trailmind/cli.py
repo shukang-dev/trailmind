@@ -1559,8 +1559,12 @@ def task_group() -> None:
 @click.option("--no-due", "has_due", flag_value=False,
               help="Show only tasks without a due date.")
 @click.option("--tag", default=None, help="Filter by tag (case-insensitive substring match).")
+@click.option("--no-tags", is_flag=True, help="Show only tasks without any tags.")
 @click.option("--has-deliverables", is_flag=True, help="Show only tasks that have deliverables defined.")
+@click.option("--no-deliverables", is_flag=True, help="Show only tasks without deliverables.")
 @click.option("--has-deps", is_flag=True, help="Show only tasks that have dependencies.")
+@click.option("--no-deps", is_flag=True, help="Show only tasks without dependencies.")
+@click.option("--unassigned", is_flag=True, help="Show only tasks without an owner.")
 @click.option("--sort", "sort_by", default="created",
               type=click.Choice(("created", "priority", "due", "status", "title"), case_sensitive=False),
               help="Sort tasks (default: created).")
@@ -1591,8 +1595,12 @@ def task_list_cmd(
     in_progress_only: bool,
     has_due: bool | None,
     tag: str | None,
+    no_tags: bool,
     has_deliverables: bool,
+    no_deliverables: bool,
     has_deps: bool,
+    no_deps: bool,
+    unassigned: bool,
     sort_by: str,
     group_by: str | None,
     compact: bool,
@@ -1633,8 +1641,16 @@ def task_list_cmd(
         tasks = [t for t in tasks if t.get("status") == "in_progress"]
     if has_deliverables:
         tasks = [t for t in tasks if t.get("deliverables")]
+    if no_deliverables:
+        tasks = [t for t in tasks if not t.get("deliverables")]
     if has_deps:
         tasks = [t for t in tasks if t.get("depends_on") or t.get("soft_depends_on")]
+    if no_deps:
+        tasks = [t for t in tasks if not t.get("depends_on") and not t.get("soft_depends_on")]
+    if no_tags:
+        tasks = [t for t in tasks if not t.get("tags")]
+    if unassigned:
+        tasks = [t for t in tasks if not t.get("owner")]
     if count_only:
         click.echo(f"{len(tasks)} task{'s' if len(tasks) != 1 else ''}")
         return
@@ -2409,6 +2425,7 @@ def issue_group() -> None:
 @click.option("--severity", default=None, type=click.Choice(ISSUE_SEVERITIES, case_sensitive=False),
               help="Filter by severity.")
 @click.option("--owner", default=None, help="Filter by owner shortname.")
+@click.option("--unassigned", is_flag=True, help="Show only issues without an owner.")
 @click.option("--sort", "sort_by", default="created",
               type=click.Choice(("created", "severity", "status", "title"), case_sensitive=False),
               help="Sort issues (default: created).")
@@ -2429,6 +2446,7 @@ def issue_list_cmd(
     active: bool,
     severity: str | None,
     owner: str | None,
+    unassigned: bool,
     sort_by: str,
     group_by: str | None,
     compact: bool,
@@ -2442,6 +2460,8 @@ def issue_list_cmd(
                           status=status, severity=severity, owner=owner, sort_by=sort_by)
     if active:
         issues = [i for i in issues if i.get("status") not in ("done", "wontfix")]
+    if unassigned:
+        issues = [i for i in issues if not i.get("owner")]
     if count_only:
         click.echo(f"{len(issues)} issue{'s' if len(issues) != 1 else ''}")
         return
