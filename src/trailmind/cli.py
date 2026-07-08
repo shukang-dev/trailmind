@@ -769,11 +769,14 @@ def spec_init(ctx: click.Context, epic_ref: str, title: str, author: str, scope:
 
 @spec_group.command("list")
 @click.option("--epic", "epic_ref", default=None)
+@click.option("--project", "project_ref", default=None, help="Filter by project slug.")
+@click.option("--status", default=None, help="Filter by spec status.")
 @click.option("--json", "json_output", is_flag=True)
 @click.pass_context
-def spec_list(ctx: click.Context, epic_ref: str | None, json_output: bool) -> None:
+def spec_list(ctx: click.Context, epic_ref: str | None, project_ref: str | None,
+              status: str | None, json_output: bool) -> None:
     root = find_repo_root(_cwd_from_context(ctx))
-    specs = list_specs(root, epic_ref=epic_ref)
+    specs = list_specs(root, epic_ref=epic_ref, project_ref=project_ref, status=status)
     if json_output:
         data = [
             {
@@ -863,11 +866,14 @@ def plan_init_cmd(ctx: click.Context, epic_ref: str, title: str, author: str, sp
 
 @plan_group.command("list")
 @click.option("--epic", "epic_ref", default=None)
+@click.option("--project", "project_ref", default=None, help="Filter by project slug.")
+@click.option("--status", default=None, help="Filter by plan status.")
 @click.option("--json", "json_output", is_flag=True)
 @click.pass_context
-def plan_list_cmd(ctx: click.Context, epic_ref: str | None, json_output: bool) -> None:
+def plan_list_cmd(ctx: click.Context, epic_ref: str | None, project_ref: str | None,
+                  status: str | None, json_output: bool) -> None:
     root = find_repo_root(_cwd_from_context(ctx))
-    plans = list_plans(root, epic_ref=epic_ref)
+    plans = list_plans(root, epic_ref=epic_ref, project_ref=project_ref, status=status)
     if json_output:
         data = [
             {

@@ -352,39 +352,61 @@ def _plan_body(title: str, author: str, today: str) -> str:
 from trailmind.log import append_activity_entry, read_entity_user_facing
 
 
-def list_specs(repo_root: Path, *, epic_ref: str | None = None) -> list[SpecInfo]:
+def list_specs(
+    repo_root: Path,
+    *,
+    epic_ref: str | None = None,
+    project_ref: str | None = None,
+    status: str | None = None,
+) -> list[SpecInfo]:
     if epic_ref:
         epic_path = resolve_epic_dir(repo_root, epic_ref)
-        return _list_docs_in_dir(epic_path / "docs" / "specs", repo_root, parse_spec_info, "spec")
-    specs: list[SpecInfo] = []
-    projects_dir = repo_root / "projects"
-    if not projects_dir.is_dir():
-        return specs
-    for project_dir in sorted(projects_dir.iterdir()):
-        if not project_dir.is_dir():
-            continue
-        for epic_dir in sorted(project_dir.iterdir()):
-            if not epic_dir.is_dir():
+        specs = _list_docs_in_dir(epic_path / "docs" / "specs", repo_root, parse_spec_info, "spec")
+    else:
+        specs: list[SpecInfo] = []
+        projects_dir = repo_root / "projects"
+        if not projects_dir.is_dir():
+            return specs
+        for project_dir in sorted(projects_dir.iterdir()):
+            if not project_dir.is_dir():
                 continue
-            specs.extend(_list_docs_in_dir(epic_dir / "docs" / "specs", repo_root, parse_spec_info, "spec"))
+            if project_ref and project_dir.name != project_ref:
+                continue
+            for epic_dir in sorted(project_dir.iterdir()):
+                if not epic_dir.is_dir():
+                    continue
+                specs.extend(_list_docs_in_dir(epic_dir / "docs" / "specs", repo_root, parse_spec_info, "spec"))
+    if status:
+        specs = [s for s in specs if s.status == status]
     return specs
 
 
-def list_plans(repo_root: Path, *, epic_ref: str | None = None) -> list[PlanInfo]:
+def list_plans(
+    repo_root: Path,
+    *,
+    epic_ref: str | None = None,
+    project_ref: str | None = None,
+    status: str | None = None,
+) -> list[PlanInfo]:
     if epic_ref:
         epic_path = resolve_epic_dir(repo_root, epic_ref)
-        return _list_docs_in_dir(epic_path / "docs" / "plans", repo_root, parse_plan_info, "plan")
-    plans: list[PlanInfo] = []
-    projects_dir = repo_root / "projects"
-    if not projects_dir.is_dir():
-        return plans
-    for project_dir in sorted(projects_dir.iterdir()):
-        if not project_dir.is_dir():
-            continue
-        for epic_dir in sorted(project_dir.iterdir()):
-            if not epic_dir.is_dir():
+        plans = _list_docs_in_dir(epic_path / "docs" / "plans", repo_root, parse_plan_info, "plan")
+    else:
+        plans: list[PlanInfo] = []
+        projects_dir = repo_root / "projects"
+        if not projects_dir.is_dir():
+            return plans
+        for project_dir in sorted(projects_dir.iterdir()):
+            if not project_dir.is_dir():
                 continue
-            plans.extend(_list_docs_in_dir(epic_dir / "docs" / "plans", repo_root, parse_plan_info, "plan"))
+            if project_ref and project_dir.name != project_ref:
+                continue
+            for epic_dir in sorted(project_dir.iterdir()):
+                if not epic_dir.is_dir():
+                    continue
+                plans.extend(_list_docs_in_dir(epic_dir / "docs" / "plans", repo_root, parse_plan_info, "plan"))
+    if status:
+        plans = [p for p in plans if p.status == status]
     return plans
 
 
