@@ -1315,6 +1315,7 @@ def task_group() -> None:
 @click.option("--active", is_flag=True, help="Show only active tasks (not done or wontfix).")
 @click.option("--blocked", is_flag=True, help="Show only blocked tasks.")
 @click.option("--ready-only", is_flag=True, help="Show only ready tasks (ready to start).")
+@click.option("--in-progress", "in_progress_only", is_flag=True, help="Show only in-progress tasks.")
 @click.option("--has-due", "has_due", flag_value=True, default=None,
               help="Show only tasks that have a due date.")
 @click.option("--no-due", "has_due", flag_value=False,
@@ -1348,6 +1349,7 @@ def task_list_cmd(
     active: bool,
     blocked: bool,
     ready_only: bool,
+    in_progress_only: bool,
     has_due: bool | None,
     tag: str | None,
     has_deliverables: bool,
@@ -1387,6 +1389,8 @@ def task_list_cmd(
         tasks = [t for t in tasks if t.get("status") == "blocked"]
     if ready_only:
         tasks = [t for t in tasks if t.get("status") in ("ready", "created")]
+    if in_progress_only:
+        tasks = [t for t in tasks if t.get("status") == "in_progress"]
     if has_deliverables:
         tasks = [t for t in tasks if t.get("deliverables")]
     if has_deps:
