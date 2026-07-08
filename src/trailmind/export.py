@@ -7,15 +7,27 @@ from typing import Any
 from trailmind.log import read_entity_user_facing
 
 
-def export_repo(repo_root: Path) -> dict[str, Any]:
-    """Export all Trailmind data in a repo as structured JSON."""
+def export_repo(
+    repo_root: Path,
+    *,
+    project: str | None = None,
+    epic: str | None = None,
+) -> dict[str, Any]:
+    """Export all Trailmind data in a repo as structured JSON.
+
+    If project is specified, only export that project.
+    If epic is specified (as projects/<project>/<epic> or just <epic_slug>), only export that epic.
+    """
     projects_path = repo_root / "projects"
     if not projects_path.exists() or not projects_path.is_dir():
         return {"projects": [], "roster": _load_roster(repo_root)}
 
     projects: list[dict[str, Any]] = []
     for project_path in sorted(p for p in projects_path.iterdir() if (p / "PROJECT.md").is_file()):
-        project_data = _export_project(repo_root, project_path)
+        # Apply project filter
+        if project and project_path.name != project:
+            continue
+        project_data = _export_project(repo_root, project_path, epic=epic)
         if project_data is not None:
             projects.append(project_data)
 
@@ -42,7 +54,7 @@ def _load_roster(repo_root: Path) -> list[dict[str, str]]:
         return []
 
 
-def _export_project(repo_root: Path, project_path: Path) -> dict[str, Any] | None:
+def _export_project(repo_root: Path, project_path: Path, *, epic: str | None = None) -> dict[str, Any] | None:
     try:
         fm, body = read_entity_user_facing(project_path / "PROJECT.md", label="project")
     except Exception:
@@ -50,6 +62,11 @@ def _export_project(repo_root: Path, project_path: Path) -> dict[str, Any] | Non
 
     epics: list[dict[str, Any]] = []
     for epic_path in sorted(e for e in project_path.iterdir() if (e / "EPIC.md").is_file()):
+        # Apply epic filter (supports "projects/demo/mvp" or "mvp")
+        if epic:
+            epic_rel = f"projects/{project_path.name}/{epic_path.name}"
+            if epic != epic_rel and epic != epic_path.name:
+                continue
         epic_data = _export_epic(repo_root, epic_path)
         if epic_data is not None:
             epics.append(epic_data)

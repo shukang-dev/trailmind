@@ -732,11 +732,14 @@ def today_command(ctx: click.Context, owner: str | None, project: str | None,
 @click.option("--output", "-o", default=None, help="Write to file instead of stdout.")
 @click.option("--format", "fmt", default="json", type=click.Choice(("json", "csv"), case_sensitive=False),
               help="Output format (default: json). CSV outputs tasks and issues as separate CSV blocks.")
+@click.option("--project", default=None, help="Export only a specific project.")
+@click.option("--epic", default=None, help="Export only a specific epic (path or slug).")
 @click.pass_context
-def export_command(ctx: click.Context, output: str | None, fmt: str) -> None:
+def export_command(ctx: click.Context, output: str | None, fmt: str,
+                    project: str | None, epic: str | None) -> None:
     """Export all project data as JSON or CSV."""
     root = find_repo_root(_cwd_from_context(ctx))
-    data = export_repo(root)
+    data = export_repo(root, project=project, epic=epic)
 
     if fmt == "csv":
         rendered = _format_export_csv(data)
@@ -1750,6 +1753,7 @@ def task_group() -> None:
               type=click.Choice(("status", "owner", "priority", "epic", "project", "tag", "due"), case_sensitive=False),
               help="Group tasks by status, owner, priority, epic, project, tag, or due date.")
 @click.option("--compact", is_flag=True, help="Compact single-line output.")
+@click.option("--ids", "ids_only", is_flag=True, help="Output only entity IDs (one per line, for piping).")
 @click.option("--count", "count_only", is_flag=True, help="Show only the count of matching tasks.")
 @click.option("--csv", "csv_output", is_flag=True, help="Output as CSV for spreadsheet import.")
 @click.option("--limit", default=None, type=click.IntRange(min=1), help="Limit number of results.")
@@ -1782,6 +1786,7 @@ def task_list_cmd(
     sort_by: str,
     group_by: str | None,
     compact: bool,
+    ids_only: bool,
     count_only: bool,
     csv_output: bool,
     limit: int | None,
@@ -1829,6 +1834,10 @@ def task_list_cmd(
         tasks = [t for t in tasks if not t.get("tags")]
     if unassigned:
         tasks = [t for t in tasks if not t.get("owner")]
+    if ids_only:
+        for t in tasks:
+            click.echo(t.get("id", ""))
+        return
     if count_only:
         click.echo(f"{len(tasks)} task{'s' if len(tasks) != 1 else ''}")
         return
@@ -2613,6 +2622,7 @@ def issue_group() -> None:
               type=click.Choice(("status", "severity", "owner", "epic", "project"), case_sensitive=False),
               help="Group issues by status, severity, owner, epic, or project.")
 @click.option("--compact", is_flag=True, help="Compact single-line output.")
+@click.option("--ids", "ids_only", is_flag=True, help="Output only entity IDs (one per line, for piping).")
 @click.option("--count", "count_only", is_flag=True, help="Show only the count of matching issues.")
 @click.option("--csv", "csv_output", is_flag=True, help="Output as CSV for spreadsheet import.")
 @click.option("--limit", default=None, type=click.IntRange(min=1), help="Limit number of results.")
@@ -2632,6 +2642,7 @@ def issue_list_cmd(
     sort_by: str,
     group_by: str | None,
     compact: bool,
+    ids_only: bool,
     count_only: bool,
     csv_output: bool,
     limit: int | None,
@@ -2648,6 +2659,10 @@ def issue_list_cmd(
         issues = [i for i in issues if i.get("linked_tasks")]
     if no_linked_tasks:
         issues = [i for i in issues if not i.get("linked_tasks")]
+    if ids_only:
+        for i in issues:
+            click.echo(i.get("id", ""))
+        return
     if count_only:
         click.echo(f"{len(issues)} issue{'s' if len(issues) != 1 else ''}")
         return
@@ -3021,6 +3036,7 @@ def milestone_group() -> None:
               help="Group milestones by status, epic, or project.")
 @click.option("--limit", default=None, type=click.IntRange(min=1), help="Limit number of results.")
 @click.option("--compact", is_flag=True, help="Compact single-line output.")
+@click.option("--ids", "ids_only", is_flag=True, help="Output only entity IDs (one per line, for piping).")
 @click.option("--count", "count_only", is_flag=True, help="Show only the count of matching milestones.")
 @click.option("--csv", "csv_output", is_flag=True, help="Output as CSV.")
 @click.option("--json", "json_output", is_flag=True, help="Print structured JSON instead of tabular output.")
@@ -3028,7 +3044,7 @@ def milestone_group() -> None:
 def milestone_list_cmd(ctx: click.Context, epic_ref: str | None, project_ref: str | None,
                         status: str | None, active: bool, upcoming: bool, due_within_days: int | None,
                         sort_by: str, group_by: str | None,
-                        limit: int | None, compact: bool, count_only: bool, csv_output: bool, json_output: bool) -> None:
+                        limit: int | None, compact: bool, ids_only: bool, count_only: bool, csv_output: bool, json_output: bool) -> None:
     root = find_repo_root(_cwd_from_context(ctx))
     milestones = list_milestones(root, epic_ref=epic_ref, project_ref=project_ref,
                                   status=status, sort_by=sort_by)
@@ -3046,6 +3062,10 @@ def milestone_list_cmd(ctx: click.Context, epic_ref: str | None, project_ref: st
         today_str = today.isoformat()
         milestones = [m for m in milestones
                       if m.get("date") and today_str <= m["date"] <= within and m.get("status") != "done"]
+    if ids_only:
+        for m in milestones:
+            click.echo(m.get("id", ""))
+        return
     if count_only:
         click.echo(f"{len(milestones)} milestone{'s' if len(milestones) != 1 else ''}")
         return
