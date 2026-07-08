@@ -519,6 +519,49 @@ def move_issue(
     return new_path
 
 
+def rename_issue(
+    repo_root: Path,
+    *,
+    issue_ref: str,
+    new_title: str,
+    actor: str,
+    note: str | None = None,
+) -> Path:
+    """Rename an issue: update the title and rename the file to match."""
+    issue_path = resolve_entity(repo_root, raw=issue_ref, entity="I")
+    frontmatter, body = read_entity_user_facing(issue_path, label="issue")
+
+    old_title = str(frontmatter.get("title") or issue_path.stem)
+    old_path = issue_path
+
+    frontmatter["title"] = new_title.strip()
+
+    issue_id = str(frontmatter.get("id") or "")
+    new_slug = slugify(new_title.strip())
+    new_filename = f"{issue_id}-{new_slug}.md"
+    new_path = old_path.parent / new_filename
+
+    action = f"Renamed issue: {old_title} → {new_title.strip()}"
+    body = append_activity_entry(
+        body,
+        action_activity_entry(
+            action=action,
+            actor_label="actor",
+            actor=actor,
+            note=note,
+        ),
+    )
+
+    if new_path == old_path:
+        write_entity(old_path, frontmatter=frontmatter, body=body)
+        return old_path
+
+    write_entity(new_path, frontmatter=frontmatter, body=body)
+    old_path.unlink()
+
+    return new_path
+
+
 def clone_issue(
     repo_root: Path,
     *,

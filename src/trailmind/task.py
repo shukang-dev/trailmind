@@ -866,6 +866,52 @@ def move_task(
     return new_path
 
 
+def rename_task(
+    repo_root: Path,
+    *,
+    task_ref: str,
+    new_title: str,
+    actor: str,
+    note: str | None = None,
+) -> Path:
+    """Rename a task: update the title and rename the file to match."""
+    task_path = resolve_entity(repo_root, raw=task_ref, entity="T")
+    frontmatter, body = read_entity_user_facing(task_path, label="task")
+
+    old_title = str(frontmatter.get("title") or task_path.stem)
+    old_path = task_path
+
+    # Update title
+    frontmatter["title"] = new_title.strip()
+
+    # Build new filename
+    task_id = str(frontmatter.get("id") or "")
+    new_slug = slugify(new_title.strip())
+    new_filename = f"{task_id}-{new_slug}.md"
+    new_path = old_path.parent / new_filename
+
+    action = f"Renamed task: {old_title} → {new_title.strip()}"
+    body = append_activity_entry(
+        body,
+        action_activity_entry(
+            action=action,
+            actor_label="actor",
+            actor=actor,
+            note=note,
+        ),
+    )
+
+    if new_path == old_path:
+        # Title changed but slug didn't (e.g., only case difference)
+        write_entity(old_path, frontmatter=frontmatter, body=body)
+        return old_path
+
+    write_entity(new_path, frontmatter=frontmatter, body=body)
+    old_path.unlink()
+
+    return new_path
+
+
 def clone_task(
     repo_root: Path,
     *,

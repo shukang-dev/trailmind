@@ -32,6 +32,7 @@ from trailmind.issue import (
     link_issue,
     list_issues,
     move_issue,
+    rename_issue,
     reopen_issue,
     set_issue_severity,
 )
@@ -96,6 +97,7 @@ from trailmind.task import (
     next_tasks,
     normalize_task_statuses,
     remove_task_dependency,
+    rename_task,
     set_task_due,
     set_task_priority,
     set_task_status,
@@ -357,6 +359,37 @@ def sweep_command(ctx: click.Context, project_slug: str | None, epic_ref: str | 
 def serve_command(ctx: click.Context, host: str, port: int) -> None:
     root = find_repo_root(_cwd_from_context(ctx))
     serve_repo(root, host=host, port=port)
+
+
+@cli.command("completion")
+@click.argument("shell", type=click.Choice(("bash", "zsh", "fish"), case_sensitive=False))
+def completion_command(shell: str) -> None:
+    """Generate shell completion script.
+
+    Usage:
+      # Bash
+      trailmind completion bash >> ~/.bashrc
+
+      # Zsh
+      trailmind completion zsh > ~/.zfunc/_trailmind
+
+      # Fish
+      trailmind completion fish > ~/.config/fish/completions/trailmind.fish
+    """
+    import subprocess
+    import sys
+    env = {**__import__("os").environ, "_TRAILMIND_COMPLETE": f"{shell}_source"}
+    try:
+        result = subprocess.run(
+            [sys.executable, "-m", "trailmind"],
+            env=env,
+            capture_output=True,
+            text=True,
+            timeout=10,
+        )
+        click.echo(result.stdout, nl=False)
+    except Exception as exc:
+        raise TrailmindError(f"failed to generate completion: {exc}")
 
 
 @cli.command("scan")
@@ -1042,6 +1075,9 @@ def inbox_add(
 @click.option("--group-by", default=None,
               type=click.Choice(("status", "epic", "project"), case_sensitive=False),
               help="Group inbox items by status, epic, or project.")
+@click.option("--sort", "sort_by", default="created",
+              type=click.Choice(("created", "title", "status"), case_sensitive=False),
+              help="Sort inbox items (default: created).")
 @click.option("--limit", default=None, type=click.IntRange(min=1), help="Limit number of results.")
 @click.option("--compact", is_flag=True, help="Compact single-line output.")
 @click.option("--ids", "ids_only", is_flag=True, help="Output only entity IDs (one per line, for piping).")
@@ -1050,10 +1086,16 @@ def inbox_add(
 @click.option("--json", "json_output", is_flag=True, help="Print structured JSON instead of Markdown.")
 @click.pass_context
 def inbox_list(ctx: click.Context, project_slug: str | None, epic_ref: str | None,
-               status: str | None, group_by: str | None, limit: int | None,
+               status: str | None, group_by: str | None, sort_by: str, limit: int | None,
                compact: bool, ids_only: bool, count_only: bool, csv_output: bool, json_output: bool) -> None:
     root = find_repo_root(_cwd_from_context(ctx))
     items = list_inbox_items(root, project=project_slug, epic=epic_ref, status=status)
+    # Sort
+    if sort_by == "title":
+        items.sort(key=lambda i: i.title.lower())
+    elif sort_by == "status":
+        items.sort(key=lambda i: (0 if i.status == "open" else 1, i.title.lower()))
+    # else: created (default order from list_inbox_items)
     if ids_only:
         for item in items:
             click.echo(item.item_id)
@@ -1316,17 +1358,28 @@ def spec_init(ctx: click.Context, epic_ref: str, title: str, author: str, scope:
 @click.option("--epic", "epic_ref", default=None)
 @click.option("--project", "project_ref", default=None, help="Filter by project slug.")
 @click.option("--status", default=None, help="Filter by spec status.")
+@click.option("--sort", "sort_by", default="created",
+              type=click.Choice(("created", "title", "status"), case_sensitive=False),
+              help="Sort specs (default: created).")
 @click.option("--compact", is_flag=True, help="Compact single-line output.")
 @click.option("--count", "count_only", is_flag=True, help="Show only the count.")
 @click.option("--json", "json_output", is_flag=True)
 @click.pass_context
 def spec_list(ctx: click.Context, epic_ref: str | None, project_ref: str | None,
-              status: str | None, compact: bool, count_only: bool, json_output: bool) -> None:
+              status: str | None, sort_by: str, compact: bool, count_only: bool, json_output: bool) -> None:
     root = find_repo_root(_cwd_from_context(ctx))
     specs = list_specs(root, epic_ref=epic_ref, project_ref=project_ref, status=status)
     if count_only:
         click.echo(f"{len(specs)} spec{'s' if len(specs) != 1 else ''}")
         return
+    # Sort
+    SPEC_STATUS_ORDER = {"draft": 0, "draft-for-review": 1, "approved-for-spec": 2, "superseded": 3}
+    if sort_by == "title":
+        specs.sort(key=lambda s: s.title.lower())
+    elif sort_by == "status":
+        specs.sort(key=lambda s: (SPEC_STATUS_ORDER.get(s.status, 99), s.title.lower()))
+    else:
+        specs.sort(key=lambda s: s.created or "9999-99-99")
     if json_output:
         data = [
             {
@@ -1422,17 +1475,28 @@ def plan_init_cmd(ctx: click.Context, epic_ref: str, title: str, author: str, sp
 @click.option("--epic", "epic_ref", default=None)
 @click.option("--project", "project_ref", default=None, help="Filter by project slug.")
 @click.option("--status", default=None, help="Filter by plan status.")
+@click.option("--sort", "sort_by", default="created",
+              type=click.Choice(("created", "title", "status"), case_sensitive=False),
+              help="Sort plans (default: created).")
 @click.option("--compact", is_flag=True, help="Compact single-line output.")
 @click.option("--count", "count_only", is_flag=True, help="Show only the count.")
 @click.option("--json", "json_output", is_flag=True)
 @click.pass_context
 def plan_list_cmd(ctx: click.Context, epic_ref: str | None, project_ref: str | None,
-                  status: str | None, compact: bool, count_only: bool, json_output: bool) -> None:
+                  status: str | None, sort_by: str, compact: bool, count_only: bool, json_output: bool) -> None:
     root = find_repo_root(_cwd_from_context(ctx))
     plans = list_plans(root, epic_ref=epic_ref, project_ref=project_ref, status=status)
     if count_only:
         click.echo(f"{len(plans)} plan{'s' if len(plans) != 1 else ''}")
         return
+    # Sort
+    PLAN_STATUS_ORDER = {"draft": 0, "approved": 1, "in-progress": 2, "completed": 3, "superseded": 4}
+    if sort_by == "title":
+        plans.sort(key=lambda p: p.title.lower())
+    elif sort_by == "status":
+        plans.sort(key=lambda p: (PLAN_STATUS_ORDER.get(p.status, 99), p.title.lower()))
+    else:
+        plans.sort(key=lambda p: p.created or "9999-99-99")
     if json_output:
         data = [
             {
@@ -2549,6 +2613,31 @@ def task_move(
     _echo_touched(root, [touched])
 
 
+@task_group.command("rename")
+@click.argument("task_ref")
+@click.argument("new_title")
+@click.option("--actor", required=True)
+@click.option("--note", default=None)
+@click.pass_context
+def task_rename(
+    ctx: click.Context,
+    task_ref: str,
+    new_title: str,
+    actor: str,
+    note: str | None,
+) -> None:
+    """Rename a task (updates title and filename)."""
+    root = find_repo_root(_cwd_from_context(ctx))
+    touched = rename_task(
+        root,
+        task_ref=task_ref,
+        new_title=new_title,
+        actor=actor,
+        note=note,
+    )
+    _echo_touched(root, [touched])
+
+
 @task_group.command("clone")
 @click.argument("task_ref")
 @click.option("--title", default=None, help="New task title (defaults to source title).")
@@ -2992,6 +3081,31 @@ def issue_move(
         root,
         issue_ref=issue_ref,
         target_epic=target_epic,
+        actor=actor,
+        note=note,
+    )
+    _echo_touched(root, [touched])
+
+
+@issue_group.command("rename")
+@click.argument("issue_ref")
+@click.argument("new_title")
+@click.option("--actor", required=True)
+@click.option("--note", default=None)
+@click.pass_context
+def issue_rename(
+    ctx: click.Context,
+    issue_ref: str,
+    new_title: str,
+    actor: str,
+    note: str | None,
+) -> None:
+    """Rename an issue (updates title and filename)."""
+    root = find_repo_root(_cwd_from_context(ctx))
+    touched = rename_issue(
+        root,
+        issue_ref=issue_ref,
+        new_title=new_title,
         actor=actor,
         note=note,
     )
