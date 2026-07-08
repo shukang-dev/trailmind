@@ -957,6 +957,139 @@ def focus_command(ctx: click.Context, owner: str, project: str | None,
     click.echo("\n".join(lines))
 
 
+@cli.command("standup")
+@click.argument("owner")
+@click.option("--project", default=None, help="Filter by project.")
+@click.option("--epic", default=None, help="Filter by epic.")
+@click.option("--yesterday", "yesterday_date", default=None,
+              help="Override 'yesterday' date (YYYY-MM-DD). Defaults to previous workday.")
+@click.option("--json", "json_output", is_flag=True, help="Print structured JSON.")
+@click.pass_context
+def standup_command(ctx: click.Context, owner: str, project: str | None,
+                     epic: str | None, yesterday_date: str | None, json_output: bool) -> None:
+    """Generate daily standup report: Yesterday, Today, Blockers."""
+    from datetime import date, timedelta
+    root = find_repo_root(_cwd_from_context(ctx))
+    today = date.today()
+
+    # Determine "yesterday" — skip weekends
+    if yesterday_date:
+        yd = date.fromisoformat(yesterday_date)
+    else:
+        yd = today - timedelta(days=1)
+        if yd.weekday() >= 5:  # Saturday or Sunday
+            yd = today - timedelta(days=3 if today.weekday() == 0 else 2)
+    yd_str = yd.isoformat()
+    today_str = today.isoformat()
+
+    # Get owner's tasks
+    all_tasks = list_tasks(root, epic_ref=epic, project_ref=project, owner=owner)
+    active = [t for t in all_tasks if t.get("status") not in ("done", "wontfix")]
+
+    # Yesterday: completed + activity
+    # Tasks done "yesterday" — check completed date or just done status
+    done_yesterday = [t for t in all_tasks if t.get("status") == "done"]
+
+    # Get yesterday's activity
+    entries = collect_activity(root, limit=50, actor=owner, since=yd_str)
+    yesterday_activity = [e for e in entries if e.get("date") == yd_str]
+
+    # Today: in progress + due today + due this week
+    in_progress = [t for t in active if t.get("status") == "in_progress"]
+    due_today = [t for t in active if t.get("due") == today_str]
+    within_3 = (today + timedelta(days=3)).isoformat()
+    due_soon = [t for t in active
+                if t.get("due") and today_str < t.get("due", "") <= within_3
+                and t not in due_today]
+
+    # Blockers: blocked tasks
+    blocked = [t for t in active if t.get("status") == "blocked"]
+
+    # My open issues
+    all_issues = list_issues(root, epic_ref=epic, project_ref=project)
+    my_issues = [i for i in all_issues
+                 if i.get("owner") == owner and i.get("status") not in ("done", "wontfix")]
+
+    if json_output:
+        data = {
+            "owner": owner,
+            "date": today_str,
+            "yesterday": {
+                "date": yd_str,
+                "completed": [{"id": t["id"], "title": t["title"]} for t in done_yesterday],
+                "activity": [{"entity_type": e["entity_type"], "entity_id": e["entity_id"],
+                              "action": e["action"]} for e in yesterday_activity],
+            },
+            "today": {
+                "in_progress": [{"id": t["id"], "title": t["title"], "due": t.get("due", "")} for t in in_progress],
+                "due_today": [{"id": t["id"], "title": t["title"], "priority": t.get("priority", "")} for t in due_today],
+                "due_soon": [{"id": t["id"], "title": t["title"], "due": t.get("due", "")} for t in due_soon],
+            },
+            "blockers": [{"id": t["id"], "title": t["title"]} for t in blocked],
+            "issues": [{"id": i["id"], "title": i["title"], "severity": i.get("severity", "")} for i in my_issues],
+        }
+        click.echo(json.dumps(data, ensure_ascii=False, indent=2))
+        return
+
+    lines = []
+    lines.append(f"🗣️  Standup: @{owner}")
+    lines.append(f"   {today_str}")
+    lines.append("")
+
+    # Yesterday
+    lines.append(f"**Yesterday ({yd_str}):**")
+    if done_yesterday:
+        for t in done_yesterday:
+            lines.append(f"  - ✅ Completed: {t['id']} — {t['title']}")
+    if yesterday_activity:
+        for e in yesterday_activity:
+            icon = {"task": "📋", "issue": "🐛", "milestone": "🏁", "inbox": "📥",
+                    "epic": "🎯", "project": "📦", "spec": "📐", "plan": "📋"}.get(e["entity_type"], "📄")
+            lines.append(f"  - {icon} {e['action']}: {e['entity_id']} — {e['entity_title']}")
+    if not done_yesterday and not yesterday_activity:
+        lines.append(f"  - (no recorded activity)")
+    lines.append("")
+
+    # Today
+    lines.append("**Today:**")
+    if in_progress:
+        for t in in_progress:
+            due = f" (due: {t.get('due', '')})" if t.get('due') else ""
+            lines.append(f"  - 🔧 {t['id']} — {t['title']}{due}")
+    if due_today:
+        for t in due_today:
+            pri = f" [{t.get('priority', '').upper()}]" if t.get('priority') else ""
+            lines.append(f"  - 📍{pri} {t['id']} — {t['title']}")
+    if due_soon and not in_progress and not due_today:
+        for t in due_soon[:3]:
+            pri = f" [{t.get('priority', '').upper()}]" if t.get('priority') else ""
+            lines.append(f"  - 📆{pri} {t['id']} — {t['title']} (due: {t.get('due', '')})")
+    if not in_progress and not due_today and not due_soon:
+        # Suggest picking up next task
+        next_list = next_tasks(root, owner=owner, epic=epic, project=project, limit=3)
+        if next_list:
+            lines.append("  - 💡 Suggest picking up:")
+            for t in next_list:
+                lines.append(f"    - {t['id']} — {t['title']}")
+        else:
+            lines.append("  - (nothing planned)")
+    lines.append("")
+
+    # Blockers
+    lines.append("**Blockers:**")
+    if blocked:
+        for t in blocked:
+            lines.append(f"  - 🚧 {t['id']} — {t['title']}")
+    if my_issues:
+        for i in my_issues:
+            sev = f" [{i.get('severity', '').upper()}]" if i.get('severity') else ""
+            lines.append(f"  - 🐛{sev} {i['id']} — {i['title']}")
+    if not blocked and not my_issues:
+        lines.append("  - None ✨")
+
+    click.echo("\n".join(lines))
+
+
 @cli.command("weekly")
 @click.option("--project", default=None, help="Show weekly review for a specific project.")
 @click.option("--epic", default=None, help="Show weekly review for a specific epic.")
