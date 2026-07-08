@@ -563,14 +563,26 @@ def inbox_add(
 @click.option("--status", default=None, type=click.Choice(("open", "resolved"), case_sensitive=False),
               help="Filter by inbox item status.")
 @click.option("--limit", default=None, type=click.IntRange(min=1), help="Limit number of results.")
+@click.option("--csv", "csv_output", is_flag=True, help="Output as CSV.")
 @click.option("--json", "json_output", is_flag=True, help="Print structured JSON instead of Markdown.")
 @click.pass_context
 def inbox_list(ctx: click.Context, project_slug: str | None, epic_ref: str | None,
-               status: str | None, limit: int | None, json_output: bool) -> None:
+               status: str | None, limit: int | None, csv_output: bool, json_output: bool) -> None:
     root = find_repo_root(_cwd_from_context(ctx))
     items = list_inbox_items(root, project=project_slug, epic=epic_ref, status=status)
     if limit:
         items = items[:limit]
+    if csv_output:
+        import csv
+        import io
+        output = io.StringIO()
+        writer = csv.writer(output)
+        writer.writerow(["item_id", "title", "status", "path"])
+        for item in items:
+            writer.writerow([item.item_id, item.title, item.status,
+                            item.path.relative_to(root).as_posix()])
+        click.echo(output.getvalue(), nl=False)
+        return
     if json_output:
         data = [
             {
@@ -2237,6 +2249,7 @@ def issue_list_cmd(
 @issue_group.command("add")
 @click.option("--epic", required=True)
 @click.option("--filer", required=True)
+@click.option("--owner", default=None, help="Owner email or shortname (defaults to filer).")
 @click.option("--title", required=True)
 @click.option("--description", required=True)
 @click.option("--severity", required=True)
@@ -2245,12 +2258,13 @@ def issue_add(
     ctx: click.Context,
     epic: str,
     filer: str,
+    owner: str | None,
     title: str,
     description: str,
     severity: str,
 ) -> None:
     root = find_repo_root(_cwd_from_context(ctx))
-    touched = add_issue(root, epic=epic, filer=filer, title=title, description=description, severity=severity)
+    touched = add_issue(root, epic=epic, filer=filer, owner=owner, title=title, description=description, severity=severity)
     _echo_touched(root, [touched])
 
 
@@ -2505,10 +2519,12 @@ def milestone_group() -> None:
               type=click.Choice(("date", "created", "status", "title"), case_sensitive=False),
               help="Sort milestones (default: date).")
 @click.option("--limit", default=None, type=click.IntRange(min=1), help="Limit number of results.")
+@click.option("--csv", "csv_output", is_flag=True, help="Output as CSV.")
 @click.option("--json", "json_output", is_flag=True, help="Print structured JSON instead of tabular output.")
 @click.pass_context
 def milestone_list_cmd(ctx: click.Context, epic_ref: str | None, project_ref: str | None,
-                        status: str | None, active: bool, sort_by: str, limit: int | None, json_output: bool) -> None:
+                        status: str | None, active: bool, sort_by: str, limit: int | None,
+                        csv_output: bool, json_output: bool) -> None:
     root = find_repo_root(_cwd_from_context(ctx))
     milestones = list_milestones(root, epic_ref=epic_ref, project_ref=project_ref,
                                   status=status, sort_by=sort_by)
@@ -2516,6 +2532,17 @@ def milestone_list_cmd(ctx: click.Context, epic_ref: str | None, project_ref: st
         milestones = [m for m in milestones if m.get("status") != "done"]
     if limit:
         milestones = milestones[:limit]
+    if csv_output:
+        import csv
+        import io
+        output = io.StringIO()
+        writer = csv.writer(output)
+        writer.writerow(["id", "title", "status", "date", "created", "path"])
+        for m in milestones:
+            writer.writerow([m.get("id", ""), m.get("title", ""), m.get("status", ""),
+                            m.get("date", ""), m.get("created", ""), m.get("path", "")])
+        click.echo(output.getvalue(), nl=False)
+        return
     if json_output:
         click.echo(json.dumps(milestones, ensure_ascii=False, indent=2))
     else:

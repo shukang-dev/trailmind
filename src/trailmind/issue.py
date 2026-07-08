@@ -192,6 +192,7 @@ def add_issue(
     *,
     epic: str,
     filer: str,
+    owner: str | None = None,
     title: str,
     description: str,
     severity: str,
@@ -200,6 +201,7 @@ def add_issue(
     roster = Roster.load(repo_root / "roster.yaml")
     filer_shortname = roster.require_shortname(filer)
     filer_uid = roster.require_uid(filer)
+    owner_shortname = roster.require_shortname(owner) if owner else filer_shortname
 
     issues_path = epic_path / "issues"
     _ensure_issues_directory(issues_path)
@@ -211,7 +213,7 @@ def add_issue(
             "id": issue_id,
             "title": title,
             "filer": filer_shortname,
-            "owner": filer_shortname,
+            "owner": owner_shortname,
             "status": "open",
             "severity": severity,
             "created": date.today().isoformat(),
