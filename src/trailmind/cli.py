@@ -1851,6 +1851,8 @@ def task_next(ctx: click.Context, owner: str | None, epic_ref: str | None, proje
 @click.option("--title", default=None, help="New task title.")
 @click.option("--code-paths", default=None, help="Comma-separated code paths.")
 @click.option("--design-doc", default=None, help="Path to design document.")
+@click.option("--due", default=None, help="New due date (YYYY-MM-DD), or empty string to clear.")
+@click.option("--tags", default=None, help="Comma-separated tags (replaces existing).")
 @click.option("--actor", required=True)
 @click.option("--note", default=None)
 @click.pass_context
@@ -1860,12 +1862,15 @@ def task_edit(
     title: str | None,
     code_paths: str | None,
     design_doc: str | None,
+    due: str | None,
+    tags: str | None,
     actor: str,
     note: str | None,
 ) -> None:
     """Edit editable fields on a task."""
     root = find_repo_root(_cwd_from_context(ctx))
     paths = split_csv(code_paths) if code_paths is not None else None
+    tag_list = split_csv(tags) if tags is not None else None
     touched = edit_task(
         root,
         task_ref=task_ref,
@@ -1873,6 +1878,8 @@ def task_edit(
         title=title,
         code_paths=paths,
         design_doc=design_doc,
+        due=due,
+        tags=tag_list,
         note=note,
     )
     _echo_touched(root, [touched])

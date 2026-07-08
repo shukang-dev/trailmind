@@ -637,6 +637,8 @@ def edit_task(
     title: str | None = None,
     code_paths: list[str] | None = None,
     design_doc: str | None = None,
+    due: str | None = None,
+    tags: list[str] | None = None,
     note: str | None = None,
 ) -> Path:
     """Edit editable fields on a task.
@@ -664,8 +666,28 @@ def edit_task(
         frontmatter["design_doc"] = new_doc
         changes.append(f"Design doc: {old_doc or '(none)'} → {new_doc or '(none)'}")
 
+    if due is not None:
+        from datetime import date as _date
+        if due.strip():
+            try:
+                _date.fromisoformat(due.strip())
+                validated_due = due.strip()
+            except ValueError:
+                raise TrailmindError(f"invalid due date {due!r}; expected YYYY-MM-DD")
+        else:
+            validated_due = None
+        old_due = str(frontmatter.get("due") or "")
+        frontmatter["due"] = validated_due
+        changes.append(f"Due: {old_due or '(none)'} → {validated_due or '(none)'}")
+
+    if tags is not None:
+        old_tags = string_list_field(frontmatter, "tags", label="task")
+        normalized = [t.strip() for t in tags if t.strip()]
+        frontmatter["tags"] = normalized
+        changes.append(f"Tags: {', '.join(old_tags) or '(none)'} → {', '.join(normalized) or '(none)'}")
+
     if not changes:
-        raise TrailmindError("no fields to edit; provide --title, --code-paths, or --design-doc")
+        raise TrailmindError("no fields to edit; provide --title, --code-paths, --design-doc, --due, or --tags")
 
     action = f"Edited task: {'; '.join(changes)}"
     body = append_activity_entry(
