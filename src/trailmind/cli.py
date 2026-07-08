@@ -562,12 +562,16 @@ def inbox_add(
 @click.option("--epic", "epic_ref", default=None)
 @click.option("--status", default=None, type=click.Choice(("open", "resolved"), case_sensitive=False),
               help="Filter by inbox item status.")
+@click.option("--group-by", default=None,
+              type=click.Choice(("status", "epic", "project"), case_sensitive=False),
+              help="Group inbox items by status, epic, or project.")
 @click.option("--limit", default=None, type=click.IntRange(min=1), help="Limit number of results.")
 @click.option("--csv", "csv_output", is_flag=True, help="Output as CSV.")
 @click.option("--json", "json_output", is_flag=True, help="Print structured JSON instead of Markdown.")
 @click.pass_context
 def inbox_list(ctx: click.Context, project_slug: str | None, epic_ref: str | None,
-               status: str | None, limit: int | None, csv_output: bool, json_output: bool) -> None:
+               status: str | None, group_by: str | None, limit: int | None,
+               csv_output: bool, json_output: bool) -> None:
     root = find_repo_root(_cwd_from_context(ctx))
     items = list_inbox_items(root, project=project_slug, epic=epic_ref, status=status)
     if limit:
@@ -577,29 +581,67 @@ def inbox_list(ctx: click.Context, project_slug: str | None, epic_ref: str | Non
         import io
         output = io.StringIO()
         writer = csv.writer(output)
-        writer.writerow(["item_id", "title", "status", "path"])
+        writer.writerow(["item_id", "title", "status", "epic", "path"])
         for item in items:
-            writer.writerow([item.item_id, item.title, item.status,
-                            item.path.relative_to(root).as_posix()])
+            rel = item.path.relative_to(root).as_posix()
+            parts = rel.split("/")
+            epic = f"projects/{parts[1]}/{parts[2]}" if len(parts) > 2 else ""
+            writer.writerow([item.item_id, item.title, item.status, epic, rel])
         click.echo(output.getvalue(), nl=False)
         return
     if json_output:
-        data = [
-            {
+        data = []
+        for item in items:
+            rel = item.path.relative_to(root).as_posix()
+            parts = rel.split("/")
+            epic = f"projects/{parts[1]}/{parts[2]}" if len(parts) > 2 else ""
+            project = parts[1] if len(parts) > 1 else ""
+            data.append({
                 "item_id": item.item_id,
                 "title": item.title,
                 "status": item.status,
-                "path": item.path.relative_to(root).as_posix(),
-            }
-            for item in items
-        ]
+                "epic": epic,
+                "project": project,
+                "path": rel,
+            })
         click.echo(json.dumps(data, ensure_ascii=False, indent=2))
     else:
         if not items:
             click.echo("No inbox items.")
             return
-        for item in items:
-            click.echo(f"{item.item_id} {item.status} {item.title}")
+
+        if group_by:
+            from collections import defaultdict
+            groups: dict[str, list] = defaultdict(list)
+            for item in items:
+                rel = item.path.relative_to(root).as_posix()
+                parts = rel.split("/")
+                if group_by == "epic":
+                    key = f"projects/{parts[1]}/{parts[2]}" if len(parts) > 2 else "unknown"
+                elif group_by == "project":
+                    key = parts[1] if len(parts) > 1 else "unknown"
+                else:
+                    key = item.status
+                groups[key].append(item)
+
+            if group_by == "status":
+                st_order = {"open": 0, "resolved": 1}
+                sorted_keys = sorted(groups.keys(), key=lambda k: st_order.get(k, 99))
+            else:
+                sorted_keys = sorted(groups.keys())
+
+            for key in sorted_keys:
+                group_items = groups[key]
+                display_key = key
+                if group_by == "epic":
+                    display_key = key.split("/")[-1] if "/" in key else key
+                click.echo(f"\n{display_key.upper()} ({len(group_items)})")
+                click.echo("─" * 60)
+                for item in group_items:
+                    click.echo(f"  {item.item_id:20s} {item.status:10s} {item.title}")
+        else:
+            for item in items:
+                click.echo(f"{item.item_id} {item.status} {item.title}")
 
 
 @inbox_group.command("resolve")
