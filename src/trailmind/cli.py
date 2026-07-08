@@ -1040,6 +1040,112 @@ def release_command(ctx: click.Context, milestone_ref: str | None, since: str | 
     click.echo("\n".join(lines))
 
 
+@cli.command("roadmap")
+@click.option("--project", default=None, help="Show roadmap for a specific project.")
+@click.option("--epic", default=None, help="Show roadmap for a specific epic.")
+@click.option("--limit", default=10, type=click.IntRange(min=1), help="Limit milestones shown.")
+@click.option("--json", "json_output", is_flag=True, help="Print structured JSON.")
+@click.pass_context
+def roadmap_command(ctx: click.Context, project: str | None, epic: str | None,
+                     limit: int, json_output: bool) -> None:
+    """Show upcoming milestones with task progress."""
+    from datetime import date
+    root = find_repo_root(_cwd_from_context(ctx))
+    today = date.today().isoformat()
+
+    milestones = list_milestones(root, epic_ref=epic, project_ref=project)
+    # Filter to upcoming/active milestones and sort by date
+    upcoming = sorted(
+        [m for m in milestones if m.get("date") and m.get("status") != "done"],
+        key=lambda m: m.get("date", "")
+    )[:limit]
+
+    all_tasks = list_tasks(root, epic_ref=epic, project_ref=project)
+
+    milestone_data = []
+    for m in upcoming:
+        epic_path = m.get("epic", "")
+        # Get tasks for this milestone's epic
+        epic_tasks = [t for t in all_tasks if t.get("epic") == epic_path]
+        total = len(epic_tasks)
+        done = len([t for t in epic_tasks if t.get("status") == "done"])
+        in_progress = len([t for t in epic_tasks if t.get("status") == "in_progress"])
+        blocked = len([t for t in epic_tasks if t.get("status") == "blocked"])
+        pct = round(done / total * 100) if total else 0
+
+        # Progress bar
+        bar_len = 20
+        filled = int(bar_len * pct / 100)
+        bar = "█" * filled + "░" * (bar_len - filled)
+
+        milestone_data.append({
+            "id": m.get("id", ""),
+            "title": m.get("title", ""),
+            "date": m.get("date", ""),
+            "status": m.get("status", ""),
+            "epic": epic_path,
+            "tasks": {"total": total, "done": done, "in_progress": in_progress, "blocked": blocked},
+            "progress": pct,
+            "bar": bar,
+        })
+
+    if json_output:
+        data = {
+            "generated": today,
+            "milestones": [
+                {
+                    "id": m["id"], "title": m["title"], "date": m["date"],
+                    "status": m["status"], "epic": m["epic"],
+                    "progress": m["progress"], "tasks": m["tasks"],
+                }
+                for m in milestone_data
+            ],
+        }
+        click.echo(json.dumps(data, ensure_ascii=False, indent=2))
+        return
+
+    lines = []
+    lines.append(f"🗺️  Roadmap")
+    lines.append(f"   {today}")
+    lines.append("")
+
+    if not milestone_data:
+        lines.append("No upcoming milestones.")
+        click.echo("\n".join(lines))
+        return
+
+    for m in milestone_data:
+        days_away = ""
+        if m["date"]:
+            try:
+                from datetime import date as _date
+                delta = (_date.fromisoformat(m["date"]) - _date.fromisoformat(today)).days
+                if delta > 0:
+                    days_away = f" (in {delta}d)"
+                elif delta == 0:
+                    days_away = " (today)"
+                else:
+                    days_away = f" ({-delta}d overdue)"
+            except ValueError:
+                pass
+
+        epic_slug = m["epic"].split("/")[-1] if "/" in m["epic"] else m["epic"]
+        tasks = m["tasks"]
+        lines.append(f"  🏁 {m['title']} — {m['date']}{days_away}")
+        lines.append(f"     {m['status']:12s} [{epic_slug}]")
+        lines.append(f"     {m['bar']} {m['progress']}%")
+        lines.append(f"     📋 {tasks['total']} tasks: ✅ {tasks['done']} done, 🔧 {tasks['in_progress']} in progress, 🚧 {tasks['blocked']} blocked")
+        lines.append("")
+
+    # Overall stats
+    total_tasks = len(all_tasks)
+    done_tasks = len([t for t in all_tasks if t.get("status") == "done"])
+    overall_pct = round(done_tasks / total_tasks * 100) if total_tasks else 0
+    lines.append(f"📊 Overall: {done_tasks}/{total_tasks} tasks done ({overall_pct}%)")
+
+    click.echo("\n".join(lines))
+
+
 @cli.command("export")
 @click.option("--output", "-o", default=None, help="Write to file instead of stdout.")
 @click.option("--format", "fmt", default="json", type=click.Choice(("json", "csv"), case_sensitive=False),
@@ -3632,6 +3738,9 @@ def milestone_edit(
 @click.option("--since", default=None, help="Show entries since YYYY-MM-DD.")
 @click.option("--project", default=None, help="Filter by project slug.")
 @click.option("--epic", default=None, help="Filter by epic path or slug.")
+@click.option("--sort", "sort_by", default="date",
+              type=click.Choice(("date", "entity_type", "actor", "action"), case_sensitive=False),
+              help="Sort entries (default: date).")
 @click.option("--compact", is_flag=True, help="Compact single-line output.")
 @click.option("--json", "json_output", is_flag=True, help="Print structured JSON.")
 @click.pass_context
@@ -3643,6 +3752,7 @@ def activity_command(
     since: str | None,
     project: str | None,
     epic: str | None,
+    sort_by: str,
     compact: bool,
     json_output: bool,
 ) -> None:
@@ -3657,6 +3767,15 @@ def activity_command(
         project=project,
         epic=epic,
     )
+
+    # Sort
+    if sort_by != "date":
+        if sort_by == "entity_type":
+            entries.sort(key=lambda e: (e.get("entity_type", ""), e.get("date", "")), reverse=True)
+        elif sort_by == "actor":
+            entries.sort(key=lambda e: (e.get("actor", ""), e.get("date", "")), reverse=True)
+        elif sort_by == "action":
+            entries.sort(key=lambda e: (e.get("action", "").lower(), e.get("date", "")), reverse=True)
 
     if json_output:
         click.echo(json.dumps(entries, ensure_ascii=False, indent=2))
