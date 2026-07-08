@@ -3741,6 +3741,9 @@ def milestone_edit(
 @click.option("--sort", "sort_by", default="date",
               type=click.Choice(("date", "entity_type", "actor", "action"), case_sensitive=False),
               help="Sort entries (default: date).")
+@click.option("--group-by", default=None,
+              type=click.Choice(("entity_type", "actor", "date"), case_sensitive=False),
+              help="Group activity by entity type, actor, or date.")
 @click.option("--compact", is_flag=True, help="Compact single-line output.")
 @click.option("--csv", "csv_output", is_flag=True, help="Output as CSV.")
 @click.option("--json", "json_output", is_flag=True, help="Print structured JSON.")
@@ -3754,6 +3757,7 @@ def activity_command(
     project: str | None,
     epic: str | None,
     sort_by: str,
+    group_by: str | None,
     compact: bool,
     csv_output: bool,
     json_output: bool,
@@ -3802,19 +3806,63 @@ def activity_command(
         click.echo("No activity found.")
         return
 
-    for e in entries:
-        type_icon = {
+    if group_by:
+        from collections import defaultdict
+        groups: dict[str, list] = defaultdict(list)
+        for e in entries:
+            if group_by == "entity_type":
+                key = e.get("entity_type", "unknown")
+            elif group_by == "actor":
+                key = e.get("actor", "unknown")
+            else:  # date
+                key = e.get("date", "unknown")
+            groups[key].append(e)
+
+        if group_by == "entity_type":
+            et_order = {"task": 0, "issue": 1, "milestone": 2, "inbox": 3, "epic": 4, "project": 5, "spec": 6, "plan": 7}
+            sorted_keys = sorted(groups.keys(), key=lambda k: et_order.get(k, 99))
+        elif group_by == "actor":
+            sorted_keys = sorted(groups.keys())
+        else:
+            sorted_keys = sorted(groups.keys(), reverse=True)
+
+        type_icon_map = {
             "project": "📦", "epic": "🎯", "task": "✅", "issue": "🐛",
             "milestone": "🏁", "inbox": "📥", "spec": "📐", "plan": "📋",
-        }.get(e["entity_type"], "📄")
-        if compact:
-            note_str = f" — {e['note']}" if e["note"] else ""
-            click.echo(f"{e['date']} {type_icon} {e['entity_type']:10s} {e['entity_id']:14s} {e['actor']:10s} {e['action']}{note_str}")
-        else:
-            note_str = f" — {e['note']}" if e["note"] else ""
-            click.echo(f"  {e['date']}  {type_icon} {e['action']}")
-            click.echo(f"          by {e['actor']} on {e['entity_type']} {e['entity_id']} {e['entity_title']}{note_str}")
-            click.echo()
+        }
+
+        for key in sorted_keys:
+            group_entries = groups[key]
+            display_key = key
+            if group_by == "entity_type":
+                icon = type_icon_map.get(key, "📄")
+                display_key = f"{icon} {key}"
+            elif group_by == "actor":
+                display_key = f"👤 {key}"
+            click.echo(f"\n{display_key} ({len(group_entries)})")
+            click.echo("─" * 60)
+            for e in group_entries:
+                icon = type_icon_map.get(e["entity_type"], "📄")
+                if compact:
+                    note_str = f" — {e['note']}" if e["note"] else ""
+                    click.echo(f"  {e['date']} {icon} {e['entity_id']:14s} {e['action']}{note_str}")
+                else:
+                    note_str = f" — {e['note']}" if e["note"] else ""
+                    click.echo(f"  {e['date']}  {e['entity_id']:14s} {e['action']}{note_str}")
+    else:
+        for e in entries:
+            type_icon = {
+                "project": "📦", "epic": "🎯", "task": "✅", "issue": "🐛",
+                "milestone": "🏁", "inbox": "📥", "spec": "📐", "plan": "📋",
+            }.get(e["entity_type"], "📄")
+            if compact:
+                note_str = f" — {e['note']}" if e["note"] else ""
+                click.echo(f"{e['date']} {type_icon} {e['entity_type']:10s} {e['entity_id']:14s} {e['actor']:10s} {e['action']}{note_str}")
+            else:
+                note_str = f" — {e['note']}" if e["note"] else ""
+                click.echo(f"  {e['date']}  {type_icon} {e['action']}")
+                click.echo(f"          by {e['actor']} on {e['entity_type']} {e['entity_id']} {e['entity_title']}{note_str}")
+                click.echo()
 
 
 @cli.command("search")
