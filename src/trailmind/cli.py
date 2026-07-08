@@ -4154,6 +4154,106 @@ def task_tag_remove(ctx: click.Context, task_ref: str, tag: str, actor: str) -> 
         click.echo(f"Tag {tag!r} not found on task.")
 
 
+@task_tag_group.command("bulk-add")
+@click.argument("task_refs", nargs=-1)
+@click.argument("tag")
+@click.option("--actor", required=True)
+@click.option("--from-file", "from_file", default=None,
+              help="Read task IDs from file (one per line), or '-' for stdin.")
+@click.option("--dry-run", is_flag=True, help="Preview without applying.")
+@click.pass_context
+def task_tag_bulk_add(
+    ctx: click.Context,
+    task_refs: tuple[str, ...],
+    tag: str,
+    actor: str,
+    from_file: str | None,
+    dry_run: bool,
+) -> None:
+    """Bulk-add a tag to multiple tasks."""
+    from trailmind.resolver import resolve_entity
+    from trailmind.log import read_entity_user_facing
+    from trailmind.entity_io import write_entity
+
+    root = find_repo_root(_cwd_from_context(ctx))
+    refs = list(task_refs)
+    if from_file:
+        refs.extend(_read_ids_from_file(from_file))
+    if not refs:
+        raise TrailmindError("no task IDs provided (pass as args or use --from-file)")
+    if dry_run:
+        click.echo(f"[DRY RUN] Would add tag {tag!r} to {len(refs)} task(s):")
+        for r in refs:
+            click.echo(f"  - {r}")
+        return
+    touched = []
+    for task_ref in refs:
+        try:
+            path = resolve_entity(root, raw=task_ref, entity="T")
+            fm, body = read_entity_user_facing(path, label="task")
+            tags = list(fm.get("tags") or [])
+            if tag not in tags:
+                tags.append(tag)
+                fm["tags"] = tags
+                write_entity(path, frontmatter=fm, body=body)
+                touched.append(path)
+        except Exception as exc:
+            click.echo(f"  ⚠ {task_ref}: {exc}", err=True)
+    if touched:
+        _echo_touched(root, touched)
+        click.echo(f"\nAdded tag {tag!r} to {len(touched)} task(s).")
+
+
+@task_tag_group.command("bulk-remove")
+@click.argument("task_refs", nargs=-1)
+@click.argument("tag")
+@click.option("--actor", required=True)
+@click.option("--from-file", "from_file", default=None,
+              help="Read task IDs from file (one per line), or '-' for stdin.")
+@click.option("--dry-run", is_flag=True, help="Preview without applying.")
+@click.pass_context
+def task_tag_bulk_remove(
+    ctx: click.Context,
+    task_refs: tuple[str, ...],
+    tag: str,
+    actor: str,
+    from_file: str | None,
+    dry_run: bool,
+) -> None:
+    """Bulk-remove a tag from multiple tasks."""
+    from trailmind.resolver import resolve_entity
+    from trailmind.log import read_entity_user_facing
+    from trailmind.entity_io import write_entity
+
+    root = find_repo_root(_cwd_from_context(ctx))
+    refs = list(task_refs)
+    if from_file:
+        refs.extend(_read_ids_from_file(from_file))
+    if not refs:
+        raise TrailmindError("no task IDs provided (pass as args or use --from-file)")
+    if dry_run:
+        click.echo(f"[DRY RUN] Would remove tag {tag!r} from {len(refs)} task(s):")
+        for r in refs:
+            click.echo(f"  - {r}")
+        return
+    touched = []
+    for task_ref in refs:
+        try:
+            path = resolve_entity(root, raw=task_ref, entity="T")
+            fm, body = read_entity_user_facing(path, label="task")
+            tags = list(fm.get("tags") or [])
+            if tag in tags:
+                tags.remove(tag)
+                fm["tags"] = tags
+                write_entity(path, frontmatter=fm, body=body)
+                touched.append(path)
+        except Exception as exc:
+            click.echo(f"  ⚠ {task_ref}: {exc}", err=True)
+    if touched:
+        _echo_touched(root, touched)
+        click.echo(f"\nRemoved tag {tag!r} from {len(touched)} task(s).")
+
+
 @task_group.command("show")
 @click.argument("task_ref")
 @click.option("--json", "json_output", is_flag=True, help="Print structured JSON.")
@@ -4790,6 +4890,108 @@ def task_depend_remove(
     _echo_touched(root, [touched])
 
 
+@task_depend_group.command("bulk-add")
+@click.argument("task_refs", nargs=-1)
+@click.argument("depends_on_ref")
+@click.option("--soft", is_flag=True, help="Add as a soft dependency.")
+@click.option("--actor", required=True)
+@click.option("--note", default=None)
+@click.option("--from-file", "from_file", default=None,
+              help="Read task IDs from file (one per line), or '-' for stdin.")
+@click.option("--dry-run", is_flag=True, help="Preview without applying.")
+@click.pass_context
+def task_depend_bulk_add(
+    ctx: click.Context,
+    task_refs: tuple[str, ...],
+    depends_on_ref: str,
+    soft: bool,
+    actor: str,
+    note: str | None,
+    from_file: str | None,
+    dry_run: bool,
+) -> None:
+    """Bulk-add a dependency to multiple tasks."""
+    root = find_repo_root(_cwd_from_context(ctx))
+    refs = list(task_refs)
+    if from_file:
+        refs.extend(_read_ids_from_file(from_file))
+    if not refs:
+        raise TrailmindError("no task IDs provided (pass as args or use --from-file)")
+    if dry_run:
+        dep_type = "soft" if soft else "hard"
+        click.echo(f"[DRY RUN] Would add {dep_type} dep {depends_on_ref!r} to {len(refs)} task(s):")
+        for r in refs:
+            click.echo(f"  - {r}")
+        return
+    touched = []
+    for task_ref in refs:
+        try:
+            path = add_task_dependency(
+                root,
+                task_ref=task_ref,
+                depends_on_ref=depends_on_ref,
+                actor=actor,
+                soft=soft,
+                note=note,
+            )
+            touched.append(path)
+        except Exception as exc:
+            click.echo(f"  ⚠ {task_ref}: {exc}", err=True)
+    if touched:
+        _echo_touched(root, touched)
+
+
+@task_depend_group.command("bulk-remove")
+@click.argument("task_refs", nargs=-1)
+@click.argument("depends_on_ref")
+@click.option("--soft", is_flag=True, help="Remove from soft dependencies.")
+@click.option("--actor", required=True)
+@click.option("--note", default=None)
+@click.option("--from-file", "from_file", default=None,
+              help="Read task IDs from file (one per line), or '-' for stdin.")
+@click.option("--dry-run", is_flag=True, help="Preview without applying.")
+@click.pass_context
+def task_depend_bulk_remove(
+    ctx: click.Context,
+    task_refs: tuple[str, ...],
+    depends_on_ref: str,
+    soft: bool,
+    actor: str,
+    note: str | None,
+    from_file: str | None,
+    dry_run: bool,
+) -> None:
+    """Bulk-remove a dependency from multiple tasks."""
+    root = find_repo_root(_cwd_from_context(ctx))
+    refs = list(task_refs)
+    if from_file:
+        refs.extend(_read_ids_from_file(from_file))
+    if not refs:
+        raise TrailmindError("no task IDs provided (pass as args or use --from-file)")
+    if dry_run:
+        dep_type = "soft" if soft else "hard"
+        click.echo(f"[DRY RUN] Would remove {dep_type} dep {depends_on_ref!r} from {len(refs)} task(s):")
+        for r in refs:
+            click.echo(f"  - {r}")
+        return
+    touched = []
+    for task_ref in refs:
+        try:
+            path = remove_task_dependency(
+                root,
+                task_ref=task_ref,
+                depends_on_ref=depends_on_ref,
+                actor=actor,
+                soft=soft,
+                note=note,
+            )
+            touched.append(path)
+        except Exception as exc:
+            click.echo(f"  ⚠ {task_ref}: {exc}", err=True)
+    if touched:
+        _echo_touched(root, touched)
+
+
 @task_group.command("normalize-statuses")
 @click.option("--write", "write_changes", is_flag=True, help="Rewrite legacy statuses in task files.")
 @click.pass_context
@@ -4926,6 +5128,84 @@ def task_deliverable_complete(ctx: click.Context, task_ref: str, item: str, acto
     root = find_repo_root(_cwd_from_context(ctx))
     touched = complete_task_deliverable(root, task_ref=task_ref, item=item, actor=actor)
     _echo_touched(root, [touched])
+
+
+@task_deliverable_group.command("bulk-add")
+@click.argument("task_refs", nargs=-1)
+@click.option("--item", required=True)
+@click.option("--actor", required=True)
+@click.option("--from-file", "from_file", default=None,
+              help="Read task IDs from file (one per line), or '-' for stdin.")
+@click.option("--dry-run", is_flag=True, help="Preview without applying.")
+@click.pass_context
+def task_deliverable_bulk_add(
+    ctx: click.Context,
+    task_refs: tuple[str, ...],
+    item: str,
+    actor: str,
+    from_file: str | None,
+    dry_run: bool,
+) -> None:
+    """Bulk-add a deliverable to multiple tasks."""
+    root = find_repo_root(_cwd_from_context(ctx))
+    refs = list(task_refs)
+    if from_file:
+        refs.extend(_read_ids_from_file(from_file))
+    if not refs:
+        raise TrailmindError("no task IDs provided (pass as args or use --from-file)")
+    if dry_run:
+        click.echo(f"[DRY RUN] Would add deliverable {item!r} to {len(refs)} task(s):")
+        for r in refs:
+            click.echo(f"  - {r}")
+        return
+    touched = []
+    for task_ref in refs:
+        try:
+            path = add_task_deliverable(root, task_ref=task_ref, item=item, actor=actor)
+            touched.append(path)
+        except Exception as exc:
+            click.echo(f"  ⚠ {task_ref}: {exc}", err=True)
+    if touched:
+        _echo_touched(root, touched)
+
+
+@task_deliverable_group.command("bulk-complete")
+@click.argument("task_refs", nargs=-1)
+@click.option("--item", required=True)
+@click.option("--actor", required=True)
+@click.option("--from-file", "from_file", default=None,
+              help="Read task IDs from file (one per line), or '-' for stdin.")
+@click.option("--dry-run", is_flag=True, help="Preview without applying.")
+@click.pass_context
+def task_deliverable_bulk_complete(
+    ctx: click.Context,
+    task_refs: tuple[str, ...],
+    item: str,
+    actor: str,
+    from_file: str | None,
+    dry_run: bool,
+) -> None:
+    """Bulk-complete a deliverable on multiple tasks."""
+    root = find_repo_root(_cwd_from_context(ctx))
+    refs = list(task_refs)
+    if from_file:
+        refs.extend(_read_ids_from_file(from_file))
+    if not refs:
+        raise TrailmindError("no task IDs provided (pass as args or use --from-file)")
+    if dry_run:
+        click.echo(f"[DRY RUN] Would complete deliverable {item!r} on {len(refs)} task(s):")
+        for r in refs:
+            click.echo(f"  - {r}")
+        return
+    touched = []
+    for task_ref in refs:
+        try:
+            path = complete_task_deliverable(root, task_ref=task_ref, item=item, actor=actor)
+            touched.append(path)
+        except Exception as exc:
+            click.echo(f"  ⚠ {task_ref}: {exc}", err=True)
+    if touched:
+        _echo_touched(root, touched)
 
 
 @cli.group("issue")
