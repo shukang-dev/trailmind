@@ -9,6 +9,7 @@ from trailmind.ids import next_entity_id, slugify
 from trailmind.log import action_activity_entry, append_activity_entry, read_entity_user_facing
 from trailmind.resolver import resolve_entity
 from trailmind.roster import Roster
+from trailmind.task_rules import string_list_field
 
 
 ISSUE_CLOSE_STATUSES = ("done", "wontfix")
@@ -291,6 +292,9 @@ def edit_issue(
     actor: str,
     title: str | None = None,
     description: str | None = None,
+    severity: str | None = None,
+    owner: str | None = None,
+    linked_tasks: list[str] | None = None,
     note: str | None = None,
 ) -> Path:
     """Edit editable fields on an issue.
@@ -324,8 +328,29 @@ def edit_issue(
             body = f"## Description\n\n{description.strip()}\n\n{old_body.lstrip('#')}"
         changes.append("Description updated")
 
+    if severity is not None:
+        normalized = severity.strip().lower()
+        if normalized not in ISSUE_SEVERITIES:
+            raise TrailmindError(f"invalid severity {severity!r}; expected one of: {', '.join(ISSUE_SEVERITIES)}")
+        old_severity = str(frontmatter.get("severity", ""))
+        frontmatter["severity"] = normalized
+        changes.append(f"Severity: {old_severity} → {normalized}")
+
+    if owner is not None:
+        roster = Roster.load(repo_root / "roster.yaml")
+        owner_shortname = roster.resolve_shortname(owner)
+        old_owner = str(frontmatter.get("owner", ""))
+        frontmatter["owner"] = owner_shortname
+        changes.append(f"Owner: {old_owner} → {owner_shortname}")
+
+    if linked_tasks is not None:
+        old_linked = string_list_field(frontmatter, "linked_tasks", label="issue")
+        normalized = [t.strip() for t in linked_tasks if t.strip()]
+        frontmatter["linked_tasks"] = normalized
+        changes.append(f"Linked tasks: {', '.join(old_linked) or '(none)'} → {', '.join(normalized) or '(none)'}")
+
     if not changes:
-        raise TrailmindError("no fields to edit; provide --title or --description")
+        raise TrailmindError("no fields to edit; provide --title, --description, --severity, --owner, or --linked-tasks")
 
     action = f"Edited issue: {'; '.join(changes)}"
     body = append_activity_entry(

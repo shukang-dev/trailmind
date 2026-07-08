@@ -1853,6 +1853,8 @@ def task_next(ctx: click.Context, owner: str | None, epic_ref: str | None, proje
 @click.option("--design-doc", default=None, help="Path to design document.")
 @click.option("--due", default=None, help="New due date (YYYY-MM-DD), or empty string to clear.")
 @click.option("--tags", default=None, help="Comma-separated tags (replaces existing).")
+@click.option("--known-issues", default=None, help="Comma-separated known issue IDs (replaces existing).")
+@click.option("--deliverables", default=None, help="Comma-separated deliverables (replaces existing).")
 @click.option("--actor", required=True)
 @click.option("--note", default=None)
 @click.pass_context
@@ -1864,6 +1866,8 @@ def task_edit(
     design_doc: str | None,
     due: str | None,
     tags: str | None,
+    known_issues: str | None,
+    deliverables: str | None,
     actor: str,
     note: str | None,
 ) -> None:
@@ -1871,6 +1875,8 @@ def task_edit(
     root = find_repo_root(_cwd_from_context(ctx))
     paths = split_csv(code_paths) if code_paths is not None else None
     tag_list = split_csv(tags) if tags is not None else None
+    ki_list = split_csv(known_issues) if known_issues is not None else None
+    del_list = split_csv(deliverables) if deliverables is not None else None
     touched = edit_task(
         root,
         task_ref=task_ref,
@@ -1880,6 +1886,8 @@ def task_edit(
         design_doc=design_doc,
         due=due,
         tags=tag_list,
+        known_issues=ki_list,
+        deliverables=del_list,
         note=note,
     )
     _echo_touched(root, [touched])
@@ -2435,6 +2443,10 @@ def issue_set_severity(
 @click.argument("issue_ref")
 @click.option("--title", default=None, help="New issue title.")
 @click.option("--description", default=None, help="New issue description.")
+@click.option("--severity", default=None, type=click.Choice(ISSUE_SEVERITIES, case_sensitive=False),
+              help="New issue severity.")
+@click.option("--owner", default=None, help="New owner email or shortname.")
+@click.option("--linked-tasks", default=None, help="Comma-separated linked task IDs (replaces existing).")
 @click.option("--actor", required=True)
 @click.option("--note", default=None)
 @click.pass_context
@@ -2443,17 +2455,24 @@ def issue_edit(
     issue_ref: str,
     title: str | None,
     description: str | None,
+    severity: str | None,
+    owner: str | None,
+    linked_tasks: str | None,
     actor: str,
     note: str | None,
 ) -> None:
     """Edit editable fields on an issue."""
     root = find_repo_root(_cwd_from_context(ctx))
+    linked = split_csv(linked_tasks) if linked_tasks is not None else None
     touched = edit_issue(
         root,
         issue_ref=issue_ref,
         actor=actor,
         title=title,
         description=description,
+        severity=severity,
+        owner=owner,
+        linked_tasks=linked,
         note=note,
     )
     _echo_touched(root, [touched])

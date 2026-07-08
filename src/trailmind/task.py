@@ -639,6 +639,8 @@ def edit_task(
     design_doc: str | None = None,
     due: str | None = None,
     tags: list[str] | None = None,
+    known_issues: list[str] | None = None,
+    deliverables: list[str] | None = None,
     note: str | None = None,
 ) -> Path:
     """Edit editable fields on a task.
@@ -686,8 +688,20 @@ def edit_task(
         frontmatter["tags"] = normalized
         changes.append(f"Tags: {', '.join(old_tags) or '(none)'} → {', '.join(normalized) or '(none)'}")
 
+    if known_issues is not None:
+        old_ki = string_list_field(frontmatter, "known_issues", label="task")
+        normalized = [k.strip() for k in known_issues if k.strip()]
+        frontmatter["known_issues"] = normalized
+        changes.append(f"Known issues: {', '.join(old_ki) or '(none)'} → {', '.join(normalized) or '(none)'}")
+
+    if deliverables is not None:
+        old_del = string_list_field(frontmatter, "deliverables", label="task")
+        normalized = [d.strip() for d in deliverables if d.strip()]
+        frontmatter["deliverables"] = normalized
+        changes.append(f"Deliverables: {', '.join(old_del) or '(none)'} → {', '.join(normalized) or '(none)'}")
+
     if not changes:
-        raise TrailmindError("no fields to edit; provide --title, --code-paths, --design-doc, --due, or --tags")
+        raise TrailmindError("no fields to edit; provide --title, --code-paths, --design-doc, --due, --tags, --known-issues, or --deliverables")
 
     action = f"Edited task: {'; '.join(changes)}"
     body = append_activity_entry(
