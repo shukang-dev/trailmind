@@ -771,6 +771,132 @@ def today_command(ctx: click.Context, owner: str | None, project: str | None,
     click.echo("\n".join(lines))
 
 
+@cli.command("weekly")
+@click.option("--project", default=None, help="Show weekly review for a specific project.")
+@click.option("--epic", default=None, help="Show weekly review for a specific epic.")
+@click.option("--owner", default=None, help="Show weekly review for a specific owner.")
+@click.option("--json", "json_output", is_flag=True, help="Print structured JSON.")
+@click.pass_context
+def weekly_command(ctx: click.Context, project: str | None, epic: str | None,
+                     owner: str | None, json_output: bool) -> None:
+    """Weekly review: completed this week, upcoming, and activity."""
+    from datetime import date, timedelta
+    root = find_repo_root(_cwd_from_context(ctx))
+    today = date.today()
+    week_start = today - timedelta(days=today.weekday())  # Monday
+    week_end = week_start + timedelta(days=6)  # Sunday
+    week_start_str = week_start.isoformat()
+    week_end_str = week_end.isoformat()
+    today_str = today.isoformat()
+
+    # Collect tasks
+    all_tasks = list_tasks(root, epic_ref=epic, project_ref=project, owner=owner)
+    done_this_week = [t for t in all_tasks
+                      if t.get("status") == "done"
+                      and t.get("completed")
+                      and week_start_str <= t["completed"] <= week_end_str]
+    # Fallback: if no completed date, check activity log
+    if not done_this_week:
+        done_this_week = [t for t in all_tasks if t.get("status") == "done"]
+
+    active_tasks = [t for t in all_tasks if t.get("status") not in ("done", "wontfix")]
+    due_this_week = [t for t in active_tasks
+                     if t.get("due") and week_start_str <= t["due"] <= week_end_str]
+    overdue = [t for t in active_tasks if t.get("due") and t["due"] < today_str]
+
+    # Collect issues
+    all_issues = list_issues(root, epic_ref=epic, project_ref=project)
+    closed_this_week = [i for i in all_issues if i.get("status") in ("done", "wontfix")]
+    open_issues = [i for i in all_issues if i.get("status") not in ("done", "wontfix")]
+
+    # Activity this week
+    entries = collect_activity(root, limit=50, project=project, epic=epic,
+                                since=week_start_str)
+
+    # Milestones
+    milestones = list_milestones(root, epic_ref=epic, project_ref=project)
+    upcoming_milestones = sorted(
+        [m for m in milestones if m.get("date") and m["date"] >= today_str and m.get("status") != "done"],
+        key=lambda m: m.get("date", "")
+    )[:3]
+
+    if json_output:
+        data = {
+            "week": {"start": week_start_str, "end": week_end_str},
+            "tasks": {
+                "done_this_week": [{"id": t["id"], "title": t["title"], "owner": t.get("owner", "")} for t in done_this_week],
+                "due_this_week": [{"id": t["id"], "title": t["title"], "due": t.get("due", ""), "owner": t.get("owner", "")} for t in due_this_week],
+                "overdue": [{"id": t["id"], "title": t["title"], "due": t.get("due", ""), "owner": t.get("owner", "")} for t in overdue],
+                "active": len(active_tasks),
+            },
+            "issues": {
+                "closed_this_week": len(closed_this_week),
+                "open": len(open_issues),
+            },
+            "activity_count": len(entries),
+            "upcoming_milestones": [{"title": m["title"], "date": m["date"]} for m in upcoming_milestones],
+        }
+        click.echo(json.dumps(data, ensure_ascii=False, indent=2))
+        return
+
+    lines = []
+    lines.append(f"📅 Weekly Review — {week_start_str} to {week_end_str}")
+    lines.append("")
+
+    # Completed
+    lines.append(f"✅ Completed this week ({len(done_this_week)}):")
+    if done_this_week:
+        for t in done_this_week:
+            owner_str = f" @{t.get('owner', '')}" if t.get('owner') else ""
+            lines.append(f"   {t['id']}{owner_str}  {t['title']}")
+    else:
+        lines.append("   (none)")
+    lines.append("")
+
+    # Due this week
+    lines.append(f"📆 Due this week ({len(due_this_week)}):")
+    if due_this_week:
+        for t in due_this_week:
+            pri = f"[{t.get('priority', '').upper()}]" if t.get('priority') else ""
+            owner_str = f" @{t.get('owner', '')}" if t.get('owner') else ""
+            lines.append(f"   {t['id']} {pri}{owner_str} due:{t.get('due', '')}  {t['title']}")
+    else:
+        lines.append("   (none)")
+    lines.append("")
+
+    # Overdue
+    if overdue:
+        lines.append(f"⚠️  Overdue ({len(overdue)}):")
+        for t in overdue:
+            pri = f"[{t.get('priority', '').upper()}]" if t.get('priority') else ""
+            owner_str = f" @{t.get('owner', '')}" if t.get('owner') else ""
+            lines.append(f"   {t['id']} {pri}{owner_str} due:{t.get('due', '')}  {t['title']}")
+        lines.append("")
+
+    # Issues
+    lines.append(f"🐛 Issues: {len(open_issues)} open, {len(closed_this_week)} closed this week")
+    lines.append("")
+
+    # Activity
+    lines.append(f"📝 Activity: {len(entries)} entries this week")
+    lines.append("")
+
+    # Upcoming milestones
+    if upcoming_milestones:
+        lines.append("🏁 Upcoming milestones:")
+        for m in upcoming_milestones:
+            lines.append(f"   {m['date']}  {m['title']}")
+        lines.append("")
+
+    # Summary
+    total = len(all_tasks)
+    done = len([t for t in all_tasks if t.get("status") == "done"])
+    pct = round(done / total * 100) if total else 0
+    lines.append(f"📊 Progress: {done}/{total} tasks done ({pct}%)")
+
+    click.echo("\n".join(lines))
+
+
 @cli.command("export")
 @click.option("--output", "-o", default=None, help="Write to file instead of stdout.")
 @click.option("--format", "fmt", default="json", type=click.Choice(("json", "csv"), case_sensitive=False),
