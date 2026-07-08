@@ -333,6 +333,7 @@ def add_task(
     known_issues: list[str],
     deliverables: list[str],
     priority: str = DEFAULT_PRIORITY,
+    due: str | None = None,
     tags: list[str] | None = None,
 ) -> Path:
     epic_path = _resolve_epic(repo_root, epic)
@@ -347,6 +348,17 @@ def add_task(
     _ensure_tasks_directory(tasks_path)
     task_id = next_entity_id(tasks_path, entity="T", uid=filer_uid)
     task_path = tasks_path / f"{task_id}-{slugify(title)}.md"
+
+    # Validate due date if provided
+    validated_due = None
+    if due:
+        from datetime import date as _date
+        try:
+            _date.fromisoformat(due)
+            validated_due = due
+        except ValueError:
+            raise TrailmindError(f"invalid due date {due!r}; expected YYYY-MM-DD")
+
     write_entity(
         task_path,
         frontmatter={
@@ -358,7 +370,7 @@ def add_task(
             "priority": validated_priority,
             "created": date.today().isoformat(),
             "start": None,
-            "due": None,
+            "due": validated_due,
             "branches": {},
             "verify": {},
             "code_paths": code_paths,

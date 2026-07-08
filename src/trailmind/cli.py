@@ -1513,6 +1513,7 @@ def task_list_cmd(
 @click.option("--priority", default=DEFAULT_PRIORITY, show_default=True,
               type=click.Choice(TASK_PRIORITIES, case_sensitive=False),
               help="Task priority level.")
+@click.option("--due", default=None, help="Due date (YYYY-MM-DD).")
 @click.option("--tags", default=None, help="Comma-separated tags.")
 @click.pass_context
 def task_add(
@@ -1528,6 +1529,7 @@ def task_add(
     known_issues: str,
     deliverables: str,
     priority: str,
+    due: str | None,
     tags: str | None,
 ) -> None:
     root = find_repo_root(_cwd_from_context(ctx))
@@ -1545,6 +1547,7 @@ def task_add(
         known_issues=split_csv(known_issues),
         deliverables=split_csv(deliverables),
         priority=priority,
+        due=due,
         tags=tag_list,
     )
     _echo_touched(root, [touched])
@@ -2652,6 +2655,8 @@ def activity_command(
 @click.argument("query")
 @click.option("--type", "entity_types", default=None,
               help="Filter by entity type (comma-separated: task,issue,epic,project,milestone,inbox,spec,plan).")
+@click.option("--project", default=None, help="Filter by project slug.")
+@click.option("--epic", default=None, help="Filter by epic path or slug.")
 @click.option("--limit", default=30, show_default=True, type=click.IntRange(min=1, max=200),
               help="Maximum results.")
 @click.option("--json", "json_output", is_flag=True, help="Print structured JSON.")
@@ -2660,13 +2665,16 @@ def search_command(
     ctx: click.Context,
     query: str,
     entity_types: str | None,
+    project: str | None,
+    epic: str | None,
     limit: int,
     json_output: bool,
 ) -> None:
     """Search across all entities by keyword."""
     root = find_repo_root(_cwd_from_context(ctx))
     type_list = [t.strip().lower() for t in entity_types.split(",")] if entity_types else None
-    results = search_entities(root, query=query, entity_types=type_list, limit=limit)
+    results = search_entities(root, query=query, entity_types=type_list,
+                               project=project, epic=epic, limit=limit)
 
     if json_output:
         click.echo(json.dumps(results, ensure_ascii=False, indent=2))

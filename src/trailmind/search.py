@@ -8,12 +8,16 @@ def search_entities(
     *,
     query: str,
     entity_types: list[str] | None = None,
+    project: str | None = None,
+    epic: str | None = None,
     limit: int = 30,
 ) -> list[dict[str, str]]:
     """Search across all entities by keyword in title and body.
 
     entity_types: filter by type (project, epic, task, issue, milestone, inbox, spec, plan).
                   None means search all types.
+    project: filter by project slug.
+    epic: filter by epic path or slug.
     """
     query_lower = query.lower()
     projects_dir = repo_root / "projects"
@@ -26,6 +30,8 @@ def search_entities(
     for proj_dir in sorted(projects_dir.iterdir()):
         if not proj_dir.is_dir():
             continue
+        if project and proj_dir.name != project:
+            continue
 
         # PROJECT.md
         proj_md = proj_dir / "PROJECT.md"
@@ -35,6 +41,10 @@ def search_entities(
         for epic_dir in sorted(proj_dir.iterdir()):
             if not epic_dir.is_dir():
                 continue
+            if epic:
+                epic_rel = f"projects/{proj_dir.name}/{epic_dir.name}"
+                if epic != epic_rel and epic != epic_dir.name:
+                    continue
 
             epic_md = epic_dir / "EPIC.md"
             if epic_md.exists():
