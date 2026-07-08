@@ -3742,6 +3742,7 @@ def milestone_edit(
               type=click.Choice(("date", "entity_type", "actor", "action"), case_sensitive=False),
               help="Sort entries (default: date).")
 @click.option("--compact", is_flag=True, help="Compact single-line output.")
+@click.option("--csv", "csv_output", is_flag=True, help="Output as CSV.")
 @click.option("--json", "json_output", is_flag=True, help="Print structured JSON.")
 @click.pass_context
 def activity_command(
@@ -3754,6 +3755,7 @@ def activity_command(
     epic: str | None,
     sort_by: str,
     compact: bool,
+    csv_output: bool,
     json_output: bool,
 ) -> None:
     """Show recent activity across all entities."""
@@ -3776,6 +3778,21 @@ def activity_command(
             entries.sort(key=lambda e: (e.get("actor", ""), e.get("date", "")), reverse=True)
         elif sort_by == "action":
             entries.sort(key=lambda e: (e.get("action", "").lower(), e.get("date", "")), reverse=True)
+
+    if csv_output:
+        import csv
+        import io
+        output = io.StringIO()
+        writer = csv.writer(output)
+        writer.writerow(["date", "entity_type", "entity_id", "entity_title", "actor", "action", "note"])
+        for e in entries:
+            writer.writerow([
+                e.get("date", ""), e.get("entity_type", ""), e.get("entity_id", ""),
+                e.get("entity_title", ""), e.get("actor", ""), e.get("action", ""),
+                e.get("note", ""),
+            ])
+        click.echo(output.getvalue(), nl=False)
+        return
 
     if json_output:
         click.echo(json.dumps(entries, ensure_ascii=False, indent=2))
