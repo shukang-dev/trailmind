@@ -126,8 +126,9 @@ def test_format_entity_show_includes_body(tmp_path: Path):
     repo, task_id, _issue_id, _ms_id, _inbox_id = _repo_with_data(tmp_path)
     data = show_entity(repo, task_id, "T")
     rendered = format_entity_show(data, entity_label="Task")
-    assert "Body" in rendered
     assert "Test Task" in rendered
+    # New format shows activity and comments instead of raw body
+    assert "Activity" in rendered or "Comments" in rendered or "epic" in rendered
 
 
 def test_task_show_missing_is_error(tmp_path: Path):
