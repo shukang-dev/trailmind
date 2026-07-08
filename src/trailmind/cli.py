@@ -3549,6 +3549,8 @@ def task_group() -> None:
 @click.option("--no-tags", is_flag=True, help="Show only tasks without any tags.")
 @click.option("--has-deliverables", is_flag=True, help="Show only tasks that have deliverables defined.")
 @click.option("--no-deliverables", is_flag=True, help="Show only tasks without deliverables.")
+@click.option("--has-known-issues", is_flag=True, help="Show only tasks that have known issues.")
+@click.option("--no-known-issues", is_flag=True, help="Show only tasks without known issues.")
 @click.option("--has-deps", is_flag=True, help="Show only tasks that have dependencies.")
 @click.option("--no-deps", is_flag=True, help="Show only tasks without dependencies.")
 @click.option("--unassigned", is_flag=True, help="Show only tasks without an owner.")
@@ -3590,6 +3592,8 @@ def task_list_cmd(
     no_tags: bool,
     has_deliverables: bool,
     no_deliverables: bool,
+    has_known_issues: bool,
+    no_known_issues: bool,
     has_deps: bool,
     no_deps: bool,
     unassigned: bool,
@@ -3638,6 +3642,10 @@ def task_list_cmd(
         tasks = [t for t in tasks if t.get("deliverables")]
     if no_deliverables:
         tasks = [t for t in tasks if not t.get("deliverables")]
+    if has_known_issues:
+        tasks = [t for t in tasks if t.get("known_issues")]
+    if no_known_issues:
+        tasks = [t for t in tasks if not t.get("known_issues")]
     if has_deps:
         tasks = [t for t in tasks if t.get("depends_on") or t.get("soft_depends_on")]
     if no_deps:
