@@ -1556,6 +1556,277 @@ def burndown_command(ctx: click.Context, project: str | None, epic: str | None,
     click.echo("\n".join(lines))
 
 
+@cli.command("velocity")
+@click.option("--project", default=None, help="Filter by project.")
+@click.option("--epic", default=None, help="Filter by epic.")
+@click.option("--owner", default=None, help="Filter by owner.")
+@click.option("--weeks", default=4, show_default=True, type=click.IntRange(min=1, max=52),
+              help="Number of weeks to include.")
+@click.option("--json", "json_output", is_flag=True, help="Print structured JSON.")
+@click.pass_context
+def velocity_command(ctx: click.Context, project: str | None, epic: str | None,
+                      owner: str | None, weeks: int, json_output: bool) -> None:
+    """Show team velocity: tasks completed per week."""
+    from datetime import date, timedelta
+    root = find_repo_root(_cwd_from_context(ctx))
+    today = date.today()
+
+    all_tasks = list_tasks(root, epic_ref=epic, project_ref=project, owner=owner)
+    done_tasks = [t for t in all_tasks if t.get("status") == "done"]
+
+    # Build weekly buckets (most recent last)
+    # Week starts on Monday
+    week_start = today - timedelta(days=today.weekday())
+    weekly: dict[str, list] = {}
+    for i in range(weeks - 1, -1, -1):
+        ws = week_start - timedelta(weeks=i)
+        we = ws + timedelta(days=6)
+        key = f"{ws.isoformat()}~{we.isoformat()}"
+        weekly[key] = []
+
+    # Assign done tasks to weeks (approximate: use created date as proxy,
+    # since we don't have a completed date in the task dict)
+    # Better: check activity log for "Completed" entries
+    for t in done_tasks:
+        created = t.get("created", "")
+        if not created:
+            continue
+        try:
+            cd = date.fromisoformat(created)
+            for key in weekly:
+                ws_str, we_str = key.split("~")
+                if ws_str <= created <= we_str:
+                    weekly[key].append(t)
+                    break
+        except ValueError:
+            continue
+
+    # Compute stats
+    week_counts = [len(tasks) for tasks in weekly.values()]
+    total_done = sum(week_counts)
+    avg_velocity = round(total_done / weeks, 1) if weeks else 0
+
+    if json_output:
+        data = {
+            "weeks": weeks,
+            "total_done": total_done,
+            "average_velocity": avg_velocity,
+            "weekly": [
+                {"week": key, "completed": len(tasks),
+                 "tasks": [{"id": t["id"], "title": t["title"], "owner": t.get("owner", "")} for t in tasks]}
+                for key, tasks in weekly.items()
+            ],
+        }
+        click.echo(json.dumps(data, ensure_ascii=False, indent=2))
+        return
+
+    lines = []
+    lines.append(f"⚡ Velocity (last {weeks} weeks)")
+    lines.append(f"   Total completed: {total_done}")
+    lines.append(f"   Average: {avg_velocity} tasks/week")
+    lines.append("")
+
+    max_count = max(week_counts) if week_counts else 1
+    chart_width = 30
+
+    for key, tasks in weekly.items():
+        ws_str, we_str = key.split("~")
+        count = len(tasks)
+        bar_len = int(count / max(max_count, 1) * chart_width)
+        bar = "█" * bar_len
+        lines.append(f"  {ws_str}  {bar} {count}")
+
+    lines.append("")
+    if week_counts and len(week_counts) >= 2:
+        recent = week_counts[-1]
+        prev = week_counts[-2] if len(week_counts) >= 2 else 0
+        if prev > 0:
+            delta = round((recent - prev) / prev * 100)
+            arrow = "↑" if delta > 0 else ("↓" if delta < 0 else "→")
+            lines.append(f"📈 Trend: {arrow} {abs(delta)}% vs last week")
+
+    click.echo("\n".join(lines))
+
+
+@cli.command("tag-list")
+@click.option("--project", default=None, help="Filter by project.")
+@click.option("--epic", default=None, help="Filter by epic.")
+@click.option("--sort", "sort_by", default="count",
+              type=click.Choice(("count", "name"), case_sensitive=False),
+              help="Sort tags by count or name (default: count).")
+@click.option("--json", "json_output", is_flag=True, help="Print structured JSON.")
+@click.pass_context
+def tag_list_command(ctx: click.Context, project: str | None, epic: str | None,
+                      sort_by: str, json_output: bool) -> None:
+    """List all tags used across tasks with counts."""
+    from collections import Counter
+    root = find_repo_root(_cwd_from_context(ctx))
+
+    all_tasks = list_tasks(root, epic_ref=epic, project_ref=project)
+    active_tasks = [t for t in all_tasks if t.get("status") not in ("done", "wontfix")]
+
+    tag_counter: Counter = Counter()
+    tag_tasks: dict[str, list] = {}
+
+    for t in all_tasks:
+        tags = t.get("tags") or []
+        for tag in tags:
+            tag_str = str(tag)
+            tag_counter[tag_str] += 1
+            if tag_str not in tag_tasks:
+                tag_tasks[tag_str] = []
+            tag_tasks[tag_str].append(t)
+
+    # Active-only counts
+    active_tag_counter: Counter = Counter()
+    for t in active_tasks:
+        tags = t.get("tags") or []
+        for tag in tags:
+            active_tag_counter[str(tag)] += 1
+
+    if sort_by == "name":
+        sorted_tags = sorted(tag_counter.keys())
+    else:
+        sorted_tags = [t for t, _ in tag_counter.most_common()]
+
+    if json_output:
+        data = [
+            {
+                "tag": tag,
+                "count": tag_counter[tag],
+                "active_count": active_tag_counter.get(tag, 0),
+                "tasks": [{"id": t["id"], "title": t["title"], "status": t.get("status", "")}
+                          for t in tag_tasks.get(tag, [])],
+            }
+            for tag in sorted_tags
+        ]
+        click.echo(json.dumps(data, ensure_ascii=False, indent=2))
+        return
+
+    if not tag_counter:
+        click.echo("No tags found.")
+        return
+
+    lines = []
+    lines.append(f"🏷️  Tags ({len(tag_counter)} total)")
+    lines.append("")
+
+    max_count = max(tag_counter.values()) if tag_counter else 1
+    chart_width = 20
+
+    for tag in sorted_tags:
+        count = tag_counter[tag]
+        active = active_tag_counter.get(tag, 0)
+        bar_len = int(count / max(max_count, 1) * chart_width)
+        bar = "█" * bar_len
+        lines.append(f"  {tag:20s} {bar} {count} total ({active} active)")
+
+    lines.append("")
+    lines.append(f"💡 {len(all_tasks)} tasks total, {len(active_tasks)} active")
+
+    click.echo("\n".join(lines))
+
+
+@cli.command("owner-list")
+@click.option("--project", default=None, help="Filter by project.")
+@click.option("--epic", default=None, help="Filter by epic.")
+@click.option("--sort", "sort_by", default="active",
+              type=click.Choice(("active", "total", "name", "done"), case_sensitive=False),
+              help="Sort owners (default: active count).")
+@click.option("--json", "json_output", is_flag=True, help="Print structured JSON.")
+@click.pass_context
+def owner_list_command(ctx: click.Context, project: str | None, epic: str | None,
+                        sort_by: str, json_output: bool) -> None:
+    """List all task owners with their task counts."""
+    from collections import defaultdict
+    root = find_repo_root(_cwd_from_context(ctx))
+
+    all_tasks = list_tasks(root, epic_ref=epic, project_ref=project)
+
+    owner_stats: dict[str, dict] = defaultdict(lambda: {
+        "total": 0, "active": 0, "done": 0, "blocked": 0,
+        "in_progress": 0, "overdue": 0,
+    })
+
+    from datetime import date
+    today = date.today().isoformat()
+
+    for t in all_tasks:
+        owner = t.get("owner") or "unassigned"
+        stats = owner_stats[owner]
+        stats["total"] += 1
+        status = t.get("status", "")
+        if status == "done":
+            stats["done"] += 1
+        elif status == "blocked":
+            stats["blocked"] += 1
+            stats["active"] += 1
+        elif status == "in_progress":
+            stats["in_progress"] += 1
+            stats["active"] += 1
+        elif status not in ("done", "wontfix"):
+            stats["active"] += 1
+        if status not in ("done", "wontfix") and t.get("due") and t["due"] < today:
+            stats["overdue"] += 1
+
+    # Sort
+    if sort_by == "name":
+        sorted_owners = sorted(owner_stats.keys())
+    elif sort_by == "total":
+        sorted_owners = sorted(owner_stats.keys(), key=lambda o: -owner_stats[o]["total"])
+    elif sort_by == "done":
+        sorted_owners = sorted(owner_stats.keys(), key=lambda o: -owner_stats[o]["done"])
+    else:  # active
+        sorted_owners = sorted(owner_stats.keys(), key=lambda o: -owner_stats[o]["active"])
+
+    if json_output:
+        data = [
+            {
+                "owner": owner,
+                "total": owner_stats[owner]["total"],
+                "active": owner_stats[owner]["active"],
+                "done": owner_stats[owner]["done"],
+                "blocked": owner_stats[owner]["blocked"],
+                "in_progress": owner_stats[owner]["in_progress"],
+                "overdue": owner_stats[owner]["overdue"],
+            }
+            for owner in sorted_owners
+        ]
+        click.echo(json.dumps(data, ensure_ascii=False, indent=2))
+        return
+
+    if not owner_stats:
+        click.echo("No task owners found.")
+        return
+
+    lines = []
+    lines.append(f"👥 Task Owners ({len(owner_stats)})")
+    lines.append("")
+
+    max_active = max(s["active"] for s in owner_stats.values()) if owner_stats else 1
+    chart_width = 20
+
+    for owner in sorted_owners:
+        s = owner_stats[owner]
+        bar_len = int(s["active"] / max(max_active, 1) * chart_width)
+        bar = "█" * bar_len
+        lines.append(f"  @{owner:15s} {bar} active:{s['active']} total:{s['total']} done:{s['done']}")
+        details = []
+        if s["blocked"]:
+            details.append(f"🚧 {s['blocked']}")
+        if s["in_progress"]:
+            details.append(f"🔧 {s['in_progress']}")
+        if s["overdue"]:
+            details.append(f"⚠️ {s['overdue']}")
+        if details:
+            lines.append(f"  {'':15s}  {' '.join(details)}")
+
+    lines.append("")
+    lines.append(f"💡 {len(all_tasks)} tasks total")
+
+    click.echo("\n".join(lines))
+
+
 def _format_export_csv(data: dict) -> str:
     """Format exported data as CSV with separate sections for tasks and issues."""
     import csv
