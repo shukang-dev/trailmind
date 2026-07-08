@@ -2260,6 +2260,7 @@ def inbox_group() -> None:
 @click.option("--author", required=True)
 @click.option("--title", required=True)
 @click.option("--note", required=True)
+@click.option("--dry-run", is_flag=True, help="Preview without creating.")
 @click.pass_context
 def inbox_add(
     ctx: click.Context,
@@ -2268,8 +2269,16 @@ def inbox_add(
     author: str,
     title: str,
     note: str,
+    dry_run: bool,
 ) -> None:
     root = find_repo_root(_cwd_from_context(ctx))
+    if dry_run:
+        scope = epic_ref or project_slug or "(root)"
+        click.echo(f"[DRY RUN] Would create inbox item in {scope}:")
+        click.echo(f"  Title: {title}")
+        click.echo(f"  Author: {author}")
+        click.echo(f"  Note: {note}")
+        return
     touched = add_inbox_item(root, project=project_slug, epic=epic_ref, author=author, title=title, note=note)
     _echo_touched(root, [touched])
 
@@ -4980,9 +4989,15 @@ def milestone_set_status(ctx: click.Context, milestone_ref: str, status: str, ac
 @click.option("--epic", required=True)
 @click.option("--title", required=True)
 @click.option("--date", "milestone_date", required=True)
+@click.option("--dry-run", is_flag=True, help="Preview without creating.")
 @click.pass_context
-def milestone_add(ctx: click.Context, epic: str, title: str, milestone_date: str) -> None:
+def milestone_add(ctx: click.Context, epic: str, title: str, milestone_date: str, dry_run: bool) -> None:
     root = find_repo_root(_cwd_from_context(ctx))
+    if dry_run:
+        click.echo(f"[DRY RUN] Would create milestone in {epic}:")
+        click.echo(f"  Title: {title}")
+        click.echo(f"  Date: {milestone_date}")
+        return
     touched = add_milestone(root, epic=epic, title=title, milestone_date=milestone_date)
     _echo_touched(root, [touched])
 
