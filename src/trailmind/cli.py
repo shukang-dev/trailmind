@@ -2111,6 +2111,19 @@ def _echo_touched(repo_root: Path, paths: list[Path]) -> None:
         click.echo(path.relative_to(repo_root).as_posix())
 
 
+def _read_ids_from_file(source: str) -> list[str]:
+    """Read entity IDs from a file path, or '-' for stdin. One ID per line."""
+    import sys
+    if source == "-":
+        content = sys.stdin.read()
+    else:
+        path = Path(source)
+        if not path.is_absolute():
+            path = Path.cwd() / path
+        content = path.read_text(encoding="utf-8")
+    return [line.strip() for line in content.splitlines() if line.strip()]
+
+
 def _relative_to_root(repo_root: Path, path: Path) -> str:
     try:
         return path.resolve(strict=False).relative_to(repo_root.resolve(strict=False)).as_posix()
@@ -3575,10 +3588,12 @@ def task_clone(
 
 
 @task_group.command("bulk-status")
-@click.argument("task_refs", nargs=-1, required=True)
+@click.argument("task_refs", nargs=-1)
 @click.argument("status")
 @click.option("--actor", required=True)
 @click.option("--note", default=None)
+@click.option("--from-file", "from_file", default=None,
+              help="Read task IDs from file (one per line), or '-' for stdin.")
 @click.pass_context
 def task_bulk_status(
     ctx: click.Context,
@@ -3586,11 +3601,17 @@ def task_bulk_status(
     status: str,
     actor: str,
     note: str | None,
+    from_file: str | None,
 ) -> None:
-    """Bulk-update task status for multiple tasks (e.g. T-001 T-002 T-003 ready)."""
+    """Bulk-update task status (e.g. T-001 T-002 ready, or --from-file ids.txt)."""
     root = find_repo_root(_cwd_from_context(ctx))
+    refs = list(task_refs)
+    if from_file:
+        refs.extend(_read_ids_from_file(from_file))
+    if not refs:
+        raise TrailmindError("no task IDs provided (pass as args or use --from-file)")
     touched = []
-    for task_ref in task_refs:
+    for task_ref in refs:
         try:
             path, _warning = set_task_status(
                 root,
@@ -3607,10 +3628,12 @@ def task_bulk_status(
 
 
 @task_group.command("bulk-assign")
-@click.argument("task_refs", nargs=-1, required=True)
+@click.argument("task_refs", nargs=-1)
 @click.argument("owner")
 @click.option("--actor", required=True)
 @click.option("--note", default=None)
+@click.option("--from-file", "from_file", default=None,
+              help="Read task IDs from file (one per line), or '-' for stdin.")
 @click.pass_context
 def task_bulk_assign(
     ctx: click.Context,
@@ -3618,11 +3641,17 @@ def task_bulk_assign(
     owner: str,
     actor: str,
     note: str | None,
+    from_file: str | None,
 ) -> None:
-    """Bulk-assign multiple tasks to an owner (e.g. T-001 T-002 alice)."""
+    """Bulk-assign tasks to an owner (e.g. T-001 T-002 alice, or --from-file ids.txt)."""
     root = find_repo_root(_cwd_from_context(ctx))
+    refs = list(task_refs)
+    if from_file:
+        refs.extend(_read_ids_from_file(from_file))
+    if not refs:
+        raise TrailmindError("no task IDs provided (pass as args or use --from-file)")
     touched = []
-    for task_ref in task_refs:
+    for task_ref in refs:
         try:
             path = assign_task(
                 root,
@@ -3639,10 +3668,12 @@ def task_bulk_assign(
 
 
 @task_group.command("bulk-due")
-@click.argument("task_refs", nargs=-1, required=True)
+@click.argument("task_refs", nargs=-1)
 @click.argument("due")
 @click.option("--actor", required=True)
 @click.option("--note", default=None)
+@click.option("--from-file", "from_file", default=None,
+              help="Read task IDs from file (one per line), or '-' for stdin.")
 @click.pass_context
 def task_bulk_due(
     ctx: click.Context,
@@ -3650,11 +3681,17 @@ def task_bulk_due(
     due: str,
     actor: str,
     note: str | None,
+    from_file: str | None,
 ) -> None:
-    """Bulk-set due date for multiple tasks (e.g. T-001 T-002 2026-08-01)."""
+    """Bulk-set due date for tasks (e.g. T-001 T-002 2026-08-01, or --from-file ids.txt)."""
     root = find_repo_root(_cwd_from_context(ctx))
+    refs = list(task_refs)
+    if from_file:
+        refs.extend(_read_ids_from_file(from_file))
+    if not refs:
+        raise TrailmindError("no task IDs provided (pass as args or use --from-file)")
     touched = []
-    for task_ref in task_refs:
+    for task_ref in refs:
         try:
             path = set_task_due(
                 root,
@@ -3668,6 +3705,47 @@ def task_bulk_due(
             click.echo(f"  ⚠ {task_ref}: {exc}", err=True)
     if touched:
         _echo_touched(root, touched)
+
+
+@task_group.command("link-issue")
+@click.argument("task_ref")
+@click.argument("issue_ref")
+@click.pass_context
+def task_link_issue(ctx: click.Context, task_ref: str, issue_ref: str) -> None:
+    """Link a task to an issue (e.g. T-001 I-001)."""
+    from trailmind.issue import link_issue_to_task
+    root = find_repo_root(_cwd_from_context(ctx))
+    touched = link_issue_to_task(root, task_ref=task_ref, issue_ref=issue_ref)
+    _echo_touched(root, touched)
+
+
+@task_group.command("unlink-issue")
+@click.argument("task_ref")
+@click.argument("issue_ref")
+@click.option("--actor", required=True)
+@click.option("--note", default=None)
+@click.pass_context
+def task_unlink_issue(ctx: click.Context, task_ref: str, issue_ref: str,
+                       actor: str, note: str | None) -> None:
+    """Unlink a task from an issue (e.g. T-001 I-001)."""
+    root = find_repo_root(_cwd_from_context(ctx))
+    # Remove from issue's linked_tasks
+    from trailmind.resolver import resolve_entity
+    from trailmind.log import read_entity_user_facing
+    from trailmind.entity_io import write_entity
+    from trailmind.activity import append_activity_entry, action_activity_entry
+
+    issue_path = resolve_entity(root, raw=issue_ref, entity="I")
+    fm, body = read_entity_user_facing(issue_path, label="issue")
+    linked = list(fm.get("linked_tasks") or [])
+    if task_ref in linked:
+        linked.remove(task_ref)
+    fm["linked_tasks"] = linked
+    action = f"Unlinked task {task_ref}"
+    body = append_activity_entry(body, action_activity_entry(
+        action=action, actor_label="actor", actor=actor, note=note))
+    write_entity(issue_path, frontmatter=fm, body=body)
+    _echo_touched(root, [issue_path])
 
 
 @task_group.group("depend")
@@ -4185,10 +4263,12 @@ def issue_set_severity(
 
 
 @issue_group.command("bulk-status")
-@click.argument("issue_refs", nargs=-1, required=True)
+@click.argument("issue_refs", nargs=-1)
 @click.argument("status", type=click.Choice(("open", "done", "wontfix"), case_sensitive=False))
 @click.option("--actor", required=True)
 @click.option("--note", default=None)
+@click.option("--from-file", "from_file", default=None,
+              help="Read issue IDs from file (one per line), or '-' for stdin.")
 @click.pass_context
 def issue_bulk_status(
     ctx: click.Context,
@@ -4196,11 +4276,18 @@ def issue_bulk_status(
     status: str,
     actor: str,
     note: str | None,
+    from_file: str | None,
 ) -> None:
-    """Bulk-update issue status (e.g. I-001 I-002 done)."""
+    """Bulk-update issue status (e.g. I-001 I-002 done, or --from-file ids.txt)."""
+    root = find_repo_root(_cwd_from_context(ctx))
+    refs = list(issue_refs)
+    if from_file:
+        refs.extend(_read_ids_from_file(from_file))
+    if not refs:
+        raise TrailmindError("no issue IDs provided (pass as args or use --from-file)")
     root = find_repo_root(_cwd_from_context(ctx))
     touched = []
-    for issue_ref in issue_refs:
+    for issue_ref in refs:
         try:
             if status in ("done", "wontfix"):
                 path = close_issue(
@@ -4225,10 +4312,12 @@ def issue_bulk_status(
 
 
 @issue_group.command("bulk-assign")
-@click.argument("issue_refs", nargs=-1, required=True)
+@click.argument("issue_refs", nargs=-1)
 @click.argument("owner")
 @click.option("--actor", required=True)
 @click.option("--note", default=None)
+@click.option("--from-file", "from_file", default=None,
+              help="Read issue IDs from file (one per line), or '-' for stdin.")
 @click.pass_context
 def issue_bulk_assign(
     ctx: click.Context,
@@ -4236,11 +4325,17 @@ def issue_bulk_assign(
     owner: str,
     actor: str,
     note: str | None,
+    from_file: str | None,
 ) -> None:
-    """Bulk-assign multiple issues to an owner (e.g. I-001 I-002 alice)."""
+    """Bulk-assign issues to an owner (e.g. I-001 I-002 alice, or --from-file ids.txt)."""
     root = find_repo_root(_cwd_from_context(ctx))
+    refs = list(issue_refs)
+    if from_file:
+        refs.extend(_read_ids_from_file(from_file))
+    if not refs:
+        raise TrailmindError("no issue IDs provided (pass as args or use --from-file)")
     touched = []
-    for issue_ref in issue_refs:
+    for issue_ref in refs:
         try:
             path = assign_issue(
                 root,
