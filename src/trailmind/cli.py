@@ -871,13 +871,14 @@ def inbox_add(
               type=click.Choice(("status", "epic", "project"), case_sensitive=False),
               help="Group inbox items by status, epic, or project.")
 @click.option("--limit", default=None, type=click.IntRange(min=1), help="Limit number of results.")
+@click.option("--compact", is_flag=True, help="Compact single-line output.")
 @click.option("--count", "count_only", is_flag=True, help="Show only the count of matching inbox items.")
 @click.option("--csv", "csv_output", is_flag=True, help="Output as CSV.")
 @click.option("--json", "json_output", is_flag=True, help="Print structured JSON instead of Markdown.")
 @click.pass_context
 def inbox_list(ctx: click.Context, project_slug: str | None, epic_ref: str | None,
                status: str | None, group_by: str | None, limit: int | None,
-               count_only: bool, csv_output: bool, json_output: bool) -> None:
+               compact: bool, count_only: bool, csv_output: bool, json_output: bool) -> None:
     root = find_repo_root(_cwd_from_context(ctx))
     items = list_inbox_items(root, project=project_slug, epic=epic_ref, status=status)
     if count_only:
@@ -1138,12 +1139,17 @@ def spec_init(ctx: click.Context, epic_ref: str, title: str, author: str, scope:
 @click.option("--epic", "epic_ref", default=None)
 @click.option("--project", "project_ref", default=None, help="Filter by project slug.")
 @click.option("--status", default=None, help="Filter by spec status.")
+@click.option("--compact", is_flag=True, help="Compact single-line output.")
+@click.option("--count", "count_only", is_flag=True, help="Show only the count.")
 @click.option("--json", "json_output", is_flag=True)
 @click.pass_context
 def spec_list(ctx: click.Context, epic_ref: str | None, project_ref: str | None,
-              status: str | None, json_output: bool) -> None:
+              status: str | None, compact: bool, count_only: bool, json_output: bool) -> None:
     root = find_repo_root(_cwd_from_context(ctx))
     specs = list_specs(root, epic_ref=epic_ref, project_ref=project_ref, status=status)
+    if count_only:
+        click.echo(f"{len(specs)} spec{'s' if len(specs) != 1 else ''}")
+        return
     if json_output:
         data = [
             {
@@ -1161,9 +1167,13 @@ def spec_list(ctx: click.Context, epic_ref: str | None, project_ref: str | None,
             click.echo("No specs found.")
             return
         for s in specs:
-            scope_str = f" [{s.scope}]" if s.scope else ""
-            click.echo(f"{s.status:30s} {s.title}{scope_str}")
-            click.echo(f"  {s.path}")
+            if compact:
+                scope_str = f" [{s.scope}]" if s.scope else ""
+                click.echo(f"{s.status:30s} {s.title}{scope_str}")
+            else:
+                scope_str = f" [{s.scope}]" if s.scope else ""
+                click.echo(f"{s.status:30s} {s.title}{scope_str}")
+                click.echo(f"  {s.path}")
 
 
 @spec_group.command("show")
@@ -1235,12 +1245,17 @@ def plan_init_cmd(ctx: click.Context, epic_ref: str, title: str, author: str, sp
 @click.option("--epic", "epic_ref", default=None)
 @click.option("--project", "project_ref", default=None, help="Filter by project slug.")
 @click.option("--status", default=None, help="Filter by plan status.")
+@click.option("--compact", is_flag=True, help="Compact single-line output.")
+@click.option("--count", "count_only", is_flag=True, help="Show only the count.")
 @click.option("--json", "json_output", is_flag=True)
 @click.pass_context
 def plan_list_cmd(ctx: click.Context, epic_ref: str | None, project_ref: str | None,
-                  status: str | None, json_output: bool) -> None:
+                  status: str | None, compact: bool, count_only: bool, json_output: bool) -> None:
     root = find_repo_root(_cwd_from_context(ctx))
     plans = list_plans(root, epic_ref=epic_ref, project_ref=project_ref, status=status)
+    if count_only:
+        click.echo(f"{len(plans)} plan{'s' if len(plans) != 1 else ''}")
+        return
     if json_output:
         data = [
             {
@@ -1260,9 +1275,13 @@ def plan_list_cmd(ctx: click.Context, epic_ref: str | None, project_ref: str | N
             click.echo("No plans found.")
             return
         for p in plans:
-            scope_str = f" [{p.scope}]" if p.scope else ""
-            click.echo(f"{p.status:15s} {p.title}{scope_str}")
-            click.echo(f"  {p.path}")
+            if compact:
+                scope_str = f" [{p.scope}]" if p.scope else ""
+                click.echo(f"{p.status:15s} {p.title}{scope_str}")
+            else:
+                scope_str = f" [{p.scope}]" if p.scope else ""
+                click.echo(f"{p.status:15s} {p.title}{scope_str}")
+                click.echo(f"  {p.path}")
 
 
 @plan_group.command("show")
@@ -1341,13 +1360,17 @@ def project_group() -> None:
 
 @project_group.command("list")
 @click.option("--active", is_flag=True, help="Show only active projects.")
+@click.option("--compact", is_flag=True, help="Compact single-line output.")
+@click.option("--count", "count_only", is_flag=True, help="Show only the count.")
 @click.option("--json", "json_output", is_flag=True, help="Print structured JSON.")
 @click.pass_context
-def project_list_cmd(ctx: click.Context, active: bool, json_output: bool) -> None:
+def project_list_cmd(ctx: click.Context, active: bool, compact: bool, count_only: bool, json_output: bool) -> None:
     root = find_repo_root(_cwd_from_context(ctx))
     projects_path = root / "projects"
     if not projects_path.exists() or not projects_path.is_dir():
-        if json_output:
+        if count_only:
+            click.echo("0 projects")
+        elif json_output:
             click.echo("[]")
         else:
             click.echo("No projects.")
@@ -1370,6 +1393,9 @@ def project_list_cmd(ctx: click.Context, active: bool, json_output: bool) -> Non
             })
         except TrailmindError:
             continue
+    if count_only:
+        click.echo(f"{len(projects)} project{'s' if len(projects) != 1 else ''}")
+        return
     if json_output:
         click.echo(json.dumps(projects, ensure_ascii=False, indent=2))
     else:
@@ -1377,8 +1403,11 @@ def project_list_cmd(ctx: click.Context, active: bool, json_output: bool) -> Non
             click.echo("No projects.")
             return
         for p in projects:
-            click.echo(f"{p['slug']:20s} {p['state']:12s} {p['title']}")
-            click.echo(f"{'':20s} {'':12s} {p['path']}")
+            if compact:
+                click.echo(f"{p['slug']:20s} {p['state']:12s} {p['title']}")
+            else:
+                click.echo(f"{p['slug']:20s} {p['state']:12s} {p['title']}")
+                click.echo(f"{'':20s} {'':12s} {p['path']}")
 
 
 @project_group.command("init")
@@ -1492,16 +1521,21 @@ def epic_group() -> None:
 @epic_group.command("list")
 @click.option("--project", "project_slug", default=None)
 @click.option("--active", is_flag=True, help="Show only active epics.")
+@click.option("--compact", is_flag=True, help="Compact single-line output.")
+@click.option("--count", "count_only", is_flag=True, help="Show only the count.")
 @click.option("--json", "json_output", is_flag=True, help="Print structured JSON.")
 @click.pass_context
-def epic_list_cmd(ctx: click.Context, project_slug: str | None, active: bool, json_output: bool) -> None:
+def epic_list_cmd(ctx: click.Context, project_slug: str | None, active: bool,
+                   compact: bool, count_only: bool, json_output: bool) -> None:
     root = find_repo_root(_cwd_from_context(ctx))
     from trailmind.log import read_entity_user_facing
 
     epics = []
     projects_path = root / "projects"
     if not projects_path.exists() or not projects_path.is_dir():
-        if json_output:
+        if count_only:
+            click.echo("0 epics")
+        elif json_output:
             click.echo("[]")
         else:
             click.echo("No epics.")
@@ -1533,12 +1567,21 @@ def epic_list_cmd(ctx: click.Context, project_slug: str | None, active: bool, js
                 })
             except TrailmindError:
                 continue
+    if count_only:
+        click.echo(f"{len(epics)} epic{'s' if len(epics) != 1 else ''}")
+        return
     if json_output:
         click.echo(json.dumps(epics, ensure_ascii=False, indent=2))
     else:
+        if not epics:
+            click.echo("No epics.")
+            return
         for e in epics:
-            click.echo(f"{e['project'] + '/' + e['slug']:30s} {e['state']:12s} {e['title']}")
-            click.echo(f"{'':30s} {'':12s} {e['path']}")
+            if compact:
+                click.echo(f"{e['project'] + '/' + e['slug']:30s} {e['state']:12s} {e['title']}")
+            else:
+                click.echo(f"{e['project'] + '/' + e['slug']:30s} {e['state']:12s} {e['title']}")
+                click.echo(f"{'':30s} {'':12s} {e['path']}")
 
 
 @epic_group.command("init")
@@ -2968,6 +3011,8 @@ def milestone_group() -> None:
               help="Filter by milestone status.")
 @click.option("--active", is_flag=True, help="Show only active milestones (not done).")
 @click.option("--upcoming", is_flag=True, help="Show only upcoming milestones (date >= today, not done).")
+@click.option("--due-within", "due_within_days", default=None, type=click.IntRange(min=0),
+              help="Show milestones due within N days (not done).")
 @click.option("--sort", "sort_by", default="date",
               type=click.Choice(("date", "created", "status", "title"), case_sensitive=False),
               help="Sort milestones (default: date).")
@@ -2975,13 +3020,15 @@ def milestone_group() -> None:
               type=click.Choice(("status", "epic", "project"), case_sensitive=False),
               help="Group milestones by status, epic, or project.")
 @click.option("--limit", default=None, type=click.IntRange(min=1), help="Limit number of results.")
+@click.option("--compact", is_flag=True, help="Compact single-line output.")
 @click.option("--count", "count_only", is_flag=True, help="Show only the count of matching milestones.")
 @click.option("--csv", "csv_output", is_flag=True, help="Output as CSV.")
 @click.option("--json", "json_output", is_flag=True, help="Print structured JSON instead of tabular output.")
 @click.pass_context
 def milestone_list_cmd(ctx: click.Context, epic_ref: str | None, project_ref: str | None,
-                        status: str | None, active: bool, upcoming: bool, sort_by: str, group_by: str | None,
-                        limit: int | None, count_only: bool, csv_output: bool, json_output: bool) -> None:
+                        status: str | None, active: bool, upcoming: bool, due_within_days: int | None,
+                        sort_by: str, group_by: str | None,
+                        limit: int | None, compact: bool, count_only: bool, csv_output: bool, json_output: bool) -> None:
     root = find_repo_root(_cwd_from_context(ctx))
     milestones = list_milestones(root, epic_ref=epic_ref, project_ref=project_ref,
                                   status=status, sort_by=sort_by)
@@ -2992,6 +3039,13 @@ def milestone_list_cmd(ctx: click.Context, epic_ref: str | None, project_ref: st
         today = date.today().isoformat()
         milestones = [m for m in milestones
                       if m.get("date") and m["date"] >= today and m.get("status") != "done"]
+    if due_within_days is not None:
+        from datetime import date, timedelta
+        today = date.today()
+        within = (today + timedelta(days=due_within_days)).isoformat()
+        today_str = today.isoformat()
+        milestones = [m for m in milestones
+                      if m.get("date") and today_str <= m["date"] <= within and m.get("status") != "done"]
     if count_only:
         click.echo(f"{len(milestones)} milestone{'s' if len(milestones) != 1 else ''}")
         return
@@ -3048,8 +3102,11 @@ def milestone_list_cmd(ctx: click.Context, epic_ref: str | None, project_ref: st
                 click.echo(f"  {'':12s} {'':12s} {'':12s} {m['path']}")
     else:
         for m in milestones:
-            click.echo(f"{m['id']:12s} {m['status']:12s} {m['date']:12s} {m['title']}")
-            click.echo(f"{'':12s} {'':12s} {'':12s} {m['path']}")
+            if compact:
+                click.echo(f"{m['id']:12s} {m['status']:12s} {m['date']:12s} {m['title']}")
+            else:
+                click.echo(f"{m['id']:12s} {m['status']:12s} {m['date']:12s} {m['title']}")
+                click.echo(f"{'':12s} {'':12s} {'':12s} {m['path']}")
 
 
 @milestone_group.command("set-status")
