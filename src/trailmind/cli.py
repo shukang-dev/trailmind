@@ -662,6 +662,214 @@ def health_command(ctx: click.Context, json_output: bool) -> None:
     click.echo("\n".join(lines))
 
 
+@cli.command("stats")
+@click.option("--project", default=None, help="Filter by project.")
+@click.option("--epic", default=None, help="Filter by epic.")
+@click.option("--json", "json_output", is_flag=True, help="Print structured JSON.")
+@click.pass_context
+def stats_command(ctx: click.Context, project: str | None, epic: str | None,
+                   json_output: bool) -> None:
+    """Comprehensive repository statistics."""
+    from datetime import date, timedelta
+    from collections import defaultdict, Counter
+    root = find_repo_root(_cwd_from_context(ctx))
+    today = date.today()
+    today_str = today.isoformat()
+    week_start = (today - timedelta(days=today.weekday())).isoformat()
+
+    # Collect data
+    all_tasks = list_tasks(root, epic_ref=epic, project_ref=project)
+    all_issues = list_issues(root, epic_ref=epic, project_ref=project)
+    all_milestones = list_milestones(root, epic_ref=epic, project_ref=project)
+    all_inbox = list_inbox_items(root, project=project, epic=epic)
+
+    # Task stats
+    active_tasks = [t for t in all_tasks if t.get("status") not in ("done", "wontfix")]
+    done_tasks = [t for t in all_tasks if t.get("status") == "done"]
+    task_status_counts: Counter = Counter(t.get("status", "unknown") for t in all_tasks)
+    task_priority_counts: Counter = Counter(t.get("priority", "unspecified") for t in all_tasks)
+
+    overdue = [t for t in active_tasks if t.get("due") and t["due"] < today_str]
+    due_this_week = [t for t in active_tasks
+                     if t.get("due") and today_str <= t["due"] <= (today + timedelta(days=7)).isoformat()]
+    no_due = [t for t in active_tasks if not t.get("due")]
+    unassigned = [t for t in active_tasks if not t.get("owner")]
+    blocked = [t for t in active_tasks if t.get("status") == "blocked"]
+    in_progress = [t for t in active_tasks if t.get("status") == "in_progress"]
+
+    # Created this week
+    created_this_week = [t for t in all_tasks if t.get("created") and t["created"] >= week_start]
+
+    # By owner
+    by_owner: dict[str, dict] = defaultdict(lambda: {"total": 0, "active": 0, "done": 0, "blocked": 0, "overdue": 0})
+    for t in all_tasks:
+        owner = t.get("owner") or "unassigned"
+        by_owner[owner]["total"] += 1
+        if t.get("status") == "done":
+            by_owner[owner]["done"] += 1
+        elif t.get("status") not in ("wontfix",):
+            by_owner[owner]["active"] += 1
+            if t.get("status") == "blocked":
+                by_owner[owner]["blocked"] += 1
+            if t.get("due") and t["due"] < today_str:
+                by_owner[owner]["overdue"] += 1
+
+    # Issue stats
+    open_issues = [i for i in all_issues if i.get("status") not in ("done", "wontfix")]
+    issue_severity_counts: Counter = Counter(i.get("severity", "unspecified") for i in open_issues)
+    issue_status_counts: Counter = Counter(i.get("status", "unknown") for i in all_issues)
+    unassigned_issues = [i for i in open_issues if not i.get("owner")]
+
+    # Milestone stats
+    upcoming_milestones = [m for m in all_milestones
+                           if m.get("date") and m["date"] >= today_str and m.get("status") != "done"]
+    done_milestones = [m for m in all_milestones if m.get("status") == "done"]
+
+    # Inbox stats
+    open_inbox = [i for i in all_inbox if i.status == "open"]
+
+    # Completion rate
+    total_with_status = len(all_tasks)
+    completion_rate = round(len(done_tasks) / total_with_status * 100, 1) if total_with_status else 0
+
+    # Tag stats
+    tag_counter: Counter = Counter()
+    for t in all_tasks:
+        for tag in (t.get("tags") or []):
+            tag_counter[str(tag)] += 1
+
+    if json_output:
+        data = {
+            "generated": today_str,
+            "tasks": {
+                "total": len(all_tasks),
+                "active": len(active_tasks),
+                "done": len(done_tasks),
+                "completion_rate": completion_rate,
+                "by_status": dict(task_status_counts),
+                "by_priority": dict(task_priority_counts),
+                "overdue": len(overdue),
+                "due_this_week": len(due_this_week),
+                "no_due": len(no_due),
+                "unassigned": len(unassigned),
+                "blocked": len(blocked),
+                "in_progress": len(in_progress),
+                "created_this_week": len(created_this_week),
+            },
+            "issues": {
+                "total": len(all_issues),
+                "open": len(open_issues),
+                "by_severity": dict(issue_severity_counts),
+                "by_status": dict(issue_status_counts),
+                "unassigned": len(unassigned_issues),
+            },
+            "milestones": {
+                "total": len(all_milestones),
+                "upcoming": len(upcoming_milestones),
+                "done": len(done_milestones),
+            },
+            "inbox": {
+                "total": len(all_inbox),
+                "open": len(open_inbox),
+            },
+            "by_owner": {
+                owner: stats for owner, stats in sorted(by_owner.items())
+            },
+            "tags": dict(tag_counter.most_common()),
+        }
+        click.echo(json.dumps(data, ensure_ascii=False, indent=2))
+        return
+
+    lines = []
+    lines.append(f"📊 Trailmind Stats")
+    lines.append(f"   {today_str}")
+    lines.append("")
+
+    # Tasks section
+    lines.append(f"📋 Tasks")
+    lines.append(f"   Total: {len(all_tasks)}")
+    lines.append(f"   Active: {len(active_tasks)}")
+    lines.append(f"   Done: {len(done_tasks)} ({completion_rate}%)")
+    lines.append(f"   In progress: {len(in_progress)}")
+    lines.append(f"   Blocked: {len(blocked)}")
+    lines.append(f"   Overdue: {len(overdue)}")
+    lines.append(f"   Due this week: {len(due_this_week)}")
+    lines.append(f"   No due date: {len(no_due)}")
+    lines.append(f"   Unassigned: {len(unassigned)}")
+    lines.append(f"   Created this week: {len(created_this_week)}")
+    lines.append("")
+
+    # Status breakdown
+    lines.append(f"   By status:")
+    for status, count in task_status_counts.most_common():
+        bar = "█" * min(count, 20)
+        lines.append(f"     {status:12s} {bar} {count}")
+    lines.append("")
+
+    # Priority breakdown
+    lines.append(f"   By priority:")
+    pri_order = {"critical": 0, "high": 1, "medium": 2, "low": 3, "unspecified": 4}
+    for pri in sorted(task_priority_counts.keys(), key=lambda p: pri_order.get(p, 99)):
+        count = task_priority_counts[pri]
+        bar = "█" * min(count, 20)
+        lines.append(f"     {pri:12s} {bar} {count}")
+    lines.append("")
+
+    # Issues section
+    lines.append(f"🐛 Issues")
+    lines.append(f"   Total: {len(all_issues)}")
+    lines.append(f"   Open: {len(open_issues)}")
+    lines.append(f"   Unassigned: {len(unassigned_issues)}")
+    if open_issues:
+        lines.append(f"   By severity:")
+        sev_order = {"critical": 0, "high": 1, "medium": 2, "low": 3, "unspecified": 4}
+        for sev in sorted(issue_severity_counts.keys(), key=lambda s: sev_order.get(s, 99)):
+            count = issue_severity_counts[sev]
+            bar = "█" * min(count, 20)
+            lines.append(f"     {sev:12s} {bar} {count}")
+    lines.append("")
+
+    # Milestones section
+    lines.append(f"🏁 Milestones")
+    lines.append(f"   Total: {len(all_milestones)}")
+    lines.append(f"   Upcoming: {len(upcoming_milestones)}")
+    lines.append(f"   Done: {len(done_milestones)}")
+    if upcoming_milestones:
+        for m in sorted(upcoming_milestones, key=lambda m: m.get("date", ""))[:3]:
+            lines.append(f"     {m['date']}  {m['title']}")
+    lines.append("")
+
+    # Inbox section
+    lines.append(f"📥 Inbox")
+    lines.append(f"   Total: {len(all_inbox)}")
+    lines.append(f"   Open: {len(open_inbox)}")
+    lines.append("")
+
+    # By owner section
+    lines.append(f"👥 By Owner")
+    for owner in sorted(by_owner.keys(), key=lambda o: -by_owner[o]["total"]):
+        s = by_owner[owner]
+        pct = round(s["done"] / max(s["total"], 1) * 100)
+        lines.append(f"   @{owner:15s} {s['active']:3d} active, {s['done']:3d} done ({pct}%)")
+        extras = []
+        if s["blocked"]:
+            extras.append(f"🚧 {s['blocked']}")
+        if s["overdue"]:
+            extras.append(f"⚠️ {s['overdue']}")
+        if extras:
+            lines.append(f"   {'':15s} {' '.join(extras)}")
+    lines.append("")
+
+    # Tags section
+    if tag_counter:
+        lines.append(f"🏷️  Top Tags")
+        for tag, count in tag_counter.most_common(5):
+            lines.append(f"   {tag:20s} {count}")
+        lines.append("")
+
+    click.echo("\n".join(lines))
+
+
 @cli.command("summary")
 @click.option("--project", default=None, help="Show summary for a specific project.")
 @click.option("--epic", default=None, help="Show summary for a specific epic.")
@@ -4901,6 +5109,45 @@ def task_bulk_assign(
         _echo_touched(root, touched)
 
 
+@task_group.command("bulk-unassign")
+@click.argument("task_refs", nargs=-1)
+@click.option("--actor", required=True)
+@click.option("--note", default=None)
+@click.option("--from-file", "from_file", default=None,
+              help="Read task IDs from file (one per line), or '-' for stdin.")
+@click.option("--dry-run", is_flag=True, help="Preview without applying.")
+@click.pass_context
+def task_bulk_unassign(
+    ctx: click.Context,
+    task_refs: tuple[str, ...],
+    actor: str,
+    note: str | None,
+    from_file: str | None,
+    dry_run: bool,
+) -> None:
+    """Bulk-unassign tasks (clear owner, e.g. T-001 T-002, or --from-file ids.txt)."""
+    root = find_repo_root(_cwd_from_context(ctx))
+    refs = list(task_refs)
+    if from_file:
+        refs.extend(_read_ids_from_file(from_file))
+    if not refs:
+        raise TrailmindError("no task IDs provided (pass as args or use --from-file)")
+    if dry_run:
+        click.echo(f"[DRY RUN] Would unassign {len(refs)} task(s):")
+        for r in refs:
+            click.echo(f"  - {r}")
+        return
+    touched = []
+    for task_ref in refs:
+        try:
+            path = assign_task(root, task_ref=task_ref, owner="", actor=actor, note=note)
+            touched.append(path)
+        except Exception as exc:
+            click.echo(f"  ⚠ {task_ref}: {exc}", err=True)
+    if touched:
+        _echo_touched(root, touched)
+
+
 @task_group.command("bulk-due")
 @click.argument("task_refs", nargs=-1)
 @click.argument("due")
@@ -6039,6 +6286,45 @@ def issue_bulk_assign(
                 actor=actor,
                 note=note,
             )
+            touched.append(path)
+        except Exception as exc:
+            click.echo(f"  ⚠ {issue_ref}: {exc}", err=True)
+    if touched:
+        _echo_touched(root, touched)
+
+
+@issue_group.command("bulk-unassign")
+@click.argument("issue_refs", nargs=-1)
+@click.option("--actor", required=True)
+@click.option("--note", default=None)
+@click.option("--from-file", "from_file", default=None,
+              help="Read issue IDs from file (one per line), or '-' for stdin.")
+@click.option("--dry-run", is_flag=True, help="Preview without applying.")
+@click.pass_context
+def issue_bulk_unassign(
+    ctx: click.Context,
+    issue_refs: tuple[str, ...],
+    actor: str,
+    note: str | None,
+    from_file: str | None,
+    dry_run: bool,
+) -> None:
+    """Bulk-unassign issues (clear owner, e.g. I-001 I-002, or --from-file ids.txt)."""
+    root = find_repo_root(_cwd_from_context(ctx))
+    refs = list(issue_refs)
+    if from_file:
+        refs.extend(_read_ids_from_file(from_file))
+    if not refs:
+        raise TrailmindError("no issue IDs provided (pass as args or use --from-file)")
+    if dry_run:
+        click.echo(f"[DRY RUN] Would unassign {len(refs)} issue(s):")
+        for r in refs:
+            click.echo(f"  - {r}")
+        return
+    touched = []
+    for issue_ref in refs:
+        try:
+            path = assign_issue(root, issue_ref=issue_ref, owner="", actor=actor, note=note)
             touched.append(path)
         except Exception as exc:
             click.echo(f"  ⚠ {issue_ref}: {exc}", err=True)
