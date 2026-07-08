@@ -930,6 +930,116 @@ def weekly_command(ctx: click.Context, project: str | None, epic: str | None,
     click.echo("\n".join(lines))
 
 
+@cli.command("release")
+@click.option("--milestone", "milestone_ref", default=None, help="Milestone to generate release notes for.")
+@click.option("--since", default=None, help="Include items completed since YYYY-MM-DD.")
+@click.option("--project", default=None, help="Filter by project.")
+@click.option("--epic", default=None, help="Filter by epic.")
+@click.option("--json", "json_output", is_flag=True, help="Print structured JSON.")
+@click.pass_context
+def release_command(ctx: click.Context, milestone_ref: str | None, since: str | None,
+                     project: str | None, epic: str | None, json_output: bool) -> None:
+    """Generate release notes from completed tasks and closed issues."""
+    from datetime import date, timedelta
+    root = find_repo_root(_cwd_from_context(ctx))
+    today = date.today().isoformat()
+
+    # Determine the "since" date
+    since_date = since
+    if not since_date and milestone_ref:
+        milestones = list_milestones(root, epic_ref=epic, project_ref=project)
+        for m in milestones:
+            if m.get("id") == milestone_ref or milestone_ref in m.get("path", ""):
+                since_date = m.get("date")
+                break
+    if not since_date:
+        since_date = (date.today() - timedelta(days=7)).isoformat()
+
+    # Collect completed tasks
+    all_tasks = list_tasks(root, epic_ref=epic, project_ref=project)
+    completed_tasks = [t for t in all_tasks if t.get("status") == "done"]
+
+    # Collect closed issues
+    all_issues = list_issues(root, epic_ref=epic, project_ref=project)
+    closed_issues = [i for i in all_issues if i.get("status") in ("done", "wontfix")]
+
+    # Group tasks by owner
+    from collections import defaultdict
+    tasks_by_owner: dict[str, list] = defaultdict(list)
+    for t in completed_tasks:
+        owner = t.get("owner") or "unassigned"
+        tasks_by_owner[owner].append(t)
+
+    if json_output:
+        data = {
+            "generated": today,
+            "since": since_date,
+            "milestone": milestone_ref,
+            "completed_tasks": [
+                {"id": t["id"], "title": t["title"], "owner": t.get("owner", ""),
+                 "priority": t.get("priority", ""), "epic": t.get("epic", "")}
+                for t in completed_tasks
+            ],
+            "closed_issues": [
+                {"id": i["id"], "title": i["title"], "severity": i.get("severity", ""),
+                 "owner": i.get("owner", ""), "epic": i.get("epic", "")}
+                for i in closed_issues
+            ],
+            "stats": {
+                "tasks_completed": len(completed_tasks),
+                "issues_closed": len(closed_issues),
+                "by_owner": {owner: len(tasks) for owner, tasks in tasks_by_owner.items()},
+            },
+        }
+        click.echo(json.dumps(data, ensure_ascii=False, indent=2))
+        return
+
+    lines = []
+    lines.append(f"🚀 Release Notes")
+    lines.append(f"   Generated: {today}")
+    lines.append(f"   Since: {since_date}")
+    if milestone_ref:
+        lines.append(f"   Milestone: {milestone_ref}")
+    lines.append("")
+
+    # Summary
+    lines.append(f"📊 Summary")
+    lines.append(f"   ✅ {len(completed_tasks)} tasks completed")
+    lines.append(f"   🐛 {len(closed_issues)} issues closed")
+    lines.append("")
+
+    # Completed tasks
+    if completed_tasks:
+        lines.append(f"✅ Completed Tasks ({len(completed_tasks)})")
+        lines.append("")
+        for owner in sorted(tasks_by_owner.keys()):
+            tasks = tasks_by_owner[owner]
+            lines.append(f"  @{owner} ({len(tasks)}):")
+            for t in tasks:
+                pri = f"[{t.get('priority', '').upper()}]" if t.get('priority') else ""
+                lines.append(f"    - {t['id']} {pri} {t['title']}")
+            lines.append("")
+
+    # Closed issues
+    if closed_issues:
+        lines.append(f"🐛 Closed Issues ({len(closed_issues)})")
+        lines.append("")
+        for i in closed_issues:
+            sev = f"[{i.get('severity', '').upper()}]" if i.get('severity') else ""
+            owner = f"@{i.get('owner', '')}" if i.get('owner') else ""
+            lines.append(f"  - {i['id']} {sev}{owner} {i['title']}")
+        lines.append("")
+
+    # Contributors
+    if tasks_by_owner:
+        lines.append(f"👥 Contributors")
+        for owner in sorted(tasks_by_owner.keys(), key=lambda o: -len(tasks_by_owner[o])):
+            lines.append(f"   @{owner}: {len(tasks_by_owner[owner])} tasks")
+        lines.append("")
+
+    click.echo("\n".join(lines))
+
+
 @cli.command("export")
 @click.option("--output", "-o", default=None, help="Write to file instead of stdout.")
 @click.option("--format", "fmt", default="json", type=click.Choice(("json", "csv"), case_sensitive=False),
@@ -1601,11 +1711,14 @@ def project_group() -> None:
 
 @project_group.command("list")
 @click.option("--active", is_flag=True, help="Show only active projects.")
+@click.option("--sort", "sort_by", default="title",
+              type=click.Choice(("title", "created", "state"), case_sensitive=False),
+              help="Sort projects (default: title).")
 @click.option("--compact", is_flag=True, help="Compact single-line output.")
 @click.option("--count", "count_only", is_flag=True, help="Show only the count.")
 @click.option("--json", "json_output", is_flag=True, help="Print structured JSON.")
 @click.pass_context
-def project_list_cmd(ctx: click.Context, active: bool, compact: bool, count_only: bool, json_output: bool) -> None:
+def project_list_cmd(ctx: click.Context, active: bool, sort_by: str, compact: bool, count_only: bool, json_output: bool) -> None:
     root = find_repo_root(_cwd_from_context(ctx))
     projects_path = root / "projects"
     if not projects_path.exists() or not projects_path.is_dir():
@@ -1630,10 +1743,19 @@ def project_list_cmd(ctx: click.Context, active: bool, compact: bool, count_only
                 "title": str(fm.get("title") or project_path.name),
                 "goal": str(fm.get("goal") or ""),
                 "state": state,
+                "created": str(fm.get("created") or ""),
                 "path": project_path.relative_to(root).as_posix(),
             })
         except TrailmindError:
             continue
+    # Sort
+    STATE_ORDER = {"active": 0, "paused": 1, "completed": 2, "archived": 3}
+    if sort_by == "created":
+        projects.sort(key=lambda p: p.get("created", "") or "9999-99-99")
+    elif sort_by == "state":
+        projects.sort(key=lambda p: (STATE_ORDER.get(p.get("state", ""), 99), p.get("title", "").lower()))
+    else:
+        projects.sort(key=lambda p: p.get("title", "").lower())
     if count_only:
         click.echo(f"{len(projects)} project{'s' if len(projects) != 1 else ''}")
         return
@@ -1762,12 +1884,15 @@ def epic_group() -> None:
 @epic_group.command("list")
 @click.option("--project", "project_slug", default=None)
 @click.option("--active", is_flag=True, help="Show only active epics.")
+@click.option("--sort", "sort_by", default="title",
+              type=click.Choice(("title", "created", "state"), case_sensitive=False),
+              help="Sort epics (default: title).")
 @click.option("--compact", is_flag=True, help="Compact single-line output.")
 @click.option("--count", "count_only", is_flag=True, help="Show only the count.")
 @click.option("--json", "json_output", is_flag=True, help="Print structured JSON.")
 @click.pass_context
 def epic_list_cmd(ctx: click.Context, project_slug: str | None, active: bool,
-                   compact: bool, count_only: bool, json_output: bool) -> None:
+                   sort_by: str, compact: bool, count_only: bool, json_output: bool) -> None:
     root = find_repo_root(_cwd_from_context(ctx))
     from trailmind.log import read_entity_user_facing
 
@@ -1804,10 +1929,19 @@ def epic_list_cmd(ctx: click.Context, project_slug: str | None, active: bool,
                     "goal": str(fm.get("goal") or ""),
                     "state": state,
                     "target": str(fm.get("target") or ""),
+                    "created": str(fm.get("created") or ""),
                     "path": epic_dir.relative_to(root).as_posix(),
                 })
             except TrailmindError:
                 continue
+    # Sort
+    EPIC_STATE_ORDER = {"active": 0, "paused": 1, "completed": 2, "archived": 3}
+    if sort_by == "created":
+        epics.sort(key=lambda e: e.get("created", "") or "9999-99-99")
+    elif sort_by == "state":
+        epics.sort(key=lambda e: (EPIC_STATE_ORDER.get(e.get("state", ""), 99), e.get("title", "").lower()))
+    else:
+        epics.sort(key=lambda e: e.get("title", "").lower())
     if count_only:
         click.echo(f"{len(epics)} epic{'s' if len(epics) != 1 else ''}")
         return
