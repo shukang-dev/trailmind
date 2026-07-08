@@ -1313,17 +1313,21 @@ def task_group() -> None:
               help="Show tasks due within N days (not done/wontfix, not overdue).")
 @click.option("--due-today", is_flag=True, help="Show tasks due today (shortcut for --due-within 0).")
 @click.option("--active", is_flag=True, help="Show only active tasks (not done or wontfix).")
+@click.option("--blocked", is_flag=True, help="Show only blocked tasks.")
+@click.option("--ready-only", is_flag=True, help="Show only ready tasks (ready to start).")
 @click.option("--has-due", "has_due", flag_value=True, default=None,
               help="Show only tasks that have a due date.")
 @click.option("--no-due", "has_due", flag_value=False,
               help="Show only tasks without a due date.")
 @click.option("--tag", default=None, help="Filter by tag (case-insensitive substring match).")
+@click.option("--has-deliverables", is_flag=True, help="Show only tasks that have deliverables defined.")
+@click.option("--has-deps", is_flag=True, help="Show only tasks that have dependencies.")
 @click.option("--sort", "sort_by", default="created",
               type=click.Choice(("created", "priority", "due", "status", "title"), case_sensitive=False),
               help="Sort tasks (default: created).")
 @click.option("--group-by", default=None,
-              type=click.Choice(("status", "owner", "priority", "epic", "tag"), case_sensitive=False),
-              help="Group tasks by status, owner, priority, epic, or tag.")
+              type=click.Choice(("status", "owner", "priority", "epic", "project", "tag"), case_sensitive=False),
+              help="Group tasks by status, owner, priority, epic, project, or tag.")
 @click.option("--compact", is_flag=True, help="Compact single-line output.")
 @click.option("--csv", "csv_output", is_flag=True, help="Output as CSV for spreadsheet import.")
 @click.option("--limit", default=None, type=click.IntRange(min=1), help="Limit number of results.")
@@ -1342,8 +1346,12 @@ def task_list_cmd(
     due_within_days: int | None,
     due_today: bool,
     active: bool,
+    blocked: bool,
+    ready_only: bool,
     has_due: bool | None,
     tag: str | None,
+    has_deliverables: bool,
+    has_deps: bool,
     sort_by: str,
     group_by: str | None,
     compact: bool,
@@ -1375,6 +1383,14 @@ def task_list_cmd(
     )
     if active:
         tasks = [t for t in tasks if t.get("status") not in ("done", "wontfix")]
+    if blocked:
+        tasks = [t for t in tasks if t.get("status") == "blocked"]
+    if ready_only:
+        tasks = [t for t in tasks if t.get("status") in ("ready", "created")]
+    if has_deliverables:
+        tasks = [t for t in tasks if t.get("deliverables")]
+    if has_deps:
+        tasks = [t for t in tasks if t.get("depends_on") or t.get("soft_depends_on")]
     if limit:
         tasks = tasks[:limit]
     if csv_output:
@@ -1407,6 +1423,11 @@ def task_list_cmd(
         for t in tasks:
             if group_by == "epic":
                 key = t.get("epic", "") or "unknown"
+                groups[key].append(t)
+            elif group_by == "project":
+                epic_path = t.get("epic", "") or ""
+                parts = epic_path.split("/")
+                key = parts[1] if len(parts) > 1 else "unknown"
                 groups[key].append(t)
             elif group_by == "tag":
                 tags = t.get("tags") or []
@@ -2094,8 +2115,8 @@ def issue_group() -> None:
               type=click.Choice(("created", "severity", "status", "title"), case_sensitive=False),
               help="Sort issues (default: created).")
 @click.option("--group-by", default=None,
-              type=click.Choice(("status", "severity", "owner", "epic"), case_sensitive=False),
-              help="Group issues by status, severity, owner, or epic.")
+              type=click.Choice(("status", "severity", "owner", "epic", "project"), case_sensitive=False),
+              help="Group issues by status, severity, owner, epic, or project.")
 @click.option("--compact", is_flag=True, help="Compact single-line output.")
 @click.option("--csv", "csv_output", is_flag=True, help="Output as CSV for spreadsheet import.")
 @click.option("--limit", default=None, type=click.IntRange(min=1), help="Limit number of results.")
@@ -2153,6 +2174,10 @@ def issue_list_cmd(
         for i in issues:
             if group_by == "epic":
                 key = i.get("epic", "") or "unknown"
+            elif group_by == "project":
+                epic_path = i.get("epic", "") or ""
+                parts = epic_path.split("/")
+                key = parts[1] if len(parts) > 1 else "unknown"
             else:
                 key = i.get(group_by, "") or "unassigned"
             groups[key].append(i)
@@ -2564,6 +2589,8 @@ def milestone_edit(
               help="Filter by entity type.")
 @click.option("--actor", default=None, help="Filter by actor shortname.")
 @click.option("--since", default=None, help="Show entries since YYYY-MM-DD.")
+@click.option("--project", default=None, help="Filter by project slug.")
+@click.option("--epic", default=None, help="Filter by epic path or slug.")
 @click.option("--json", "json_output", is_flag=True, help="Print structured JSON.")
 @click.pass_context
 def activity_command(
@@ -2572,6 +2599,8 @@ def activity_command(
     entity_type: str | None,
     actor: str | None,
     since: str | None,
+    project: str | None,
+    epic: str | None,
     json_output: bool,
 ) -> None:
     """Show recent activity across all entities."""
@@ -2582,6 +2611,8 @@ def activity_command(
         entity_type=entity_type,
         actor=actor,
         since=since,
+        project=project,
+        epic=epic,
     )
 
     if json_output:

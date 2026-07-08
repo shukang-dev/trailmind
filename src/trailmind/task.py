@@ -253,6 +253,10 @@ def list_tasks(
             "filer": str(frontmatter.get("filer") or ""),
             "created": str(frontmatter.get("created") or ""),
             "tags": [str(t) for t in task_tags_list],
+            "deliverables": list(frontmatter.get("deliverables") or []),
+            "completed_deliverables": list(frontmatter.get("completed_deliverables") or []),
+            "depends_on": list(frontmatter.get("depends_on") or []),
+            "soft_depends_on": list(frontmatter.get("soft_depends_on") or []),
             "epic": epic_path,
             "path": rel_path,
         })

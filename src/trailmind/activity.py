@@ -20,6 +20,8 @@ def collect_activity(
     entity_type: str | None = None,
     actor: str | None = None,
     since: str | None = None,
+    project: str | None = None,
+    epic: str | None = None,
 ) -> list[dict[str, str]]:
     """Collect recent activity across all entities.
 
@@ -36,6 +38,9 @@ def collect_activity(
     for proj_dir in sorted(projects_dir.iterdir()):
         if not proj_dir.is_dir():
             continue
+        # Apply project filter early
+        if project and proj_dir.name != project:
+            continue
         # PROJECT.md
         proj_md = proj_dir / "PROJECT.md"
         if proj_md.exists():
@@ -44,6 +49,11 @@ def collect_activity(
         for epic_dir in sorted(proj_dir.iterdir()):
             if not epic_dir.is_dir():
                 continue
+            # Apply epic filter early
+            if epic:
+                epic_rel = f"projects/{proj_dir.name}/{epic_dir.name}"
+                if epic_rel != epic and epic_dir.name != epic:
+                    continue
             epic_md = epic_dir / "EPIC.md"
             if epic_md.exists():
                 entity_files.append(epic_md)
