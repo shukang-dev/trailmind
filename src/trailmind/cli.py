@@ -5786,6 +5786,582 @@ def task_what_if(ctx: click.Context, task_ref: str, scenario: str, epic_ref: str
     click.echo("\n".join(lines))
 
 
+@task_group.command("auto-schedule")
+@click.option("--epic", "epic_ref", default=None, help="Schedule tasks in a specific epic.")
+@click.option("--project", "project_ref", default=None, help="Schedule tasks in a specific project.")
+@click.option("--owner", default=None, help="Schedule tasks for a specific owner.")
+@click.option("--start-date", default=None, help="Schedule start date YYYY-MM-DD (default: today).")
+@click.option("--hours-per-day", default=6, show_default=True, type=click.IntRange(min=1, max=12),
+              help="Available working hours per day.")
+@click.option("--tasks-per-day", default=2, show_default=True, type=click.IntRange(min=1, max=10),
+              help="Max tasks to schedule per day.")
+@click.option("--include-done", is_flag=True, help="Include done tasks in analysis.")
+@click.option("--apply", is_flag=True, help="Apply the schedule by setting due dates.")
+@click.option("--actor", default=None, help="Actor for --apply (required with --apply).")
+@click.option("--json", "json_output", is_flag=True, help="Print structured JSON.")
+@click.pass_context
+def task_auto_schedule(
+    ctx: click.Context,
+    epic_ref: str | None,
+    project_ref: str | None,
+    owner: str | None,
+    start_date: str | None,
+    hours_per_day: int,
+    tasks_per_day: int,
+    include_done: bool,
+    apply: bool,
+    actor: str | None,
+    json_output: bool,
+) -> None:
+    """Auto-schedule tasks based on dependencies, priority, and due dates."""
+    from datetime import date, timedelta
+
+    root = find_repo_root(_cwd_from_context(ctx))
+    today = date.fromisoformat(start_date) if start_date else date.today()
+
+    # Get all tasks
+    all_tasks = list_tasks(root, epic_ref=epic_ref, project_ref=project_ref, owner=owner)
+    if not include_done:
+        all_tasks = [t for t in all_tasks if t.get("status") not in ("done", "wontfix")]
+
+    if not all_tasks:
+        click.echo("No tasks to schedule.")
+        return
+
+    # Build dependency graph
+    task_map: dict[str, dict] = {}
+    for t in all_tasks:
+        tid = t.get("id", "")
+        if tid:
+            task_map[tid] = t
+
+    # Topological sort with priority weighting
+    # Calculate priority score (higher = should be done first)
+    PRIORITY_SCORE = {"critical": 100, "high": 75, "medium": 50, "low": 25, "unspecified": 40}
+
+    def get_dep_ids(task: dict) -> list[str]:
+        deps = task.get("depends_on") or []
+        resolved = []
+        for dep in deps:
+            for tid in task_map:
+                if tid.endswith(dep) or dep in tid:
+                    resolved.append(tid)
+                    break
+        return resolved
+
+    # Calculate depth (longest chain from this task to a root)
+    depth_cache: dict[str, int] = {}
+
+    def get_depth(task_id: str, visited: set | None = None) -> int:
+        if visited is None:
+            visited = set()
+        if task_id in depth_cache:
+            return depth_cache[task_id]
+        if task_id in visited:
+            return 0
+        visited.add(task_id)
+        task = task_map.get(task_id)
+        if not task:
+            return 0
+        deps = get_dep_ids(task)
+        if not deps:
+            depth_cache[task_id] = 0
+            return 0
+        max_dep_depth = max(get_depth(d, visited.copy()) for d in deps)
+        depth = max_dep_depth + 1
+        depth_cache[task_id] = depth
+        return depth
+
+    # Score each task
+    scored_tasks = []
+    for tid, task in task_map.items():
+        depth = get_depth(tid)
+        priority_score = PRIORITY_SCORE.get(task.get("priority", "unspecified"), 40)
+        # Due date bonus: earlier due = higher score
+        due = task.get("due", "")
+        due_score = 0
+        if due:
+            try:
+                due_d = date.fromisoformat(due)
+                days_until = (due_d - today).days
+                if days_until < 0:
+                    due_score = 200  # overdue gets highest priority
+                else:
+                    due_score = max(0, 100 - days_until * 2)
+            except ValueError:
+                pass
+        # Combined score: depth (most important) + priority + due urgency
+        total_score = depth * 50 + priority_score + due_score
+        scored_tasks.append((total_score, tid, task, depth))
+
+    # Sort by depth first (to respect dependencies), then by score
+    scored_tasks.sort(key=lambda x: (x[3], -x[0]))
+
+    # Schedule tasks
+    schedule: list[dict] = []
+    current_date = today
+    tasks_today = 0
+    scheduled_ids: set[str] = set()
+
+    def can_schedule(task: dict) -> bool:
+        """Check if all dependencies are already scheduled."""
+        deps = get_dep_ids(task)
+        for dep in deps:
+            if dep in task_map and dep not in scheduled_ids:
+                return False
+        return True
+
+    # Greedy scheduling: process in depth order, schedule as many as possible per day
+    remaining = list(scored_tasks)
+    max_iterations = len(remaining) * 2
+    iteration = 0
+
+    while remaining and iteration < max_iterations:
+        iteration += 1
+        newly_scheduled = []
+        still_remaining = []
+
+        for score, tid, task, depth in remaining:
+            if tid in scheduled_ids:
+                continue
+            if can_schedule(task):
+                if tasks_today >= tasks_per_day:
+                    # Move to next day
+                    current_date += timedelta(days=1)
+                    tasks_today = 0
+                schedule.append({
+                    "id": tid,
+                    "title": task.get("title", ""),
+                    "scheduled_date": current_date.isoformat(),
+                    "priority": task.get("priority", ""),
+                    "owner": task.get("owner", ""),
+                    "depth": depth,
+                    "score": score,
+                    "original_due": task.get("due", ""),
+                    "status": task.get("status", ""),
+                })
+                scheduled_ids.add(tid)
+                tasks_today += 1
+                newly_scheduled.append(tid)
+            else:
+                still_remaining.append((score, tid, task, depth))
+
+        if not newly_scheduled:
+            # No progress — force schedule remaining on next day
+            if still_remaining:
+                current_date += timedelta(days=1)
+                tasks_today = 0
+                # Schedule one that has unmet deps anyway
+                still_remaining.sort(key=lambda x: (x[3], -x[0]))
+                score, tid, task, depth = still_remaining[0]
+                schedule.append({
+                    "id": tid,
+                    "title": task.get("title", ""),
+                    "scheduled_date": current_date.isoformat(),
+                    "priority": task.get("priority", ""),
+                    "owner": task.get("owner", ""),
+                    "depth": depth,
+                    "score": score,
+                    "original_due": task.get("due", ""),
+                    "status": task.get("status", ""),
+                    "note": "scheduled despite unmet dependencies",
+                })
+                scheduled_ids.add(tid)
+                tasks_today += 1
+                still_remaining = still_remaining[1:]
+        remaining = still_remaining
+
+    # Apply if requested
+    applied = []
+    if apply:
+        if not actor:
+            click.echo("⚠️  --apply requires --actor", err=True)
+        else:
+            for item in schedule:
+                tid = item["id"]
+                new_due = item["scheduled_date"]
+                try:
+                    edit_task(root, task_ref=tid, actor=actor, due=new_due,
+                              note=f"Auto-scheduled to {new_due}")
+                    applied.append(tid)
+                except Exception as exc:
+                    click.echo(f"  ⚠ {tid}: {exc}", err=True)
+
+    if json_output:
+        data = {
+            "generated": today.isoformat(),
+            "total_tasks": len(all_tasks),
+            "scheduled": len(schedule),
+            "start_date": today.isoformat(),
+            "end_date": schedule[-1]["scheduled_date"] if schedule else today.isoformat(),
+            "tasks_per_day": tasks_per_day,
+            "hours_per_day": hours_per_day,
+            "schedule": schedule,
+            "applied": applied,
+        }
+        click.echo(json.dumps(data, ensure_ascii=False, indent=2, default=str))
+        return
+
+    # Text output
+    lines = []
+    lines.append(f"📅 Auto-Schedule ({len(schedule)} tasks)")
+    lines.append(f"   Start: {today.isoformat()}")
+    if schedule:
+        lines.append(f"   End: {schedule[-1]['scheduled_date']}")
+    lines.append(f"   Max {tasks_per_day} tasks/day")
+    lines.append("")
+
+    # Group by date
+    by_date: dict[str, list[dict]] = {}
+    for item in schedule:
+        d = item["scheduled_date"]
+        if d not in by_date:
+            by_date[d] = []
+        by_date[d].append(item)
+
+    for d in sorted(by_date.keys()):
+        items = by_date[d]
+        weekday = date.fromisoformat(d).strftime("%a")
+        lines.append(f"  {d} ({weekday}) — {len(items)} task(s):")
+        for item in items:
+            pri = f"[{item['priority'].upper()}]" if item.get("priority") else ""
+            owner = f" @{item['owner']}" if item.get("owner") else ""
+            orig_due = f" (orig due: {item['original_due']})" if item.get("original_due") else ""
+            note = f" ⚠️ {item['note']}" if item.get("note") else ""
+            lines.append(f"    {item['id']} {pri}{owner}{orig_due}{note}  {item['title']}")
+        lines.append("")
+
+    # Summary stats
+    already_dated = [t for t in all_tasks if t.get("due")]
+    undated = [t for t in all_tasks if not t.get("due")]
+    lines.append(f"💡 {len(already_dated)} task(s) already have due dates.")
+    lines.append(f"💡 {len(undated)} task(s) without due dates.")
+
+    if apply and applied:
+        lines.append(f"✅ Applied due dates to {len(applied)} task(s).")
+    elif apply:
+        lines.append("⚠️  No changes applied (missing --actor or no applicable tasks).")
+    else:
+        lines.append("💡 Use --apply --actor <name> to apply this schedule.")
+
+    click.echo("\n".join(lines))
+
+
+@task_group.command("gantt")
+@click.option("--epic", "epic_ref", default=None, help="Show Gantt for a specific epic.")
+@click.option("--project", "project_ref", default=None, help="Show Gantt for a specific project.")
+@click.option("--owner", default=None, help="Filter by owner.")
+@click.option("--width", default=40, show_default=True, type=click.IntRange(min=10, max=100),
+              help="Chart width in characters.")
+@click.option("--include-done", is_flag=True, help="Include done tasks.")
+@click.option("--json", "json_output", is_flag=True, help="Print structured JSON.")
+@click.pass_context
+def task_gantt(ctx: click.Context, epic_ref: str | None, project_ref: str | None,
+               owner: str | None, width: int, include_done: bool, json_output: bool) -> None:
+    """Show an ASCII Gantt chart of tasks with due dates."""
+    from datetime import date, timedelta
+
+    root = find_repo_root(_cwd_from_context(ctx))
+    today = date.today()
+
+    all_tasks = list_tasks(root, epic_ref=epic_ref, project_ref=project_ref, owner=owner)
+    if not include_done:
+        all_tasks = [t for t in all_tasks if t.get("status") not in ("done", "wontfix")]
+
+    # Only tasks with due dates
+    dated_tasks = [t for t in all_tasks if t.get("due")]
+
+    if not dated_tasks:
+        click.echo("No tasks with due dates found.")
+        return
+
+    # Find date range
+    due_dates = [date.fromisoformat(t["due"]) for t in dated_tasks if t.get("due")]
+    min_date = min(due_dates + [today])
+    max_date = max(due_dates + [today])
+    total_days = (max_date - min_date).days + 1
+
+    # Normalize to chart width
+    day_width = max(1, total_days / width)
+
+    if json_output:
+        data = {
+            "generated": today.isoformat(),
+            "date_range": {"start": min_date.isoformat(), "end": max_date.isoformat()},
+            "total_days": total_days,
+            "tasks": [
+                {
+                    "id": t["id"],
+                    "title": t["title"],
+                    "due": t.get("due", ""),
+                    "status": t.get("status", ""),
+                    "owner": t.get("owner", ""),
+                    "priority": t.get("priority", ""),
+                    "position": round((date.fromisoformat(t["due"]) - min_date).days / day_width) if t.get("due") else 0,
+                }
+                for t in dated_tasks
+            ],
+        }
+        click.echo(json.dumps(data, ensure_ascii=False, indent=2, default=str))
+        return
+
+    # Text output
+    lines = []
+    lines.append(f"📊 Gantt Chart ({len(dated_tasks)} tasks)")
+    lines.append(f"   Range: {min_date.isoformat()} → {max_date.isoformat()} ({total_days} days)")
+    lines.append(f"   Today: {today.isoformat()}")
+    lines.append("")
+
+    # Header: date markers
+    header = " " * 20
+    for i in range(width + 1):
+        day_num = int(i * day_width)
+        if day_num % 7 == 0 and day_num < total_days:
+            marker_date = min_date + timedelta(days=day_num)
+            label = f"{marker_date.month}/{marker_date.day}"
+            if i + len(label) <= width:
+                header = header[:i + 20] + label + header[i + 20 + len(label):]
+    lines.append(header)
+    lines.append(" " * 20 + "├" + "─" * width + "┤")
+
+    # Today marker
+    today_pos = int((today - min_date).days / day_width)
+    today_line = " " * 20 + "│" + " " * width + "│"
+    if 0 <= today_pos <= width:
+        today_line = today_line[:21 + today_pos] + "▼" + today_line[22 + today_pos:]
+    lines.append(today_line)
+
+    # Task bars
+    STATUS_ICONS = {
+        "done": "✅", "in_progress": "🔧", "blocked": "🚧",
+        "ready": "⏳", "created": "📝", "wontfix": "❌",
+    }
+
+    # Sort by due date
+    dated_tasks.sort(key=lambda t: t.get("due", ""))
+
+    for t in dated_tasks:
+        status_icon = STATUS_ICONS.get(t.get("status", "?"), "❓")
+        task_id = t.get("id", "")
+        label = f"{status_icon} {task_id}"
+        label = label[:18].ljust(18)
+
+        due = date.fromisoformat(t["due"])
+        pos = int((due - min_date).days / day_width)
+        pos = max(0, min(width, pos))
+
+        # Build bar: from start to due date
+        bar = " " * width
+        # Fill from start (or today) to due date
+        start_fill = 0
+        end_fill = pos
+        for i in range(start_fill, min(end_fill + 1, width)):
+            if i == today_pos and t.get("status") == "in_progress":
+                bar = bar[:i] + "◉" + bar[i + 1:]
+            elif i < pos:
+                bar = bar[:i] + "─" + bar[i + 1:]
+            elif i == pos:
+                bar = bar[:i] + "●" + bar[i + 1:]
+
+        # Overdue indicator
+        is_overdue = t.get("due") < today.isoformat() and t.get("status") not in ("done", "wontfix")
+        overdue_marker = " ⚠️" if is_overdue else ""
+
+        lines.append(f"  {label} │{bar}│{overdue_marker}")
+
+    lines.append(" " * 20 + "└" + "─" * width + "┘")
+    lines.append("")
+
+    # Legend
+    lines.append("Legend: ● = due date, ▼ = today, ⚠️ = overdue")
+    lines.append(f"  {STATUS_ICONS.get('done', '✅')} done  {STATUS_ICONS.get('in_progress', '🔧')} in progress  "
+                 f"{STATUS_ICONS.get('blocked', '🚧')} blocked  {STATUS_ICONS.get('ready', '⏳')} ready  "
+                 f"{STATUS_ICONS.get('created', '📝')} created")
+
+    click.echo("\n".join(lines))
+
+
+@task_group.command("timeline")
+@click.option("--epic", "epic_ref", default=None, help="Show timeline for a specific epic.")
+@click.option("--project", "project_ref", default=None, help="Show timeline for a specific project.")
+@click.option("--owner", default=None, help="Filter by owner.")
+@click.option("--group-by", default="month",
+              type=click.Choice(("week", "month", "quarter"), case_sensitive=False),
+              help="Group tasks by week, month, or quarter (default: month).")
+@click.option("--include-done", is_flag=True, help="Include done tasks.")
+@click.option("--json", "json_output", is_flag=True, help="Print structured JSON.")
+@click.pass_context
+def task_timeline(ctx: click.Context, epic_ref: str | None, project_ref: str | None,
+                  owner: str | None, group_by: str, include_done: bool,
+                  json_output: bool) -> None:
+    """Show tasks grouped by due date periods (week/month/quarter)."""
+    from datetime import date, timedelta
+    from collections import defaultdict
+
+    root = find_repo_root(_cwd_from_context(ctx))
+    today = date.today()
+
+    all_tasks = list_tasks(root, epic_ref=epic_ref, project_ref=project_ref, owner=owner)
+    if not include_done:
+        all_tasks = [t for t in all_tasks if t.get("status") not in ("done", "wontfix")]
+
+    # Group tasks by due date period
+    def get_period_key(d: date) -> str:
+        if group_by == "week":
+            # ISO week
+            year, week, _ = d.isocalendar()
+            return f"{year}-W{week:02d}"
+        elif group_by == "quarter":
+            quarter = (d.month - 1) // 3 + 1
+            return f"{d.year}-Q{quarter}"
+        else:  # month
+            return f"{d.year}-{d.month:02d}"
+
+    def get_period_label(key: str) -> str:
+        if group_by == "week":
+            return f"Week {key}"
+        elif group_by == "quarter":
+            return f"Quarter {key}"
+        else:
+            return key  # e.g. "2026-07"
+
+    by_period: dict[str, list[dict]] = defaultdict(list)
+    no_due = []
+
+    for t in all_tasks:
+        due = t.get("due", "")
+        if due:
+            try:
+                due_d = date.fromisoformat(due)
+                key = get_period_key(due_d)
+                by_period[key].append(t)
+            except ValueError:
+                no_due.append(t)
+        else:
+            no_due.append(t)
+
+    # Sort periods
+    sorted_periods = sorted(by_period.keys())
+
+    # Calculate stats per period
+    period_stats = {}
+    for key in sorted_periods:
+        tasks = by_period[key]
+        done = len([t for t in tasks if t.get("status") == "done"])
+        in_progress = len([t for t in tasks if t.get("status") == "in_progress"])
+        blocked = len([t for t in tasks if t.get("status") == "blocked"])
+        overdue = len([t for t in tasks if t.get("due") and t["due"] < today.isoformat()
+                        and t.get("status") not in ("done", "wontfix")])
+        by_priority: dict[str, int] = defaultdict(int)
+        for t in tasks:
+            by_priority[t.get("priority", "unspecified")] += 1
+        period_stats[key] = {
+            "total": len(tasks),
+            "done": done,
+            "in_progress": in_progress,
+            "blocked": blocked,
+            "overdue": overdue,
+            "by_priority": dict(by_priority),
+        }
+
+    if json_output:
+        data = {
+            "generated": today.isoformat(),
+            "group_by": group_by,
+            "total_tasks": len(all_tasks),
+            "with_due": len(all_tasks) - len(no_due),
+            "without_due": len(no_due),
+            "periods": {
+                key: {
+                    "label": get_period_label(key),
+                    "stats": period_stats[key],
+                    "tasks": [{"id": t["id"], "title": t["title"], "due": t.get("due", ""),
+                               "status": t.get("status", ""), "owner": t.get("owner", ""),
+                               "priority": t.get("priority", "")} for t in by_period[key]],
+                }
+                for key in sorted_periods
+            },
+            "no_due": [{"id": t["id"], "title": t["title"], "status": t.get("status", ""),
+                        "owner": t.get("owner", "")} for t in no_due],
+        }
+        click.echo(json.dumps(data, ensure_ascii=False, indent=2, default=str))
+        return
+
+    # Text output
+    lines = []
+    lines.append(f"📅 Task Timeline (grouped by {group_by})")
+    lines.append(f"   {len(all_tasks)} tasks total, {len(no_due)} without due date")
+    lines.append("")
+
+    for key in sorted_periods:
+        tasks = by_period[key]
+        stats = period_stats[key]
+        label = get_period_label(key)
+
+        # Check if this period is current
+        today_key = get_period_key(today)
+        is_current = key == today_key
+        is_past = key < today_key
+
+        period_icon = "📍" if is_current else ("✅" if is_past and stats["done"] == stats["total"] else "⏳")
+        header = f"{period_icon} {label} ({stats['total']} tasks)"
+
+        # Status summary
+        status_parts = []
+        if stats["done"]:
+            status_parts.append(f"✅ {stats['done']}")
+        if stats["in_progress"]:
+            status_parts.append(f"🔧 {stats['in_progress']}")
+        if stats["blocked"]:
+            status_parts.append(f"🚧 {stats['blocked']}")
+        if stats["overdue"]:
+            status_parts.append(f"⚠️ {stats['overdue']} overdue")
+        status_str = "  ".join(status_parts)
+
+        lines.append(f"  {header}")
+        if status_str:
+            lines.append(f"     {status_str}")
+
+        # Priority breakdown
+        pri_parts = []
+        for pri in ("critical", "high", "medium", "low"):
+            count = stats["by_priority"].get(pri, 0)
+            if count:
+                pri_parts.append(f"{pri}: {count}")
+        if pri_parts:
+            lines.append(f"     [{', '.join(pri_parts)}]")
+
+        # List tasks
+        for t in sorted(tasks, key=lambda x: (x.get("due", ""), x.get("priority", ""))):
+            pri = f"[{t.get('priority', '').upper()}]" if t.get("priority") else ""
+            owner = f" @{t.get('owner', '')}" if t.get("owner") else ""
+            status_icon = {"done": "✅", "in_progress": "🔧", "blocked": "🚧",
+                          "ready": "⏳", "created": "📝"}.get(t.get("status", ""), "❓")
+            overdue_mark = " ⚠️" if (t.get("due") and t["due"] < today.isoformat()
+                                     and t.get("status") not in ("done", "wontfix")) else ""
+            lines.append(f"     {status_icon} {t['id']} {pri}{owner}{overdue_mark}  {t['title']}")
+
+        lines.append("")
+
+    # No due date section
+    if no_due:
+        lines.append(f"❓ No due date ({len(no_due)}):")
+        for t in no_due[:10]:
+            owner = f" @{t.get('owner', '')}" if t.get("owner") else ""
+            lines.append(f"     {t['id']}{owner}  {t['title']}")
+        if len(no_due) > 10:
+            lines.append(f"     ... and {len(no_due) - 10} more")
+        lines.append("")
+
+    # Overall stats
+    total_dated = len(all_tasks) - len(no_due)
+    total_done = sum(s["done"] for s in period_stats.values())
+    total_overdue = sum(s["overdue"] for s in period_stats.values())
+    lines.append(f"📊 Summary: {total_dated} scheduled, {total_done} done, {total_overdue} overdue")
+
+    click.echo("\n".join(lines))
+
+
 @task_group.command("edit")
 @click.argument("task_ref")
 @click.option("--title", default=None, help="New task title.")
