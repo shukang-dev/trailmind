@@ -5504,6 +5504,248 @@ def task_bulk_rename(
         _echo_touched(root, touched)
 
 
+@task_group.command("bulk-clear-tags")
+@click.argument("task_refs", nargs=-1)
+@click.option("--actor", required=True)
+@click.option("--note", default=None)
+@click.option("--from-file", "from_file", default=None,
+              help="Read task IDs from file (one per line), or '-' for stdin.")
+@click.option("--dry-run", is_flag=True, help="Preview without applying.")
+@click.pass_context
+def task_bulk_clear_tags(
+    ctx: click.Context,
+    task_refs: tuple[str, ...],
+    actor: str,
+    note: str | None,
+    from_file: str | None,
+    dry_run: bool,
+) -> None:
+    """Bulk-clear all tags from tasks (e.g. T-001 T-002, or --from-file ids.txt)."""
+    root = find_repo_root(_cwd_from_context(ctx))
+    refs = list(task_refs)
+    if from_file:
+        refs.extend(_read_ids_from_file(from_file))
+    if not refs:
+        raise TrailmindError("no task IDs provided (pass as args or use --from-file)")
+    if dry_run:
+        click.echo(f"[DRY RUN] Would clear all tags from {len(refs)} task(s):")
+        for r in refs:
+            click.echo(f"  - {r}")
+        return
+    touched = []
+    for task_ref in refs:
+        try:
+            path = edit_task(root, task_ref=task_ref, actor=actor, tags=[], note=note)
+            touched.append(path)
+        except Exception as exc:
+            click.echo(f"  ⚠ {task_ref}: {exc}", err=True)
+    if touched:
+        _echo_touched(root, touched)
+
+
+@task_group.command("bulk-clear-deliverables")
+@click.argument("task_refs", nargs=-1)
+@click.option("--actor", required=True)
+@click.option("--note", default=None)
+@click.option("--from-file", "from_file", default=None,
+              help="Read task IDs from file (one per line), or '-' for stdin.")
+@click.option("--dry-run", is_flag=True, help="Preview without applying.")
+@click.pass_context
+def task_bulk_clear_deliverables(
+    ctx: click.Context,
+    task_refs: tuple[str, ...],
+    actor: str,
+    note: str | None,
+    from_file: str | None,
+    dry_run: bool,
+) -> None:
+    """Bulk-clear all deliverables from tasks (e.g. T-001 T-002, or --from-file ids.txt)."""
+    root = find_repo_root(_cwd_from_context(ctx))
+    refs = list(task_refs)
+    if from_file:
+        refs.extend(_read_ids_from_file(from_file))
+    if not refs:
+        raise TrailmindError("no task IDs provided (pass as args or use --from-file)")
+    if dry_run:
+        click.echo(f"[DRY RUN] Would clear all deliverables from {len(refs)} task(s):")
+        for r in refs:
+            click.echo(f"  - {r}")
+        return
+    touched = []
+    for task_ref in refs:
+        try:
+            path = edit_task(root, task_ref=task_ref, actor=actor, deliverables=[], note=note)
+            touched.append(path)
+        except Exception as exc:
+            click.echo(f"  ⚠ {task_ref}: {exc}", err=True)
+    if touched:
+        _echo_touched(root, touched)
+
+
+@task_group.command("bulk-clear-known-issues")
+@click.argument("task_refs", nargs=-1)
+@click.option("--actor", required=True)
+@click.option("--note", default=None)
+@click.option("--from-file", "from_file", default=None,
+              help="Read task IDs from file (one per line), or '-' for stdin.")
+@click.option("--dry-run", is_flag=True, help="Preview without applying.")
+@click.pass_context
+def task_bulk_clear_known_issues(
+    ctx: click.Context,
+    task_refs: tuple[str, ...],
+    actor: str,
+    note: str | None,
+    from_file: str | None,
+    dry_run: bool,
+) -> None:
+    """Bulk-clear all known issues from tasks (e.g. T-001 T-002, or --from-file ids.txt)."""
+    root = find_repo_root(_cwd_from_context(ctx))
+    refs = list(task_refs)
+    if from_file:
+        refs.extend(_read_ids_from_file(from_file))
+    if not refs:
+        raise TrailmindError("no task IDs provided (pass as args or use --from-file)")
+    if dry_run:
+        click.echo(f"[DRY RUN] Would clear all known issues from {len(refs)} task(s):")
+        for r in refs:
+            click.echo(f"  - {r}")
+        return
+    touched = []
+    for task_ref in refs:
+        try:
+            path = edit_task(root, task_ref=task_ref, actor=actor, known_issues=[], note=note)
+            touched.append(path)
+        except Exception as exc:
+            click.echo(f"  ⚠ {task_ref}: {exc}", err=True)
+    if touched:
+        _echo_touched(root, touched)
+
+
+@task_group.command("bulk-clear-code-paths")
+@click.argument("task_refs", nargs=-1)
+@click.option("--actor", required=True)
+@click.option("--note", default=None)
+@click.option("--from-file", "from_file", default=None,
+              help="Read task IDs from file (one per line), or '-' for stdin.")
+@click.option("--dry-run", is_flag=True, help="Preview without applying.")
+@click.pass_context
+def task_bulk_clear_code_paths(
+    ctx: click.Context,
+    task_refs: tuple[str, ...],
+    actor: str,
+    note: str | None,
+    from_file: str | None,
+    dry_run: bool,
+) -> None:
+    """Bulk-clear all code paths from tasks (e.g. T-001 T-002, or --from-file ids.txt)."""
+    root = find_repo_root(_cwd_from_context(ctx))
+    refs = list(task_refs)
+    if from_file:
+        refs.extend(_read_ids_from_file(from_file))
+    if not refs:
+        raise TrailmindError("no task IDs provided (pass as args or use --from-file)")
+    if dry_run:
+        click.echo(f"[DRY RUN] Would clear all code paths from {len(refs)} task(s):")
+        for r in refs:
+            click.echo(f"  - {r}")
+        return
+    touched = []
+    for task_ref in refs:
+        try:
+            path = edit_task(root, task_ref=task_ref, actor=actor, code_paths=[], note=note)
+            touched.append(path)
+        except Exception as exc:
+            click.echo(f"  ⚠ {task_ref}: {exc}", err=True)
+    if touched:
+        _echo_touched(root, touched)
+
+
+@task_group.command("bulk-clear-design-doc")
+@click.argument("task_refs", nargs=-1)
+@click.option("--actor", required=True)
+@click.option("--note", default=None)
+@click.option("--from-file", "from_file", default=None,
+              help="Read task IDs from file (one per line), or '-' for stdin.")
+@click.option("--dry-run", is_flag=True, help="Preview without applying.")
+@click.pass_context
+def task_bulk_clear_design_doc(
+    ctx: click.Context,
+    task_refs: tuple[str, ...],
+    actor: str,
+    note: str | None,
+    from_file: str | None,
+    dry_run: bool,
+) -> None:
+    """Bulk-clear design doc from tasks (e.g. T-001 T-002, or --from-file ids.txt)."""
+    root = find_repo_root(_cwd_from_context(ctx))
+    refs = list(task_refs)
+    if from_file:
+        refs.extend(_read_ids_from_file(from_file))
+    if not refs:
+        raise TrailmindError("no task IDs provided (pass as args or use --from-file)")
+    if dry_run:
+        click.echo(f"[DRY RUN] Would clear design doc from {len(refs)} task(s):")
+        for r in refs:
+            click.echo(f"  - {r}")
+        return
+    touched = []
+    for task_ref in refs:
+        try:
+            path = edit_task(root, task_ref=task_ref, actor=actor, design_doc="", note=note)
+            touched.append(path)
+        except Exception as exc:
+            click.echo(f"  ⚠ {task_ref}: {exc}", err=True)
+    if touched:
+        _echo_touched(root, touched)
+
+
+@task_group.command("bulk-clear-deps")
+@click.argument("task_refs", nargs=-1)
+@click.option("--actor", required=True)
+@click.option("--note", default=None)
+@click.option("--from-file", "from_file", default=None,
+              help="Read task IDs from file (one per line), or '-' for stdin.")
+@click.option("--dry-run", is_flag=True, help="Preview without applying.")
+@click.pass_context
+def task_bulk_clear_deps(
+    ctx: click.Context,
+    task_refs: tuple[str, ...],
+    actor: str,
+    note: str | None,
+    from_file: str | None,
+    dry_run: bool,
+) -> None:
+    """Bulk-clear all dependencies (hard and soft) from tasks."""
+    from trailmind.resolver import resolve_entity
+    from trailmind.log import read_entity_user_facing
+    from trailmind.entity_io import write_entity
+
+    root = find_repo_root(_cwd_from_context(ctx))
+    refs = list(task_refs)
+    if from_file:
+        refs.extend(_read_ids_from_file(from_file))
+    if not refs:
+        raise TrailmindError("no task IDs provided (pass as args or use --from-file)")
+    if dry_run:
+        click.echo(f"[DRY RUN] Would clear all deps from {len(refs)} task(s):")
+        for r in refs:
+            click.echo(f"  - {r}")
+        return
+    touched = []
+    for task_ref in refs:
+        try:
+            path = resolve_entity(root, raw=task_ref, entity="T")
+            fm, body = read_entity_user_facing(path, label="task")
+            fm["depends_on"] = []
+            fm["soft_depends_on"] = []
+            write_entity(path, frontmatter=fm, body=body)
+            touched.append(path)
+        except Exception as exc:
+            click.echo(f"  ⚠ {task_ref}: {exc}", err=True)
+    if touched:
+        _echo_touched(root, touched)
+
+
 @task_group.command("move")
 @click.argument("task_ref")
 @click.argument("target_epic")
@@ -6153,6 +6395,102 @@ def task_bulk_remove_known_issue(
         _echo_touched(root, touched)
 
 
+@task_depend_group.command("bulk-add-soft")
+@click.argument("task_refs", nargs=-1)
+@click.argument("depends_on_ref")
+@click.option("--actor", required=True)
+@click.option("--note", default=None)
+@click.option("--from-file", "from_file", default=None,
+              help="Read task IDs from file (one per line), or '-' for stdin.")
+@click.option("--dry-run", is_flag=True, help="Preview without applying.")
+@click.pass_context
+def task_depend_bulk_add_soft(
+    ctx: click.Context,
+    task_refs: tuple[str, ...],
+    depends_on_ref: str,
+    actor: str,
+    note: str | None,
+    from_file: str | None,
+    dry_run: bool,
+) -> None:
+    """Bulk-add a soft dependency to multiple tasks."""
+    root = find_repo_root(_cwd_from_context(ctx))
+    refs = list(task_refs)
+    if from_file:
+        refs.extend(_read_ids_from_file(from_file))
+    if not refs:
+        raise TrailmindError("no task IDs provided (pass as args or use --from-file)")
+    if dry_run:
+        click.echo(f"[DRY RUN] Would add soft dep {depends_on_ref!r} to {len(refs)} task(s):")
+        for r in refs:
+            click.echo(f"  - {r}")
+        return
+    touched = []
+    for task_ref in refs:
+        try:
+            path = add_task_dependency(
+                root,
+                task_ref=task_ref,
+                depends_on_ref=depends_on_ref,
+                actor=actor,
+                soft=True,
+                note=note,
+            )
+            touched.append(path)
+        except Exception as exc:
+            click.echo(f"  ⚠ {task_ref}: {exc}", err=True)
+    if touched:
+        _echo_touched(root, touched)
+
+
+@task_depend_group.command("bulk-remove-soft")
+@click.argument("task_refs", nargs=-1)
+@click.argument("depends_on_ref")
+@click.option("--actor", required=True)
+@click.option("--note", default=None)
+@click.option("--from-file", "from_file", default=None,
+              help="Read task IDs from file (one per line), or '-' for stdin.")
+@click.option("--dry-run", is_flag=True, help="Preview without applying.")
+@click.pass_context
+def task_depend_bulk_remove_soft(
+    ctx: click.Context,
+    task_refs: tuple[str, ...],
+    depends_on_ref: str,
+    actor: str,
+    note: str | None,
+    from_file: str | None,
+    dry_run: bool,
+) -> None:
+    """Bulk-remove a soft dependency from multiple tasks."""
+    root = find_repo_root(_cwd_from_context(ctx))
+    refs = list(task_refs)
+    if from_file:
+        refs.extend(_read_ids_from_file(from_file))
+    if not refs:
+        raise TrailmindError("no task IDs provided (pass as args or use --from-file)")
+    if dry_run:
+        click.echo(f"[DRY RUN] Would remove soft dep {depends_on_ref!r} from {len(refs)} task(s):")
+        for r in refs:
+            click.echo(f"  - {r}")
+        return
+    touched = []
+    for task_ref in refs:
+        try:
+            path = remove_task_dependency(
+                root,
+                task_ref=task_ref,
+                depends_on_ref=depends_on_ref,
+                actor=actor,
+                soft=True,
+                note=note,
+            )
+            touched.append(path)
+        except Exception as exc:
+            click.echo(f"  ⚠ {task_ref}: {exc}", err=True)
+    if touched:
+        _echo_touched(root, touched)
+
+
 @task_group.command("normalize-statuses")
 @click.option("--write", "write_changes", is_flag=True, help="Rewrite legacy statuses in task files.")
 @click.pass_context
@@ -6347,6 +6685,84 @@ def task_deliverable_bulk_complete(
     dry_run: bool,
 ) -> None:
     """Bulk-complete a deliverable on multiple tasks."""
+    root = find_repo_root(_cwd_from_context(ctx))
+    refs = list(task_refs)
+    if from_file:
+        refs.extend(_read_ids_from_file(from_file))
+    if not refs:
+        raise TrailmindError("no task IDs provided (pass as args or use --from-file)")
+    if dry_run:
+        click.echo(f"[DRY RUN] Would complete deliverable {item!r} on {len(refs)} task(s):")
+        for r in refs:
+            click.echo(f"  - {r}")
+        return
+    touched = []
+    for task_ref in refs:
+        try:
+            path = complete_task_deliverable(root, task_ref=task_ref, item=item, actor=actor)
+            touched.append(path)
+        except Exception as exc:
+            click.echo(f"  ⚠ {task_ref}: {exc}", err=True)
+    if touched:
+        _echo_touched(root, touched)
+
+
+@task_deliverable_group.command("bulk-add-item")
+@click.argument("task_refs", nargs=-1)
+@click.option("--item", required=True)
+@click.option("--actor", required=True)
+@click.option("--from-file", "from_file", default=None,
+              help="Read task IDs from file (one per line), or '-' for stdin.")
+@click.option("--dry-run", is_flag=True, help="Preview without applying.")
+@click.pass_context
+def task_deliverable_bulk_add_item(
+    ctx: click.Context,
+    task_refs: tuple[str, ...],
+    item: str,
+    actor: str,
+    from_file: str | None,
+    dry_run: bool,
+) -> None:
+    """Bulk-add a deliverable item to multiple tasks (appends to existing)."""
+    root = find_repo_root(_cwd_from_context(ctx))
+    refs = list(task_refs)
+    if from_file:
+        refs.extend(_read_ids_from_file(from_file))
+    if not refs:
+        raise TrailmindError("no task IDs provided (pass as args or use --from-file)")
+    if dry_run:
+        click.echo(f"[DRY RUN] Would add deliverable {item!r} to {len(refs)} task(s):")
+        for r in refs:
+            click.echo(f"  - {r}")
+        return
+    touched = []
+    for task_ref in refs:
+        try:
+            path = add_task_deliverable(root, task_ref=task_ref, item=item, actor=actor)
+            touched.append(path)
+        except Exception as exc:
+            click.echo(f"  ⚠ {task_ref}: {exc}", err=True)
+    if touched:
+        _echo_touched(root, touched)
+
+
+@task_deliverable_group.command("bulk-complete-item")
+@click.argument("task_refs", nargs=-1)
+@click.option("--item", required=True)
+@click.option("--actor", required=True)
+@click.option("--from-file", "from_file", default=None,
+              help="Read task IDs from file (one per line), or '-' for stdin.")
+@click.option("--dry-run", is_flag=True, help="Preview without applying.")
+@click.pass_context
+def task_deliverable_bulk_complete_item(
+    ctx: click.Context,
+    task_refs: tuple[str, ...],
+    item: str,
+    actor: str,
+    from_file: str | None,
+    dry_run: bool,
+) -> None:
+    """Bulk-complete a specific deliverable item across multiple tasks."""
     root = find_repo_root(_cwd_from_context(ctx))
     refs = list(task_refs)
     if from_file:
@@ -6866,6 +7282,45 @@ def issue_bulk_set_description(
     for issue_ref in refs:
         try:
             path = edit_issue(root, issue_ref=issue_ref, actor=actor, description=description, note=note)
+            touched.append(path)
+        except Exception as exc:
+            click.echo(f"  ⚠ {issue_ref}: {exc}", err=True)
+    if touched:
+        _echo_touched(root, touched)
+
+
+@issue_group.command("bulk-clear-linked-tasks")
+@click.argument("issue_refs", nargs=-1)
+@click.option("--actor", required=True)
+@click.option("--note", default=None)
+@click.option("--from-file", "from_file", default=None,
+              help="Read issue IDs from file (one per line), or '-' for stdin.")
+@click.option("--dry-run", is_flag=True, help="Preview without applying.")
+@click.pass_context
+def issue_bulk_clear_linked_tasks(
+    ctx: click.Context,
+    issue_refs: tuple[str, ...],
+    actor: str,
+    note: str | None,
+    from_file: str | None,
+    dry_run: bool,
+) -> None:
+    """Bulk-clear all linked tasks from issues."""
+    root = find_repo_root(_cwd_from_context(ctx))
+    refs = list(issue_refs)
+    if from_file:
+        refs.extend(_read_ids_from_file(from_file))
+    if not refs:
+        raise TrailmindError("no issue IDs provided (pass as args or use --from-file)")
+    if dry_run:
+        click.echo(f"[DRY RUN] Would clear linked tasks from {len(refs)} issue(s):")
+        for r in refs:
+            click.echo(f"  - {r}")
+        return
+    touched = []
+    for issue_ref in refs:
+        try:
+            path = edit_issue(root, issue_ref=issue_ref, actor=actor, linked_tasks=[], note=note)
             touched.append(path)
         except Exception as exc:
             click.echo(f"  ⚠ {issue_ref}: {exc}", err=True)
