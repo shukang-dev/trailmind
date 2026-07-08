@@ -2713,6 +2713,45 @@ def inbox_resolve(ctx: click.Context, item_ref: str, resolver: str, note: str) -
     _echo_touched(root, [touched])
 
 
+@inbox_group.command("bulk-resolve")
+@click.argument("item_refs", nargs=-1)
+@click.option("--resolver", required=True)
+@click.option("--note", required=True)
+@click.option("--from-file", "from_file", default=None,
+              help="Read inbox item IDs from file (one per line), or '-' for stdin.")
+@click.option("--dry-run", is_flag=True, help="Preview without applying.")
+@click.pass_context
+def inbox_bulk_resolve(
+    ctx: click.Context,
+    item_refs: tuple[str, ...],
+    resolver: str,
+    note: str,
+    from_file: str | None,
+    dry_run: bool,
+) -> None:
+    """Bulk-resolve inbox items (e.g. IN-001 IN-002, or --from-file ids.txt)."""
+    root = find_repo_root(_cwd_from_context(ctx))
+    refs = list(item_refs)
+    if from_file:
+        refs.extend(_read_ids_from_file(from_file))
+    if not refs:
+        raise TrailmindError("no inbox item IDs provided (pass as args or use --from-file)")
+    if dry_run:
+        click.echo(f"[DRY RUN] Would resolve {len(refs)} inbox item(s):")
+        for r in refs:
+            click.echo(f"  - {r}")
+        return
+    touched = []
+    for item_ref in refs:
+        try:
+            path = resolve_inbox_item(root, item_ref=item_ref, resolver=resolver, note=note)
+            touched.append(path)
+        except Exception as exc:
+            click.echo(f"  ⚠ {item_ref}: {exc}", err=True)
+    if touched:
+        _echo_touched(root, touched)
+
+
 @inbox_group.command("show")
 @click.argument("item_ref")
 @click.option("--json", "json_output", is_flag=True, help="Print structured JSON.")
@@ -4045,6 +4084,47 @@ def task_set_priority(
     _echo_touched(root, [touched])
 
 
+@task_group.command("bulk-priority")
+@click.argument("task_refs", nargs=-1)
+@click.argument("priority", type=click.Choice(TASK_PRIORITIES, case_sensitive=False))
+@click.option("--actor", required=True)
+@click.option("--note", default=None)
+@click.option("--from-file", "from_file", default=None,
+              help="Read task IDs from file (one per line), or '-' for stdin.")
+@click.option("--dry-run", is_flag=True, help="Preview without applying.")
+@click.pass_context
+def task_bulk_priority(
+    ctx: click.Context,
+    task_refs: tuple[str, ...],
+    priority: str,
+    actor: str,
+    note: str | None,
+    from_file: str | None,
+    dry_run: bool,
+) -> None:
+    """Bulk-set priority for tasks (e.g. T-001 T-002 high, or --from-file ids.txt)."""
+    root = find_repo_root(_cwd_from_context(ctx))
+    refs = list(task_refs)
+    if from_file:
+        refs.extend(_read_ids_from_file(from_file))
+    if not refs:
+        raise TrailmindError("no task IDs provided (pass as args or use --from-file)")
+    if dry_run:
+        click.echo(f"[DRY RUN] Would set priority to {priority!r} for {len(refs)} task(s):")
+        for r in refs:
+            click.echo(f"  - {r}")
+        return
+    touched = []
+    for task_ref in refs:
+        try:
+            path = set_task_priority(root, task_ref=task_ref, priority=priority, actor=actor, note=note)
+            touched.append(path)
+        except Exception as exc:
+            click.echo(f"  ⚠ {task_ref}: {exc}", err=True)
+    if touched:
+        _echo_touched(root, touched)
+
+
 @task_group.command("due")
 @click.argument("task_ref")
 @click.argument("due_date", required=False, default=None)
@@ -4075,6 +4155,86 @@ def task_due(
             raise TrailmindError("due date is required (or use --clear)")
         touched = set_task_due(root, task_ref=task_ref, due_date=due_date, actor=actor, note=note)
     _echo_touched(root, [touched])
+
+
+@task_group.command("bulk-due-set")
+@click.argument("task_refs", nargs=-1)
+@click.argument("due_date")
+@click.option("--actor", required=True)
+@click.option("--note", default=None)
+@click.option("--from-file", "from_file", default=None,
+              help="Read task IDs from file (one per line), or '-' for stdin.")
+@click.option("--dry-run", is_flag=True, help="Preview without applying.")
+@click.pass_context
+def task_bulk_due_set(
+    ctx: click.Context,
+    task_refs: tuple[str, ...],
+    due_date: str,
+    actor: str,
+    note: str | None,
+    from_file: str | None,
+    dry_run: bool,
+) -> None:
+    """Bulk-set due date for tasks (e.g. T-001 T-002 2026-08-01, or --from-file ids.txt)."""
+    root = find_repo_root(_cwd_from_context(ctx))
+    refs = list(task_refs)
+    if from_file:
+        refs.extend(_read_ids_from_file(from_file))
+    if not refs:
+        raise TrailmindError("no task IDs provided (pass as args or use --from-file)")
+    if dry_run:
+        click.echo(f"[DRY RUN] Would set due date to {due_date!r} for {len(refs)} task(s):")
+        for r in refs:
+            click.echo(f"  - {r}")
+        return
+    touched = []
+    for task_ref in refs:
+        try:
+            path = set_task_due(root, task_ref=task_ref, due_date=due_date, actor=actor, note=note)
+            touched.append(path)
+        except Exception as exc:
+            click.echo(f"  ⚠ {task_ref}: {exc}", err=True)
+    if touched:
+        _echo_touched(root, touched)
+
+
+@task_group.command("bulk-due-clear")
+@click.argument("task_refs", nargs=-1)
+@click.option("--actor", required=True)
+@click.option("--note", default=None)
+@click.option("--from-file", "from_file", default=None,
+              help="Read task IDs from file (one per line), or '-' for stdin.")
+@click.option("--dry-run", is_flag=True, help="Preview without applying.")
+@click.pass_context
+def task_bulk_due_clear(
+    ctx: click.Context,
+    task_refs: tuple[str, ...],
+    actor: str,
+    note: str | None,
+    from_file: str | None,
+    dry_run: bool,
+) -> None:
+    """Bulk-clear due date for tasks (e.g. T-001 T-002, or --from-file ids.txt)."""
+    root = find_repo_root(_cwd_from_context(ctx))
+    refs = list(task_refs)
+    if from_file:
+        refs.extend(_read_ids_from_file(from_file))
+    if not refs:
+        raise TrailmindError("no task IDs provided (pass as args or use --from-file)")
+    if dry_run:
+        click.echo(f"[DRY RUN] Would clear due date for {len(refs)} task(s):")
+        for r in refs:
+            click.echo(f"  - {r}")
+        return
+    touched = []
+    for task_ref in refs:
+        try:
+            path = set_task_due(root, task_ref=task_ref, due_date=None, actor=actor, note=note)
+            touched.append(path)
+        except Exception as exc:
+            click.echo(f"  ⚠ {task_ref}: {exc}", err=True)
+    if touched:
+        _echo_touched(root, touched)
 
 
 @task_group.command("assign")
@@ -5737,6 +5897,47 @@ def issue_set_severity(
     _echo_touched(root, [touched])
 
 
+@issue_group.command("bulk-severity")
+@click.argument("issue_refs", nargs=-1)
+@click.argument("severity", type=click.Choice(ISSUE_SEVERITIES, case_sensitive=False))
+@click.option("--actor", required=True)
+@click.option("--note", default=None)
+@click.option("--from-file", "from_file", default=None,
+              help="Read issue IDs from file (one per line), or '-' for stdin.")
+@click.option("--dry-run", is_flag=True, help="Preview without applying.")
+@click.pass_context
+def issue_bulk_severity(
+    ctx: click.Context,
+    issue_refs: tuple[str, ...],
+    severity: str,
+    actor: str,
+    note: str | None,
+    from_file: str | None,
+    dry_run: bool,
+) -> None:
+    """Bulk-set severity for issues (e.g. I-001 I-002 high, or --from-file ids.txt)."""
+    root = find_repo_root(_cwd_from_context(ctx))
+    refs = list(issue_refs)
+    if from_file:
+        refs.extend(_read_ids_from_file(from_file))
+    if not refs:
+        raise TrailmindError("no issue IDs provided (pass as args or use --from-file)")
+    if dry_run:
+        click.echo(f"[DRY RUN] Would set severity to {severity!r} for {len(refs)} issue(s):")
+        for r in refs:
+            click.echo(f"  - {r}")
+        return
+    touched = []
+    for issue_ref in refs:
+        try:
+            path = set_issue_severity(root, issue_ref=issue_ref, severity=severity, actor=actor, note=note)
+            touched.append(path)
+        except Exception as exc:
+            click.echo(f"  ⚠ {issue_ref}: {exc}", err=True)
+    if touched:
+        _echo_touched(root, touched)
+
+
 @issue_group.command("bulk-status")
 @click.argument("issue_refs", nargs=-1)
 @click.argument("status", type=click.Choice(("open", "done", "wontfix"), case_sensitive=False))
@@ -5994,6 +6195,45 @@ def issue_reopen(
     _echo_touched(root, [touched])
 
 
+@issue_group.command("bulk-reopen")
+@click.argument("issue_refs", nargs=-1)
+@click.option("--actor", required=True)
+@click.option("--note", default=None)
+@click.option("--from-file", "from_file", default=None,
+              help="Read issue IDs from file (one per line), or '-' for stdin.")
+@click.option("--dry-run", is_flag=True, help="Preview without applying.")
+@click.pass_context
+def issue_bulk_reopen(
+    ctx: click.Context,
+    issue_refs: tuple[str, ...],
+    actor: str,
+    note: str | None,
+    from_file: str | None,
+    dry_run: bool,
+) -> None:
+    """Bulk-reopen closed issues (e.g. I-001 I-002, or --from-file ids.txt)."""
+    root = find_repo_root(_cwd_from_context(ctx))
+    refs = list(issue_refs)
+    if from_file:
+        refs.extend(_read_ids_from_file(from_file))
+    if not refs:
+        raise TrailmindError("no issue IDs provided (pass as args or use --from-file)")
+    if dry_run:
+        click.echo(f"[DRY RUN] Would reopen {len(refs)} issue(s):")
+        for r in refs:
+            click.echo(f"  - {r}")
+        return
+    touched = []
+    for issue_ref in refs:
+        try:
+            path = reopen_issue(root, issue_ref=issue_ref, actor=actor, note=note)
+            touched.append(path)
+        except Exception as exc:
+            click.echo(f"  ⚠ {issue_ref}: {exc}", err=True)
+    if touched:
+        _echo_touched(root, touched)
+
+
 @issue_group.command("pickup")
 @click.argument("issue_ref")
 @click.option("--json", "json_output", is_flag=True, help="Print structured JSON instead of Markdown.")
@@ -6163,6 +6403,47 @@ def milestone_set_status(ctx: click.Context, milestone_ref: str, status: str, ac
         return
     touched = set_milestone_status(root, milestone_ref=milestone_ref, status=status, actor=actor, note=note)
     _echo_touched(root, [touched])
+
+
+@milestone_group.command("bulk-set-status")
+@click.argument("milestone_refs", nargs=-1)
+@click.argument("status")
+@click.option("--actor", required=True)
+@click.option("--note", default=None)
+@click.option("--from-file", "from_file", default=None,
+              help="Read milestone IDs from file (one per line), or '-' for stdin.")
+@click.option("--dry-run", is_flag=True, help="Preview without applying.")
+@click.pass_context
+def milestone_bulk_set_status(
+    ctx: click.Context,
+    milestone_refs: tuple[str, ...],
+    status: str,
+    actor: str,
+    note: str | None,
+    from_file: str | None,
+    dry_run: bool,
+) -> None:
+    """Bulk-set milestone status (e.g. M-001 M-002 done, or --from-file ids.txt)."""
+    root = find_repo_root(_cwd_from_context(ctx))
+    refs = list(milestone_refs)
+    if from_file:
+        refs.extend(_read_ids_from_file(from_file))
+    if not refs:
+        raise TrailmindError("no milestone IDs provided (pass as args or use --from-file)")
+    if dry_run:
+        click.echo(f"[DRY RUN] Would set status to {status!r} for {len(refs)} milestone(s):")
+        for r in refs:
+            click.echo(f"  - {r}")
+        return
+    touched = []
+    for milestone_ref in refs:
+        try:
+            path = set_milestone_status(root, milestone_ref=milestone_ref, status=status, actor=actor, note=note)
+            touched.append(path)
+        except Exception as exc:
+            click.echo(f"  ⚠ {milestone_ref}: {exc}", err=True)
+    if touched:
+        _echo_touched(root, touched)
 
 
 @milestone_group.command("add")
