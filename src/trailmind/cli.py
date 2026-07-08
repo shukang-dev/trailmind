@@ -3556,6 +3556,7 @@ def task_group() -> None:
 @click.option("--unassigned", is_flag=True, help="Show only tasks without an owner.")
 @click.option("--stale-days", default=None, type=click.IntRange(min=1),
               help="Show only tasks with no activity in N days (approximated by created date for done tasks).")
+@click.option("--title-contains", default=None, help="Filter by title substring (case-insensitive).")
 @click.option("--created-today", is_flag=True, help="Show only tasks created today.")
 @click.option("--created-this-week", is_flag=True, help="Show only tasks created this week.")
 @click.option("--sort", "sort_by", default="created",
@@ -3600,6 +3601,7 @@ def task_list_cmd(
     no_deps: bool,
     unassigned: bool,
     stale_days: int | None,
+    title_contains: str | None,
     created_today: bool,
     created_this_week: bool,
     sort_by: str,
@@ -3657,6 +3659,9 @@ def task_list_cmd(
         tasks = [t for t in tasks if not t.get("tags")]
     if unassigned:
         tasks = [t for t in tasks if not t.get("owner")]
+    if title_contains:
+        needle = title_contains.lower()
+        tasks = [t for t in tasks if needle in (t.get("title") or "").lower()]
     # --stale-days: tasks with no recent activity (approximate using created date for non-done tasks)
     if stale_days is not None:
         from datetime import date, timedelta
@@ -4701,6 +4706,7 @@ def issue_group() -> None:
 @click.option("--created-before", default=None, help="Filter issues created before YYYY-MM-DD.")
 @click.option("--created-today", is_flag=True, help="Show only issues created today.")
 @click.option("--created-this-week", is_flag=True, help="Show only issues created this week.")
+@click.option("--title-contains", default=None, help="Filter by title substring (case-insensitive).")
 @click.option("--sort", "sort_by", default="created",
               type=click.Choice(("created", "severity", "status", "title"), case_sensitive=False),
               help="Sort issues (default: created).")
@@ -4729,6 +4735,7 @@ def issue_list_cmd(
     created_before: str | None,
     created_today: bool,
     created_this_week: bool,
+    title_contains: str | None,
     sort_by: str,
     group_by: str | None,
     compact: bool,
@@ -4749,6 +4756,9 @@ def issue_list_cmd(
         issues = [i for i in issues if i.get("linked_tasks")]
     if no_linked_tasks:
         issues = [i for i in issues if not i.get("linked_tasks")]
+    if title_contains:
+        needle = title_contains.lower()
+        issues = [i for i in issues if needle in (i.get("title") or "").lower()]
     # --created-today and --created-this-week shortcuts
     if created_today or created_this_week:
         from datetime import date, timedelta
