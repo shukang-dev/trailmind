@@ -1489,6 +1489,191 @@ def release_command(ctx: click.Context, milestone_ref: str | None, since: str | 
     click.echo("\n".join(lines))
 
 
+@cli.command("due-report")
+@click.option("--project", default=None, help="Filter by project.")
+@click.option("--epic", default=None, help="Filter by epic.")
+@click.option("--owner", default=None, help="Filter by owner.")
+@click.option("--include-done", is_flag=True, help="Include done tasks.")
+@click.option("--json", "json_output", is_flag=True, help="Print structured JSON.")
+@click.pass_context
+def due_report_command(ctx: click.Context, project: str | None, epic: str | None,
+                        owner: str | None, include_done: bool, json_output: bool) -> None:
+    """Report tasks grouped by due date buckets."""
+    from datetime import date, timedelta
+    root = find_repo_root(_cwd_from_context(ctx))
+    today = date.today()
+    today_str = today.isoformat()
+    week_end = (today + timedelta(days=7)).isoformat()
+    next_week_start = (today + timedelta(days=8)).isoformat()
+    next_week_end = (today + timedelta(days=14)).isoformat()
+    month_end = (today + timedelta(days=30)).isoformat()
+
+    all_tasks = list_tasks(root, epic_ref=epic, project_ref=project, owner=owner)
+    if not include_done:
+        all_tasks = [t for t in all_tasks if t.get("status") not in ("done", "wontfix")]
+
+    # Buckets
+    overdue = []
+    due_today = []
+    this_week = []
+    next_week = []
+    this_month = []
+    later = []
+    no_due = []
+
+    for t in all_tasks:
+        due = t.get("due", "")
+        if not due:
+            no_due.append(t)
+        elif due < today_str:
+            overdue.append(t)
+        elif due == today_str:
+            due_today.append(t)
+        elif due <= week_end:
+            this_week.append(t)
+        elif due <= next_week_end:
+            next_week.append(t)
+        elif due <= month_end:
+            this_month.append(t)
+        else:
+            later.append(t)
+
+    buckets = [
+        ("Overdue", overdue, "⚠️"),
+        ("Due today", due_today, "📍"),
+        ("This week", this_week, "📆"),
+        ("Next week", next_week, "📅"),
+        ("This month", this_month, "🗓️"),
+        ("Later", later, "⏳"),
+        ("No due date", no_due, "❓"),
+    ]
+
+    if json_output:
+        data = {
+            "generated": today_str,
+            "total": len(all_tasks),
+            "buckets": {
+                name: {
+                    "count": len(tasks),
+                    "tasks": [{"id": t["id"], "title": t["title"], "due": t.get("due", ""),
+                               "owner": t.get("owner", ""), "priority": t.get("priority", ""),
+                               "status": t.get("status", "")} for t in tasks],
+                }
+                for name, tasks, _ in buckets
+            },
+        }
+        click.echo(json.dumps(data, ensure_ascii=False, indent=2))
+        return
+
+    lines = []
+    lines.append(f"📋 Due Report ({len(all_tasks)} tasks)")
+    lines.append(f"   {today_str}")
+    lines.append("")
+
+    for name, tasks, icon in buckets:
+        if not tasks and name in ("Later",):
+            continue
+        lines.append(f"{icon} {name} ({len(tasks)}):")
+        if not tasks:
+            lines.append("   (none)")
+        else:
+            for t in sorted(tasks, key=lambda x: (x.get("due", "") or "9999-99-99", x.get("priority", ""))):
+                pri = f"[{t.get('priority', '').upper()}]" if t.get('priority') else ""
+                owner_str = f" @{t.get('owner', '')}" if t.get('owner') else ""
+                due_str = f" due:{t.get('due', '')}" if t.get('due') else ""
+                status = f" [{t.get('status', '')}]" if t.get('status') not in ('created', 'ready') else ""
+                lines.append(f"   {t['id']} {pri}{owner_str}{due_str}{status}  {t['title']}")
+        lines.append("")
+
+    # Summary stats
+    total_with_due = len(all_tasks) - len(no_due)
+    if total_with_due > 0:
+        on_time = len(due_today) + len(this_week) + len(next_week) + len(this_month) + len(later)
+        lines.append(f"💡 {len(overdue)} overdue · {on_time} on schedule · {len(no_due)} no due date")
+
+    click.echo("\n".join(lines))
+
+
+@cli.command("priority-report")
+@click.option("--project", default=None, help="Filter by project.")
+@click.option("--epic", default=None, help="Filter by epic.")
+@click.option("--owner", default=None, help="Filter by owner.")
+@click.option("--include-done", is_flag=True, help="Include done tasks.")
+@click.option("--json", "json_output", is_flag=True, help="Print structured JSON.")
+@click.pass_context
+def priority_report_command(ctx: click.Context, project: str | None, epic: str | None,
+                             owner: str | None, include_done: bool, json_output: bool) -> None:
+    """Report tasks grouped by priority with status breakdowns."""
+    from collections import defaultdict
+    root = find_repo_root(_cwd_from_context(ctx))
+
+    all_tasks = list_tasks(root, epic_ref=epic, project_ref=project, owner=owner)
+    if not include_done:
+        all_tasks = [t for t in all_tasks if t.get("status") not in ("done", "wontfix")]
+
+    # Group by priority
+    by_priority: dict[str, list] = defaultdict(list)
+    for t in all_tasks:
+        pri = t.get("priority") or "unspecified"
+        by_priority[pri].append(t)
+
+    PRIORITY_ORDER = {"critical": 0, "high": 1, "medium": 2, "low": 3, "unspecified": 4}
+    sorted_priorities = sorted(by_priority.keys(), key=lambda p: PRIORITY_ORDER.get(p, 99))
+
+    if json_output:
+        data = {
+            "total": len(all_tasks),
+            "by_priority": {
+                pri: {
+                    "count": len(tasks),
+                    "by_status": {
+                        status: len([t for t in tasks if t.get("status") == status])
+                        for status in sorted(set(t.get("status", "unknown") for t in tasks))
+                    },
+                    "tasks": [{"id": t["id"], "title": t["title"], "status": t.get("status", ""),
+                               "owner": t.get("owner", ""), "due": t.get("due", "")} for t in tasks],
+                }
+                for pri, tasks in by_priority.items()
+            },
+        }
+        click.echo(json.dumps(data, ensure_ascii=False, indent=2))
+        return
+
+    lines = []
+    lines.append(f"⚡ Priority Report ({len(all_tasks)} tasks)")
+    lines.append("")
+
+    max_count = max((len(tasks) for tasks in by_priority.values()), default=1)
+    chart_width = 20
+
+    for pri in sorted_priorities:
+        tasks = by_priority[pri]
+        count = len(tasks)
+        bar_len = int(count / max(max_count, 1) * chart_width)
+        bar = "█" * bar_len
+
+        # Status breakdown
+        statuses = defaultdict(int)
+        for t in tasks:
+            statuses[t.get("status", "unknown")] += 1
+        status_str = ", ".join(f"{s}: {c}" for s, c in sorted(statuses.items()))
+
+        emoji = {"critical": "🔥", "high": "🔴", "medium": "🟡", "low": "🟢", "unspecified": "❓"}.get(pri, "❓")
+        lines.append(f"{emoji} {pri.upper():12s} {bar} {count}")
+        lines.append(f"   {status_str}")
+
+        # Show overdue critical/high
+        overdue = [t for t in tasks if t.get("due") and t["due"] < str(__import__("datetime").date.today())]
+        if overdue and pri in ("critical", "high"):
+            lines.append(f"   ⚠️  {len(overdue)} overdue:")
+            for t in overdue[:3]:
+                lines.append(f"     {t['id']} due:{t.get('due', '')} {t['title']}")
+
+        lines.append("")
+
+    click.echo("\n".join(lines))
+
+
 @cli.command("roadmap")
 @click.option("--project", default=None, help="Show roadmap for a specific project.")
 @click.option("--epic", default=None, help="Show roadmap for a specific epic.")
