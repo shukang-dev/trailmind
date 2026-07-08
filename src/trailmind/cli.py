@@ -1674,6 +1674,112 @@ def priority_report_command(ctx: click.Context, project: str | None, epic: str |
     click.echo("\n".join(lines))
 
 
+@cli.command("blocked-report")
+@click.option("--project", default=None, help="Filter by project.")
+@click.option("--epic", default=None, help="Filter by epic.")
+@click.option("--owner", default=None, help="Filter by owner.")
+@click.option("--json", "json_output", is_flag=True, help="Print structured JSON.")
+@click.pass_context
+def blocked_report_command(ctx: click.Context, project: str | None, epic: str | None,
+                            owner: str | None, json_output: bool) -> None:
+    """Report blocked tasks with their dependencies and linked issues."""
+    from datetime import date
+    root = find_repo_root(_cwd_from_context(ctx))
+    today = date.today().isoformat()
+
+    all_tasks = list_tasks(root, epic_ref=epic, project_ref=project, owner=owner)
+    blocked = [t for t in all_tasks if t.get("status") == "blocked"]
+
+    # For each blocked task, check dependencies
+    blocked_data = []
+    for t in sorted(blocked, key=lambda x: (x.get("due", "") or "9999-99-99", x.get("priority", ""))):
+        deps = t.get("depends_on") or []
+        soft_deps = t.get("soft_depends_on") or []
+        known_issues = t.get("known_issues") or []
+        is_overdue = t.get("due") and t["due"] < today
+
+        # Check if hard deps are done
+        dep_statuses = []
+        for dep in deps:
+            dep_task = None
+            try:
+                dep_tasks = list_tasks(root)
+                for dt in dep_tasks:
+                    if dt.get("id") == dep or dep in dt.get("path", ""):
+                        dep_task = dt
+                        break
+            except Exception:
+                pass
+            if dep_task:
+                dep_statuses.append(f"{dep} ({dep_task.get('status', '?')})")
+            else:
+                dep_statuses.append(f"{dep} (not found)")
+
+        blocked_data.append({
+            "id": t["id"],
+            "title": t["title"],
+            "owner": t.get("owner", ""),
+            "due": t.get("due", ""),
+            "priority": t.get("priority", ""),
+            "overdue": is_overdue,
+            "depends_on": dep_statuses,
+            "soft_depends_on": list(soft_deps),
+            "known_issues": list(known_issues),
+            "epic": t.get("epic", ""),
+        })
+
+    if json_output:
+        click.echo(json.dumps(blocked_data, ensure_ascii=False, indent=2))
+        return
+
+    lines = []
+    lines.append(f"🚧 Blocked Tasks Report ({len(blocked)})")
+    lines.append("")
+
+    if not blocked:
+        lines.append("No blocked tasks. All clear! ✨")
+        click.echo("\n".join(lines))
+        return
+
+    overdue_blocked = [b for b in blocked_data if b["overdue"]]
+    if overdue_blocked:
+        lines.append(f"⚠️  Overdue & blocked: {len(overdue_blocked)}")
+        lines.append("")
+
+    for b in blocked_data:
+        overdue_icon = " ⚠️" if b["overdue"] else ""
+        pri = f"[{b['priority'].upper()}]" if b["priority"] else ""
+        owner = f" @{b['owner']}" if b["owner"] else ""
+        due = f" due:{b['due']}" if b["due"] else ""
+        epic = f" [{b['epic'].split('/')[-1]}]" if b["epic"] else ""
+        lines.append(f"  🚧 {b['id']} {pri}{owner}{due}{epic}{overdue_icon}  {b['title']}")
+
+        if b["depends_on"]:
+            lines.append(f"     Hard deps: {', '.join(b['depends_on'])}")
+        if b["soft_depends_on"]:
+            lines.append(f"     Soft deps: {', '.join(b['soft_depends_on'])}")
+        if b["known_issues"]:
+            lines.append(f"     Known issues: {', '.join(b['known_issues'])}")
+
+        if not b["depends_on"] and not b["soft_depends_on"] and not b["known_issues"]:
+            lines.append(f"     (no dependencies or known issues listed — may need triage)")
+
+        lines.append("")
+
+    # By owner
+    from collections import defaultdict
+    by_owner: dict[str, int] = defaultdict(int)
+    for b in blocked_data:
+        o = b["owner"] or "unassigned"
+        by_owner[o] += 1
+    if len(by_owner) > 1:
+        lines.append("By owner:")
+        for o in sorted(by_owner.keys(), key=lambda x: -by_owner[x]):
+            lines.append(f"  @{o}: {by_owner[o]}")
+
+    click.echo("\n".join(lines))
+
+
 @cli.command("roadmap")
 @click.option("--project", default=None, help="Show roadmap for a specific project.")
 @click.option("--epic", default=None, help="Show roadmap for a specific epic.")
@@ -3739,6 +3845,7 @@ def task_update(ctx: click.Context, task_ref: str, status: str) -> None:
 @click.argument("status")
 @click.option("--actor", required=True)
 @click.option("--note", default=None)
+@click.option("--dry-run", is_flag=True, help="Preview without applying.")
 @click.pass_context
 def task_set_status(
     ctx: click.Context,
@@ -3746,8 +3853,12 @@ def task_set_status(
     status: str,
     actor: str,
     note: str | None,
+    dry_run: bool,
 ) -> None:
     root = find_repo_root(_cwd_from_context(ctx))
+    if dry_run:
+        click.echo(f"[DRY RUN] Would set {task_ref} status to {status!r}")
+        return
     touched, warning = set_task_status(root, task_ref=task_ref, status=status, actor=actor, note=note)
     _echo_touched(root, [touched])
     if warning:
@@ -3759,6 +3870,7 @@ def task_set_status(
 @click.argument("priority", type=click.Choice(TASK_PRIORITIES, case_sensitive=False))
 @click.option("--actor", required=True)
 @click.option("--note", default=None)
+@click.option("--dry-run", is_flag=True, help="Preview without applying.")
 @click.pass_context
 def task_set_priority(
     ctx: click.Context,
@@ -3766,8 +3878,12 @@ def task_set_priority(
     priority: str,
     actor: str,
     note: str | None,
+    dry_run: bool,
 ) -> None:
     root = find_repo_root(_cwd_from_context(ctx))
+    if dry_run:
+        click.echo(f"[DRY RUN] Would set {task_ref} priority to {priority!r}")
+        return
     touched = set_task_priority(root, task_ref=task_ref, priority=priority, actor=actor, note=note)
     _echo_touched(root, [touched])
 
@@ -3778,6 +3894,7 @@ def task_set_priority(
 @click.option("--actor", required=True)
 @click.option("--note", default=None)
 @click.option("--clear", is_flag=True, help="Clear the due date.")
+@click.option("--dry-run", is_flag=True, help="Preview without applying.")
 @click.pass_context
 def task_due(
     ctx: click.Context,
@@ -3786,9 +3903,14 @@ def task_due(
     actor: str,
     note: str | None,
     clear: bool,
+    dry_run: bool,
 ) -> None:
     """Set or clear a task due date (YYYY-MM-DD)."""
     root = find_repo_root(_cwd_from_context(ctx))
+    if dry_run:
+        action = "clear" if clear else f"set to {due_date!r}"
+        click.echo(f"[DRY RUN] Would {action} due date for {task_ref}")
+        return
     if clear:
         touched = set_task_due(root, task_ref=task_ref, due_date=None, actor=actor, note=note)
     else:
@@ -3803,6 +3925,7 @@ def task_due(
 @click.argument("owner")
 @click.option("--actor", required=True)
 @click.option("--note", default=None)
+@click.option("--dry-run", is_flag=True, help="Preview without applying.")
 @click.pass_context
 def task_assign(
     ctx: click.Context,
@@ -3810,9 +3933,13 @@ def task_assign(
     owner: str,
     actor: str,
     note: str | None,
+    dry_run: bool,
 ) -> None:
     """Reassign a task to a different owner."""
     root = find_repo_root(_cwd_from_context(ctx))
+    if dry_run:
+        click.echo(f"[DRY RUN] Would assign {task_ref} to @{owner}")
+        return
     touched = assign_task(root, task_ref=task_ref, owner=owner, actor=actor, note=note)
     _echo_touched(root, [touched])
 
@@ -4806,6 +4933,7 @@ def issue_comment(ctx: click.Context, issue_ref: str, author: str, text: str) ->
 @click.argument("owner")
 @click.option("--actor", required=True)
 @click.option("--note", default=None)
+@click.option("--dry-run", is_flag=True, help="Preview without applying.")
 @click.pass_context
 def issue_assign(
     ctx: click.Context,
@@ -4813,9 +4941,13 @@ def issue_assign(
     owner: str,
     actor: str,
     note: str | None,
+    dry_run: bool,
 ) -> None:
     """Reassign an issue to a different owner."""
     root = find_repo_root(_cwd_from_context(ctx))
+    if dry_run:
+        click.echo(f"[DRY RUN] Would assign {issue_ref} to @{owner}")
+        return
     touched = assign_issue(root, issue_ref=issue_ref, owner=owner, actor=actor, note=note)
     _echo_touched(root, [touched])
 
@@ -4825,6 +4957,7 @@ def issue_assign(
 @click.argument("severity", type=click.Choice(ISSUE_SEVERITIES, case_sensitive=False))
 @click.option("--actor", required=True)
 @click.option("--note", default=None)
+@click.option("--dry-run", is_flag=True, help="Preview without applying.")
 @click.pass_context
 def issue_set_severity(
     ctx: click.Context,
@@ -4832,9 +4965,13 @@ def issue_set_severity(
     severity: str,
     actor: str,
     note: str | None,
+    dry_run: bool,
 ) -> None:
     """Change an issue's severity."""
     root = find_repo_root(_cwd_from_context(ctx))
+    if dry_run:
+        click.echo(f"[DRY RUN] Would set {issue_ref} severity to {severity!r}")
+        return
     touched = set_issue_severity(root, issue_ref=issue_ref, severity=severity, actor=actor, note=note)
     _echo_touched(root, [touched])
 
@@ -5162,10 +5299,14 @@ def milestone_list_cmd(ctx: click.Context, epic_ref: str | None, project_ref: st
 @click.argument("status")
 @click.option("--actor", required=True)
 @click.option("--note", default=None)
+@click.option("--dry-run", is_flag=True, help="Preview without applying.")
 @click.pass_context
-def milestone_set_status(ctx: click.Context, milestone_ref: str, status: str, actor: str, note: str | None) -> None:
+def milestone_set_status(ctx: click.Context, milestone_ref: str, status: str, actor: str, note: str | None, dry_run: bool) -> None:
     """Change a milestone's status (planned, in_progress, done)."""
     root = find_repo_root(_cwd_from_context(ctx))
+    if dry_run:
+        click.echo(f"[DRY RUN] Would set {milestone_ref} status to {status!r}")
+        return
     touched = set_milestone_status(root, milestone_ref=milestone_ref, status=status, actor=actor, note=note)
     _echo_touched(root, [touched])
 
