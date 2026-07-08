@@ -662,14 +662,14 @@ def health_command(ctx: click.Context, json_output: bool) -> None:
     click.echo("\n".join(lines))
 
 
-@cli.command("stats")
+@cli.command("dashboard")
 @click.option("--project", default=None, help="Filter by project.")
 @click.option("--epic", default=None, help="Filter by epic.")
 @click.option("--json", "json_output", is_flag=True, help="Print structured JSON.")
 @click.pass_context
-def stats_command(ctx: click.Context, project: str | None, epic: str | None,
+def dashboard_command(ctx: click.Context, project: str | None, epic: str | None,
                    json_output: bool) -> None:
-    """Comprehensive repository statistics."""
+    """Comprehensive repository statistics dashboard."""
     from datetime import date, timedelta
     from collections import defaultdict, Counter
     root = find_repo_root(_cwd_from_context(ctx))
@@ -866,6 +866,192 @@ def stats_command(ctx: click.Context, project: str | None, epic: str | None,
         for tag, count in tag_counter.most_common(5):
             lines.append(f"   {tag:20s} {count}")
         lines.append("")
+
+    click.echo("\n".join(lines))
+
+
+@cli.command("cleanup")
+@click.option("--apply", is_flag=True, help="Apply fixes automatically (where possible).")
+@click.option("--actor", default=None, help="Actor for auto-fixes (required with --apply).")
+@click.option("--json", "json_output", is_flag=True, help="Print structured JSON.")
+@click.pass_context
+def cleanup_command(ctx: click.Context, apply: bool, actor: str | None, json_output: bool) -> None:
+    """Find and report cleanup opportunities: stale tasks, missing due dates, unassigned tasks."""
+    from datetime import date, timedelta
+    from collections import defaultdict
+
+    root = find_repo_root(_cwd_from_context(ctx))
+    today = date.today()
+    today_str = today.isoformat()
+    week_ago = (today - timedelta(days=7)).isoformat()
+    month_ago = (today - timedelta(days=30)).isoformat()
+
+    all_tasks = list_tasks(root)
+    active_tasks = [t for t in all_tasks if t.get("status") not in ("done", "wontfix")]
+
+    # Find cleanup opportunities
+    findings = []
+
+    # 1. Overdue tasks
+    overdue = [t for t in active_tasks if t.get("due") and t["due"] < today_str]
+    if overdue:
+        findings.append({
+            "type": "overdue",
+            "severity": "high",
+            "count": len(overdue),
+            "description": f"{len(overdue)} overdue task(s)",
+            "ids": [t["id"] for t in overdue],
+            "action": "Review and update due dates or mark as done.",
+        })
+
+    # 2. Tasks without due dates (active)
+    no_due = [t for t in active_tasks if not t.get("due")]
+    if no_due:
+        findings.append({
+            "type": "no_due",
+            "severity": "medium",
+            "count": len(no_due),
+            "description": f"{len(no_due)} active task(s) without due date",
+            "ids": [t["id"] for t in no_due],
+            "action": "Consider adding due dates for better planning.",
+        })
+
+    # 3. Unassigned tasks
+    unassigned = [t for t in active_tasks if not t.get("owner")]
+    if unassigned:
+        findings.append({
+            "type": "unassigned",
+            "severity": "medium",
+            "count": len(unassigned),
+            "description": f"{len(unassigned)} active task(s) without owner",
+            "ids": [t["id"] for t in unassigned],
+            "action": "Assign owners for accountability.",
+        })
+
+    # 4. Stale tasks (created > 30 days ago, still active, no due date)
+    stale = [t for t in active_tasks
+             if t.get("created") and t["created"] < month_ago
+             and not t.get("due") and t.get("status") in ("created", "ready")]
+    if stale:
+        findings.append({
+            "type": "stale",
+            "severity": "low",
+            "count": len(stale),
+            "description": f"{len(stale)} stale task(s) (created >30 days ago, no due date)",
+            "ids": [t["id"] for t in stale],
+            "action": "Review and either schedule, close, or delete.",
+        })
+
+    # 5. Blocked tasks
+    blocked = [t for t in active_tasks if t.get("status") == "blocked"]
+    if blocked:
+        findings.append({
+            "type": "blocked",
+            "severity": "high",
+            "count": len(blocked),
+            "description": f"{len(blocked)} blocked task(s)",
+            "ids": [t["id"] for t in blocked],
+            "action": "Unblock or reassign.",
+        })
+
+    # 6. Tasks without deliverables
+    no_deliverables = [t for t in active_tasks
+                       if not t.get("deliverables") and t.get("status") != "done"]
+    if no_deliverables:
+        findings.append({
+            "type": "no_deliverables",
+            "severity": "low",
+            "count": len(no_deliverables),
+            "description": f"{len(no_deliverables)} active task(s) without deliverables",
+            "ids": [t["id"] for t in no_deliverables],
+            "action": "Add deliverables for clear completion criteria.",
+        })
+
+    # 7. Open issues without owners
+    all_issues = list_issues(root)
+    open_issues = [i for i in all_issues if i.get("status") not in ("done", "wontfix")]
+    unassigned_issues = [i for i in open_issues if not i.get("owner")]
+    if unassigned_issues:
+        findings.append({
+            "type": "unassigned_issues",
+            "severity": "medium",
+            "count": len(unassigned_issues),
+            "description": f"{len(unassigned_issues)} open issue(s) without owner",
+            "ids": [i["id"] for i in unassigned_issues],
+            "action": "Assign owners for triage.",
+        })
+
+    # 8. Open inbox items
+    all_inbox = list_inbox_items(root)
+    open_inbox = [i for i in all_inbox if i.status == "open"]
+    if open_inbox:
+        findings.append({
+            "type": "open_inbox",
+            "severity": "info",
+            "count": len(open_inbox),
+            "description": f"{len(open_inbox)} open inbox item(s)",
+            "ids": [i.item_id for i in open_inbox],
+            "action": "Triage and resolve or convert to tasks.",
+        })
+
+    # Apply fixes if requested
+    applied = []
+    if apply and actor:
+        # Auto-assign unassigned tasks to actor
+        for t in unassigned:
+            try:
+                assign_task(root, task_ref=t["id"], owner=actor, actor=actor, note="Auto-assigned via cleanup")
+                applied.append(f"Assigned {t['id']} to @{actor}")
+            except Exception:
+                pass
+
+        # Auto-assign unassigned issues to actor
+        for i in unassigned_issues:
+            try:
+                assign_issue(root, issue_ref=i["id"], owner=actor, actor=actor, note="Auto-assigned via cleanup")
+                applied.append(f"Assigned issue {i['id']} to @{actor}")
+            except Exception:
+                pass
+
+    if json_output:
+        data = {
+            "total_findings": len(findings),
+            "findings": findings,
+            "applied": applied,
+        }
+        click.echo(json.dumps(data, ensure_ascii=False, indent=2))
+        return
+
+    if not findings:
+        click.echo("✨ No cleanup opportunities found! Everything looks great.")
+        return
+
+    lines = []
+    lines.append(f"🧹 Cleanup Report ({len(findings)} findings)")
+    lines.append("")
+
+    severity_icons = {"high": "🔴", "medium": "🟡", "low": "🟢", "info": "🔵"}
+    for f in sorted(findings, key=lambda x: {"high": 0, "medium": 1, "low": 2, "info": 3}.get(x["severity"], 99)):
+        icon = severity_icons.get(f["severity"], "❓")
+        lines.append(f"{icon} {f['description']}")
+        lines.append(f"   Action: {f['action']}")
+        if f["ids"]:
+            ids_str = ", ".join(f["ids"][:5])
+            extra = f" +{len(f['ids']) - 5}" if len(f["ids"]) > 5 else ""
+            lines.append(f"   IDs: {ids_str}{extra}")
+        lines.append("")
+
+    if apply:
+        if not actor:
+            lines.append("⚠️  --apply requires --actor")
+        elif applied:
+            lines.append(f"✅ Applied {len(applied)} fix(es):")
+            for a in applied:
+                lines.append(f"   - {a}")
+        else:
+            lines.append("No auto-fixes were applicable.")
+    else:
+        lines.append("💡 Use --apply --actor <name> to auto-apply simple fixes.")
 
     click.echo("\n".join(lines))
 
@@ -5216,6 +5402,108 @@ def task_bulk_set_deliverables(
         _echo_touched(root, touched)
 
 
+@task_group.command("bulk-set-design-doc")
+@click.argument("task_refs", nargs=-1)
+@click.option("--path", "design_doc_path", required=True, help="Path to design document.")
+@click.option("--actor", required=True)
+@click.option("--note", default=None)
+@click.option("--from-file", "from_file", default=None,
+              help="Read task IDs from file (one per line), or '-' for stdin.")
+@click.option("--dry-run", is_flag=True, help="Preview without applying.")
+@click.pass_context
+def task_bulk_set_design_doc(
+    ctx: click.Context,
+    task_refs: tuple[str, ...],
+    design_doc_path: str,
+    actor: str,
+    note: str | None,
+    from_file: str | None,
+    dry_run: bool,
+) -> None:
+    """Bulk-set design document for tasks (e.g. T-001 T-002 --path docs/design.md)."""
+    root = find_repo_root(_cwd_from_context(ctx))
+    refs = list(task_refs)
+    if from_file:
+        refs.extend(_read_ids_from_file(from_file))
+    if not refs:
+        raise TrailmindError("no task IDs provided (pass as args or use --from-file)")
+    if dry_run:
+        click.echo(f"[DRY RUN] Would set design doc to {design_doc_path!r} for {len(refs)} task(s):")
+        for r in refs:
+            click.echo(f"  - {r}")
+        return
+    touched = []
+    for task_ref in refs:
+        try:
+            path = edit_task(root, task_ref=task_ref, actor=actor, design_doc=design_doc_path, note=note)
+            touched.append(path)
+        except Exception as exc:
+            click.echo(f"  ⚠ {task_ref}: {exc}", err=True)
+    if touched:
+        _echo_touched(root, touched)
+
+
+@task_group.command("bulk-rename")
+@click.argument("task_refs", nargs=-1)
+@click.option("--title", required=True, help="New title (use {id} to insert task ID, {old} for original title).")
+@click.option("--prefix", default=None, help="Prefix to add to existing titles.")
+@click.option("--suffix", default=None, help="Suffix to add to existing titles.")
+@click.option("--actor", required=True)
+@click.option("--note", default=None)
+@click.option("--from-file", "from_file", default=None,
+              help="Read task IDs from file (one per line), or '-' for stdin.")
+@click.option("--dry-run", is_flag=True, help="Preview without applying.")
+@click.pass_context
+def task_bulk_rename(
+    ctx: click.Context,
+    task_refs: tuple[str, ...],
+    title: str,
+    prefix: str | None,
+    suffix: str | None,
+    actor: str,
+    note: str | None,
+    from_file: str | None,
+    dry_run: bool,
+) -> None:
+    """Bulk-rename tasks (e.g. T-001 T-002 --prefix "[WIP] ")."""
+    from trailmind.resolver import resolve_entity
+    from trailmind.log import read_entity_user_facing
+
+    root = find_repo_root(_cwd_from_context(ctx))
+    refs = list(task_refs)
+    if from_file:
+        refs.extend(_read_ids_from_file(from_file))
+    if not refs:
+        raise TrailmindError("no task IDs provided (pass as args or use --from-file)")
+    if dry_run:
+        click.echo(f"[DRY RUN] Would rename {len(refs)} task(s):")
+    touched = []
+    for task_ref in refs:
+        try:
+            task_path = resolve_entity(root, raw=task_ref, entity="T")
+            fm, _body = read_entity_user_facing(task_path, label="task")
+            old_title = str(fm.get("title", ""))
+            task_id = str(fm.get("id", task_ref))
+
+            if prefix or suffix:
+                new_title = f"{prefix or ''}{old_title}{suffix or ''}"
+            elif "{old}" in title or "{id}" in title:
+                new_title = title.replace("{old}", old_title).replace("{id}", task_id)
+            else:
+                new_title = title
+
+            if dry_run:
+                click.echo(f"  {task_ref}: {old_title} → {new_title}")
+                continue
+
+            path = edit_task(root, task_ref=task_ref, actor=actor, title=new_title, note=note)
+            touched.append(path)
+        except Exception as exc:
+            click.echo(f"  ⚠ {task_ref}: {exc}", err=True)
+    if touched:
+        _echo_touched(root, touched)
+
+
 @task_group.command("move")
 @click.argument("task_ref")
 @click.argument("target_epic")
@@ -6475,6 +6763,109 @@ def issue_bulk_close(
     for issue_ref in refs:
         try:
             path = close_issue(root, raw_id=issue_ref, closer=closer, status=status, note=note)
+            touched.append(path)
+        except Exception as exc:
+            click.echo(f"  ⚠ {issue_ref}: {exc}", err=True)
+    if touched:
+        _echo_touched(root, touched)
+
+
+@issue_group.command("bulk-rename")
+@click.argument("issue_refs", nargs=-1)
+@click.option("--title", required=True, help="New title (use {id} to insert issue ID, {old} for original title).")
+@click.option("--prefix", default=None, help="Prefix to add to existing titles.")
+@click.option("--suffix", default=None, help="Suffix to add to existing titles.")
+@click.option("--actor", required=True)
+@click.option("--note", default=None)
+@click.option("--from-file", "from_file", default=None,
+              help="Read issue IDs from file (one per line), or '-' for stdin.")
+@click.option("--dry-run", is_flag=True, help="Preview without applying.")
+@click.pass_context
+def issue_bulk_rename(
+    ctx: click.Context,
+    issue_refs: tuple[str, ...],
+    title: str,
+    prefix: str | None,
+    suffix: str | None,
+    actor: str,
+    note: str | None,
+    from_file: str | None,
+    dry_run: bool,
+) -> None:
+    """Bulk-rename issues (e.g. I-001 I-002 --prefix "[Fixed] ")."""
+    from trailmind.resolver import resolve_entity
+    from trailmind.log import read_entity_user_facing
+
+    root = find_repo_root(_cwd_from_context(ctx))
+    refs = list(issue_refs)
+    if from_file:
+        refs.extend(_read_ids_from_file(from_file))
+    if not refs:
+        raise TrailmindError("no issue IDs provided (pass as args or use --from-file)")
+    if dry_run:
+        click.echo(f"[DRY RUN] Would rename {len(refs)} issue(s):")
+    touched = []
+    for issue_ref in refs:
+        try:
+            issue_path = resolve_entity(root, raw=issue_ref, entity="I")
+            fm, _body = read_entity_user_facing(issue_path, label="issue")
+            old_title = str(fm.get("title", ""))
+            issue_id = str(fm.get("id", issue_ref))
+
+            if prefix or suffix:
+                new_title = f"{prefix or ''}{old_title}{suffix or ''}"
+            elif "{old}" in title or "{id}" in title:
+                new_title = title.replace("{old}", old_title).replace("{id}", issue_id)
+            else:
+                new_title = title
+
+            if dry_run:
+                click.echo(f"  {issue_ref}: {old_title} → {new_title}")
+                continue
+
+            path = edit_issue(root, issue_ref=issue_ref, actor=actor, title=new_title, note=note)
+            touched.append(path)
+        except Exception as exc:
+            click.echo(f"  ⚠ {issue_ref}: {exc}", err=True)
+    if touched:
+        _echo_touched(root, touched)
+
+
+@issue_group.command("bulk-set-description")
+@click.argument("issue_refs", nargs=-1)
+@click.option("--description", required=True, help="New description text.")
+@click.option("--actor", required=True)
+@click.option("--note", default=None)
+@click.option("--from-file", "from_file", default=None,
+              help="Read issue IDs from file (one per line), or '-' for stdin.")
+@click.option("--dry-run", is_flag=True, help="Preview without applying.")
+@click.pass_context
+def issue_bulk_set_description(
+    ctx: click.Context,
+    issue_refs: tuple[str, ...],
+    description: str,
+    actor: str,
+    note: str | None,
+    from_file: str | None,
+    dry_run: bool,
+) -> None:
+    """Bulk-set description for issues (e.g. I-001 I-002 --description "Fixed in v2.0")."""
+    root = find_repo_root(_cwd_from_context(ctx))
+    refs = list(issue_refs)
+    if from_file:
+        refs.extend(_read_ids_from_file(from_file))
+    if not refs:
+        raise TrailmindError("no issue IDs provided (pass as args or use --from-file)")
+    if dry_run:
+        click.echo(f"[DRY RUN] Would set description for {len(refs)} issue(s):")
+        for r in refs:
+            click.echo(f"  - {r}")
+        click.echo(f"  Description: {description[:80]}{'...' if len(description) > 80 else ''}")
+        return
+    touched = []
+    for issue_ref in refs:
+        try:
+            path = edit_issue(root, issue_ref=issue_ref, actor=actor, description=description, note=note)
             touched.append(path)
         except Exception as exc:
             click.echo(f"  ⚠ {issue_ref}: {exc}", err=True)
