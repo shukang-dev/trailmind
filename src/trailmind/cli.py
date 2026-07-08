@@ -3606,6 +3606,70 @@ def task_bulk_status(
         _echo_touched(root, touched)
 
 
+@task_group.command("bulk-assign")
+@click.argument("task_refs", nargs=-1, required=True)
+@click.argument("owner")
+@click.option("--actor", required=True)
+@click.option("--note", default=None)
+@click.pass_context
+def task_bulk_assign(
+    ctx: click.Context,
+    task_refs: tuple[str, ...],
+    owner: str,
+    actor: str,
+    note: str | None,
+) -> None:
+    """Bulk-assign multiple tasks to an owner (e.g. T-001 T-002 alice)."""
+    root = find_repo_root(_cwd_from_context(ctx))
+    touched = []
+    for task_ref in task_refs:
+        try:
+            path = assign_task(
+                root,
+                task_ref=task_ref,
+                owner=owner,
+                actor=actor,
+                note=note,
+            )
+            touched.append(path)
+        except Exception as exc:
+            click.echo(f"  ⚠ {task_ref}: {exc}", err=True)
+    if touched:
+        _echo_touched(root, touched)
+
+
+@task_group.command("bulk-due")
+@click.argument("task_refs", nargs=-1, required=True)
+@click.argument("due")
+@click.option("--actor", required=True)
+@click.option("--note", default=None)
+@click.pass_context
+def task_bulk_due(
+    ctx: click.Context,
+    task_refs: tuple[str, ...],
+    due: str,
+    actor: str,
+    note: str | None,
+) -> None:
+    """Bulk-set due date for multiple tasks (e.g. T-001 T-002 2026-08-01)."""
+    root = find_repo_root(_cwd_from_context(ctx))
+    touched = []
+    for task_ref in task_refs:
+        try:
+            path = set_task_due(
+                root,
+                task_ref=task_ref,
+                due=due,
+                actor=actor,
+                note=note,
+            )
+            touched.append(path)
+        except Exception as exc:
+            click.echo(f"  ⚠ {task_ref}: {exc}", err=True)
+    if touched:
+        _echo_touched(root, touched)
+
+
 @task_group.group("depend")
 def task_depend_group() -> None:
     """Manage task dependencies."""
@@ -4118,6 +4182,78 @@ def issue_set_severity(
     root = find_repo_root(_cwd_from_context(ctx))
     touched = set_issue_severity(root, issue_ref=issue_ref, severity=severity, actor=actor, note=note)
     _echo_touched(root, [touched])
+
+
+@issue_group.command("bulk-status")
+@click.argument("issue_refs", nargs=-1, required=True)
+@click.argument("status", type=click.Choice(("open", "done", "wontfix"), case_sensitive=False))
+@click.option("--actor", required=True)
+@click.option("--note", default=None)
+@click.pass_context
+def issue_bulk_status(
+    ctx: click.Context,
+    issue_refs: tuple[str, ...],
+    status: str,
+    actor: str,
+    note: str | None,
+) -> None:
+    """Bulk-update issue status (e.g. I-001 I-002 done)."""
+    root = find_repo_root(_cwd_from_context(ctx))
+    touched = []
+    for issue_ref in issue_refs:
+        try:
+            if status in ("done", "wontfix"):
+                path = close_issue(
+                    root,
+                    issue_ref=issue_ref,
+                    closer=actor,
+                    status=status,
+                    note=note or f"Bulk closed as {status}",
+                )
+            else:  # open
+                path = reopen_issue(
+                    root,
+                    issue_ref=issue_ref,
+                    actor=actor,
+                    note=note,
+                )
+            touched.append(path)
+        except Exception as exc:
+            click.echo(f"  ⚠ {issue_ref}: {exc}", err=True)
+    if touched:
+        _echo_touched(root, touched)
+
+
+@issue_group.command("bulk-assign")
+@click.argument("issue_refs", nargs=-1, required=True)
+@click.argument("owner")
+@click.option("--actor", required=True)
+@click.option("--note", default=None)
+@click.pass_context
+def issue_bulk_assign(
+    ctx: click.Context,
+    issue_refs: tuple[str, ...],
+    owner: str,
+    actor: str,
+    note: str | None,
+) -> None:
+    """Bulk-assign multiple issues to an owner (e.g. I-001 I-002 alice)."""
+    root = find_repo_root(_cwd_from_context(ctx))
+    touched = []
+    for issue_ref in issue_refs:
+        try:
+            path = assign_issue(
+                root,
+                issue_ref=issue_ref,
+                owner=owner,
+                actor=actor,
+                note=note,
+            )
+            touched.append(path)
+        except Exception as exc:
+            click.echo(f"  ⚠ {issue_ref}: {exc}", err=True)
+    if touched:
+        _echo_touched(root, touched)
 
 
 @issue_group.command("edit")
