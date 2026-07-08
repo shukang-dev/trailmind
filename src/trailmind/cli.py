@@ -3881,6 +3881,112 @@ def task_add(
     _echo_touched(root, [touched])
 
 
+@task_group.command("bulk-add")
+@click.option("--epic", required=True)
+@click.option("--filer", required=True)
+@click.option("--input-file", "input_file", required=True,
+              help="CSV or JSON file with tasks (columns: title, owner, priority, due, tags).")
+@click.option("--format", "fmt", default="csv", type=click.Choice(("csv", "json"), case_sensitive=False),
+              help="Input file format (default: csv).")
+@click.option("--default-owner", default=None, help="Default owner if not specified in file.")
+@click.option("--default-priority", default=DEFAULT_PRIORITY, show_default=True,
+              type=click.Choice(TASK_PRIORITIES, case_sensitive=False),
+              help="Default priority if not specified in file.")
+@click.option("--dry-run", is_flag=True, help="Preview without creating.")
+@click.pass_context
+def task_bulk_add(
+    ctx: click.Context,
+    epic: str,
+    filer: str,
+    input_file: str,
+    fmt: str,
+    default_owner: str | None,
+    default_priority: str,
+    dry_run: bool,
+) -> None:
+    """Bulk-add tasks from a CSV or JSON file."""
+    import csv
+    import json as _json
+    root = find_repo_root(_cwd_from_context(ctx))
+
+    # Read input file
+    path = Path(input_file)
+    if not path.is_absolute():
+        path = Path.cwd() / path
+    if not path.exists():
+        raise TrailmindError(f"input file not found: {input_file}")
+
+    content = path.read_text(encoding="utf-8")
+
+    # Parse
+    task_specs: list[dict] = []
+    if fmt == "json":
+        data = _json.loads(content)
+        if isinstance(data, list):
+            task_specs = data
+        elif isinstance(data, dict) and "tasks" in data:
+            task_specs = data["tasks"]
+        else:
+            raise TrailmindError("JSON must be a list or object with 'tasks' key.")
+    else:  # csv
+        reader = csv.DictReader(content.splitlines())
+        for row in reader:
+            task_specs.append(dict(row))
+
+    if not task_specs:
+        raise TrailmindError("no tasks found in input file")
+
+    if dry_run:
+        click.echo(f"[DRY RUN] Would create {len(task_specs)} task(s) in {epic}:")
+        for i, spec in enumerate(task_specs):
+            title = spec.get("title", "(untitled)")
+            owner = spec.get("owner") or default_owner or "(unassigned)"
+            click.echo(f"  {i+1}. {title} (owner: @{owner})")
+        return
+
+    touched = []
+    for i, spec in enumerate(task_specs):
+        title = spec.get("title", "").strip()
+        if not title:
+            click.echo(f"  ⚠ task {i+1}: missing title, skipping", err=True)
+            continue
+        owner = spec.get("owner") or default_owner
+        if not owner:
+            click.echo(f"  ⚠ task {i+1} ({title}): missing owner, skipping", err=True)
+            continue
+        priority = spec.get("priority") or default_priority
+        due = spec.get("due") or None
+        tags_str = spec.get("tags") or ""
+        tag_list = split_csv(tags_str) if tags_str else []
+        code_paths_str = spec.get("code_paths") or ""
+        depends_on_str = spec.get("depends_on") or ""
+        known_issues_str = spec.get("known_issues") or ""
+        deliverables_str = spec.get("deliverables") or ""
+
+        try:
+            path = add_task(
+                root,
+                epic=epic,
+                filer=filer,
+                owner=owner,
+                title=title,
+                code_paths=split_csv(code_paths_str),
+                depends_on=split_csv(depends_on_str),
+                known_issues=split_csv(known_issues_str),
+                deliverables=split_csv(deliverables_str),
+                priority=priority,
+                due=due,
+                tags=tag_list,
+            )
+            touched.append(path)
+        except Exception as exc:
+            click.echo(f"  ⚠ {title}: {exc}", err=True)
+
+    if touched:
+        _echo_touched(root, touched)
+        click.echo(f"\nCreated {len(touched)}/{len(task_specs)} tasks.")
+
+
 @task_group.command("update")
 @click.argument("task_ref")
 @click.option("--status", required=True)
@@ -4619,6 +4725,45 @@ def task_close(ctx: click.Context, task_ref: str, closer: str, note: str) -> Non
         click.echo(f"linked open issues remain: {details}")
 
 
+@task_group.command("bulk-close")
+@click.argument("task_refs", nargs=-1)
+@click.option("--closer", required=True)
+@click.option("--note", required=True)
+@click.option("--from-file", "from_file", default=None,
+              help="Read task IDs from file (one per line), or '-' for stdin.")
+@click.option("--dry-run", is_flag=True, help="Preview without applying.")
+@click.pass_context
+def task_bulk_close(
+    ctx: click.Context,
+    task_refs: tuple[str, ...],
+    closer: str,
+    note: str,
+    from_file: str | None,
+    dry_run: bool,
+) -> None:
+    """Bulk-close tasks (e.g. T-001 T-002, or --from-file ids.txt)."""
+    root = find_repo_root(_cwd_from_context(ctx))
+    refs = list(task_refs)
+    if from_file:
+        refs.extend(_read_ids_from_file(from_file))
+    if not refs:
+        raise TrailmindError("no task IDs provided (pass as args or use --from-file)")
+    if dry_run:
+        click.echo(f"[DRY RUN] Would close {len(refs)} task(s):")
+        for r in refs:
+            click.echo(f"  - {r}")
+        return
+    touched = []
+    for task_ref in refs:
+        try:
+            path = close_task(root, task_ref=task_ref, closer=closer, note=note)
+            touched.append(path)
+        except Exception as exc:
+            click.echo(f"  ⚠ {task_ref}: {exc}", err=True)
+    if touched:
+        _echo_touched(root, touched)
+
+
 @task_group.command("pickup")
 @click.argument("task_ref")
 @click.option("--json", "json_output", is_flag=True, help="Print structured JSON instead of Markdown.")
@@ -4892,6 +5037,100 @@ def issue_add(
     _echo_touched(root, [touched])
 
 
+@issue_group.command("bulk-add")
+@click.option("--epic", required=True)
+@click.option("--filer", required=True)
+@click.option("--input-file", "input_file", required=True,
+              help="CSV or JSON file with issues (columns: title, owner, severity, description, linked_tasks).")
+@click.option("--format", "fmt", default="csv", type=click.Choice(("csv", "json"), case_sensitive=False),
+              help="Input file format (default: csv).")
+@click.option("--default-owner", default=None, help="Default owner if not specified in file.")
+@click.option("--default-severity", default="medium", show_default=True,
+              type=click.Choice(ISSUE_SEVERITIES, case_sensitive=False),
+              help="Default severity if not specified in file.")
+@click.option("--dry-run", is_flag=True, help="Preview without creating.")
+@click.pass_context
+def issue_bulk_add(
+    ctx: click.Context,
+    epic: str,
+    filer: str,
+    input_file: str,
+    fmt: str,
+    default_owner: str | None,
+    default_severity: str,
+    dry_run: bool,
+) -> None:
+    """Bulk-add issues from a CSV or JSON file."""
+    import csv
+    import json as _json
+    root = find_repo_root(_cwd_from_context(ctx))
+
+    path = Path(input_file)
+    if not path.is_absolute():
+        path = Path.cwd() / path
+    if not path.exists():
+        raise TrailmindError(f"input file not found: {input_file}")
+
+    content = path.read_text(encoding="utf-8")
+
+    issue_specs: list[dict] = []
+    if fmt == "json":
+        data = _json.loads(content)
+        if isinstance(data, list):
+            issue_specs = data
+        elif isinstance(data, dict) and "issues" in data:
+            issue_specs = data["issues"]
+        else:
+            raise TrailmindError("JSON must be a list or object with 'issues' key.")
+    else:
+        reader = csv.DictReader(content.splitlines())
+        for row in reader:
+            issue_specs.append(dict(row))
+
+    if not issue_specs:
+        raise TrailmindError("no issues found in input file")
+
+    if dry_run:
+        click.echo(f"[DRY RUN] Would create {len(issue_specs)} issue(s) in {epic}:")
+        for i, spec in enumerate(issue_specs):
+            title = spec.get("title", "(untitled)")
+            owner = spec.get("owner") or default_owner or "(unassigned)"
+            severity = spec.get("severity") or default_severity
+            click.echo(f"  {i+1}. {title} (owner: @{owner}, severity: {severity})")
+        return
+
+    touched = []
+    for i, spec in enumerate(issue_specs):
+        title = spec.get("title", "").strip()
+        if not title:
+            click.echo(f"  ⚠ issue {i+1}: missing title, skipping", err=True)
+            continue
+        owner = spec.get("owner") or default_owner
+        severity = spec.get("severity") or default_severity
+        description = spec.get("description") or "TBD"
+        linked_str = spec.get("linked_tasks") or ""
+        linked = split_csv(linked_str) if linked_str else None
+
+        try:
+            path = add_issue(
+                root,
+                epic=epic,
+                filer=filer,
+                owner=owner,
+                title=title,
+                description=description,
+                severity=severity,
+                linked_tasks=linked,
+            )
+            touched.append(path)
+        except Exception as exc:
+            click.echo(f"  ⚠ {title}: {exc}", err=True)
+
+    if touched:
+        _echo_touched(root, touched)
+        click.echo(f"\nCreated {len(touched)}/{len(issue_specs)} issues.")
+
+
 @issue_group.command("link")
 @click.option("--issue", "issue_ref", required=True)
 @click.option("--task", "task_ref", required=True)
@@ -4912,6 +5151,47 @@ def issue_close(ctx: click.Context, issue_ref: str, closer: str, status: str, no
     root = find_repo_root(_cwd_from_context(ctx))
     touched = close_issue(root, raw_id=issue_ref, closer=closer, status=status, note=note)
     _echo_touched(root, [touched])
+
+
+@issue_group.command("bulk-close")
+@click.argument("issue_refs", nargs=-1)
+@click.option("--closer", required=True)
+@click.option("--status", required=True, type=click.Choice(("done", "wontfix"), case_sensitive=False))
+@click.option("--note", required=True)
+@click.option("--from-file", "from_file", default=None,
+              help="Read issue IDs from file (one per line), or '-' for stdin.")
+@click.option("--dry-run", is_flag=True, help="Preview without applying.")
+@click.pass_context
+def issue_bulk_close(
+    ctx: click.Context,
+    issue_refs: tuple[str, ...],
+    closer: str,
+    status: str,
+    note: str,
+    from_file: str | None,
+    dry_run: bool,
+) -> None:
+    """Bulk-close issues (e.g. I-001 I-002, or --from-file ids.txt)."""
+    root = find_repo_root(_cwd_from_context(ctx))
+    refs = list(issue_refs)
+    if from_file:
+        refs.extend(_read_ids_from_file(from_file))
+    if not refs:
+        raise TrailmindError("no issue IDs provided (pass as args or use --from-file)")
+    if dry_run:
+        click.echo(f"[DRY RUN] Would close {len(refs)} issue(s) as {status!r}:")
+        for r in refs:
+            click.echo(f"  - {r}")
+        return
+    touched = []
+    for issue_ref in refs:
+        try:
+            path = close_issue(root, raw_id=issue_ref, closer=closer, status=status, note=note)
+            touched.append(path)
+        except Exception as exc:
+            click.echo(f"  ⚠ {issue_ref}: {exc}", err=True)
+    if touched:
+        _echo_touched(root, touched)
 
 
 @issue_group.command("carry")
