@@ -3554,6 +3554,8 @@ def task_group() -> None:
 @click.option("--has-deps", is_flag=True, help="Show only tasks that have dependencies.")
 @click.option("--no-deps", is_flag=True, help="Show only tasks without dependencies.")
 @click.option("--unassigned", is_flag=True, help="Show only tasks without an owner.")
+@click.option("--stale-days", default=None, type=click.IntRange(min=1),
+              help="Show only tasks with no activity in N days (approximated by created date for done tasks).")
 @click.option("--created-today", is_flag=True, help="Show only tasks created today.")
 @click.option("--created-this-week", is_flag=True, help="Show only tasks created this week.")
 @click.option("--sort", "sort_by", default="created",
@@ -3597,6 +3599,7 @@ def task_list_cmd(
     has_deps: bool,
     no_deps: bool,
     unassigned: bool,
+    stale_days: int | None,
     created_today: bool,
     created_this_week: bool,
     sort_by: str,
@@ -3654,6 +3657,12 @@ def task_list_cmd(
         tasks = [t for t in tasks if not t.get("tags")]
     if unassigned:
         tasks = [t for t in tasks if not t.get("owner")]
+    # --stale-days: tasks with no recent activity (approximate using created date for non-done tasks)
+    if stale_days is not None:
+        from datetime import date, timedelta
+        cutoff = (date.today() - timedelta(days=stale_days)).isoformat()
+        tasks = [t for t in tasks if t.get("created") and t["created"] <= cutoff
+                 and t.get("status") not in ("done", "wontfix")]
     # --created-today and --created-this-week are shortcuts
     if created_today or created_this_week:
         from datetime import date, timedelta
