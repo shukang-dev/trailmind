@@ -403,6 +403,49 @@ def tree_command(ctx: click.Context, project: str | None, epic: str | None, json
         click.echo(format_tree(tree))
 
 
+@cli.command("path")
+@click.argument("entity_ref")
+@click.option("--type", "entity_type", default="task",
+              type=click.Choice(("task", "issue", "milestone", "inbox"), case_sensitive=False),
+              help="Entity type (default: task).")
+@click.pass_context
+def path_command(ctx: click.Context, entity_ref: str, entity_type: str) -> None:
+    """Print the file path of an entity."""
+    from trailmind.resolver import resolve_entity
+    root = find_repo_root(_cwd_from_context(ctx))
+    prefix_map = {"task": "T", "issue": "I", "milestone": "M", "inbox": "IN"}
+    prefix = prefix_map.get(entity_type, "T")
+    try:
+        path = resolve_entity(root, raw=entity_ref, entity=prefix)
+        click.echo(str(path))
+    except TrailmindError as exc:
+        raise exc
+
+
+@cli.command("open")
+@click.argument("entity_ref")
+@click.option("--type", "entity_type", default="task",
+              type=click.Choice(("task", "issue", "milestone", "inbox"), case_sensitive=False),
+              help="Entity type (default: task).")
+@click.pass_context
+def open_command(ctx: click.Context, entity_ref: str, entity_type: str) -> None:
+    """Open an entity file in $EDITOR."""
+    import os
+    import subprocess
+    from trailmind.resolver import resolve_entity
+    root = find_repo_root(_cwd_from_context(ctx))
+    prefix_map = {"task": "T", "issue": "I", "milestone": "M", "inbox": "IN"}
+    prefix = prefix_map.get(entity_type, "T")
+    path = resolve_entity(root, raw=entity_ref, entity=prefix)
+
+    editor = os.environ.get("EDITOR") or os.environ.get("VISUAL") or "vi"
+    click.echo(f"Opening {path} with {editor}...")
+    try:
+        subprocess.run([editor, str(path)], check=False)
+    except FileNotFoundError:
+        raise TrailmindError(f"editor not found: {editor}; set $EDITOR")
+
+
 @cli.command("doctor")
 @click.option("--json", "json_output", is_flag=True, help="Print structured JSON instead of text report.")
 @click.pass_context
@@ -875,15 +918,20 @@ def inbox_add(
               help="Group inbox items by status, epic, or project.")
 @click.option("--limit", default=None, type=click.IntRange(min=1), help="Limit number of results.")
 @click.option("--compact", is_flag=True, help="Compact single-line output.")
+@click.option("--ids", "ids_only", is_flag=True, help="Output only entity IDs (one per line, for piping).")
 @click.option("--count", "count_only", is_flag=True, help="Show only the count of matching inbox items.")
 @click.option("--csv", "csv_output", is_flag=True, help="Output as CSV.")
 @click.option("--json", "json_output", is_flag=True, help="Print structured JSON instead of Markdown.")
 @click.pass_context
 def inbox_list(ctx: click.Context, project_slug: str | None, epic_ref: str | None,
                status: str | None, group_by: str | None, limit: int | None,
-               compact: bool, count_only: bool, csv_output: bool, json_output: bool) -> None:
+               compact: bool, ids_only: bool, count_only: bool, csv_output: bool, json_output: bool) -> None:
     root = find_repo_root(_cwd_from_context(ctx))
     items = list_inbox_items(root, project=project_slug, epic=epic_ref, status=status)
+    if ids_only:
+        for item in items:
+            click.echo(item.item_id)
+        return
     if count_only:
         click.echo(f"{len(items)} inbox item{'s' if len(items) != 1 else ''}")
         return
