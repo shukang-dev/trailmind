@@ -3,7 +3,12 @@ from __future__ import annotations
 from pathlib import Path
 
 
-def build_tree(repo_root: Path) -> dict:
+def build_tree(
+    repo_root: Path,
+    *,
+    project: str | None = None,
+    epic: str | None = None,
+) -> dict:
     """Build a tree structure of projects, epics, and entity counts."""
     projects_dir = repo_root / "projects"
     if not projects_dir.exists():
@@ -15,6 +20,8 @@ def build_tree(repo_root: Path) -> dict:
             continue
         proj_md = proj_dir / "PROJECT.md"
         if not proj_md.exists():
+            continue
+        if project and proj_dir.name != project:
             continue
 
         proj_info = {"slug": proj_dir.name, "title": proj_dir.name, "state": "active", "epics": []}
@@ -33,6 +40,10 @@ def build_tree(repo_root: Path) -> dict:
             epic_md = epic_dir / "EPIC.md"
             if not epic_md.exists():
                 continue
+            if epic:
+                epic_rel = f"projects/{proj_dir.name}/{epic_dir.name}"
+                if epic != epic_rel and epic != epic_dir.name:
+                    continue
 
             epic_info = {"slug": epic_dir.name, "title": epic_dir.name, "state": "active",
                          "counts": {}, "has_dashboard": (epic_dir / "dashboard.html").exists()}

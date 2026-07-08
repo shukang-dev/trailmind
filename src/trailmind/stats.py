@@ -8,8 +8,17 @@ from typing import Any
 from trailmind.log import read_entity_user_facing
 
 
-def build_stats(repo_root: Path) -> dict[str, Any]:
-    """Build repository statistics."""
+def build_stats(
+    repo_root: Path,
+    *,
+    project: str | None = None,
+    epic: str | None = None,
+) -> dict[str, Any]:
+    """Build repository statistics.
+
+    If project is specified, only count entities in that project.
+    If epic is specified (as a full path like projects/demo/mvp), only count entities in that epic.
+    """
     projects_path = repo_root / "projects"
     if not projects_path.exists():
         return {
@@ -50,6 +59,9 @@ def build_stats(repo_root: Path) -> dict[str, Any]:
         project_md = project_dir / "PROJECT.md"
         if not project_md.exists():
             continue
+        # Apply project filter
+        if project and project_dir.name != project:
+            continue
         project_count += 1
 
         for epic_dir in sorted(project_dir.iterdir()):
@@ -58,6 +70,11 @@ def build_stats(repo_root: Path) -> dict[str, Any]:
             epic_md = epic_dir / "EPIC.md"
             if not epic_md.exists():
                 continue
+            # Apply epic filter (supports "projects/demo/mvp" or "mvp")
+            if epic:
+                epic_rel = f"projects/{project_dir.name}/{epic_dir.name}"
+                if epic != epic_rel and epic != epic_dir.name:
+                    continue
             epic_count += 1
 
             # Tasks

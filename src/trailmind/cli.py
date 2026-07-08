@@ -374,12 +374,14 @@ def scan_command(ctx: click.Context) -> None:
 
 
 @cli.command("stats")
+@click.option("--project", default=None, help="Show stats for a specific project.")
+@click.option("--epic", default=None, help="Show stats for a specific epic (path or slug).")
 @click.option("--json", "json_output", is_flag=True, help="Print structured JSON instead of text report.")
 @click.pass_context
-def stats_command(ctx: click.Context, json_output: bool) -> None:
+def stats_command(ctx: click.Context, project: str | None, epic: str | None, json_output: bool) -> None:
     """Show repository statistics."""
     root = find_repo_root(_cwd_from_context(ctx))
-    data = build_stats(root)
+    data = build_stats(root, project=project, epic=epic)
     if json_output:
         click.echo(json.dumps(data, ensure_ascii=False, indent=2, default=str))
     else:
@@ -387,12 +389,14 @@ def stats_command(ctx: click.Context, json_output: bool) -> None:
 
 
 @cli.command("tree")
+@click.option("--project", default=None, help="Show tree for a specific project.")
+@click.option("--epic", default=None, help="Show tree for a specific epic (path or slug).")
 @click.option("--json", "json_output", is_flag=True, help="Print structured JSON.")
 @click.pass_context
-def tree_command(ctx: click.Context, json_output: bool) -> None:
+def tree_command(ctx: click.Context, project: str | None, epic: str | None, json_output: bool) -> None:
     """Show project structure as a tree with entity counts."""
     root = find_repo_root(_cwd_from_context(ctx))
-    tree = build_tree(root)
+    tree = build_tree(root, project=project, epic=epic)
     if json_output:
         click.echo(json.dumps(tree, ensure_ascii=False, indent=2, default=str))
     else:
