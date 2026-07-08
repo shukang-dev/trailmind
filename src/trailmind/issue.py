@@ -196,6 +196,7 @@ def add_issue(
     title: str,
     description: str,
     severity: str,
+    linked_tasks: list[str] | None = None,
 ) -> Path:
     epic_path = _resolve_epic(repo_root, epic)
     roster = Roster.load(repo_root / "roster.yaml")
@@ -217,7 +218,7 @@ def add_issue(
             "status": "open",
             "severity": severity,
             "created": date.today().isoformat(),
-            "linked_tasks": [],
+            "linked_tasks": linked_tasks or [],
             "carried_into": [],
         },
         body=_initial_body(title, description, filer_shortname),

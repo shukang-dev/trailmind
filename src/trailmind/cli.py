@@ -2258,8 +2258,9 @@ def issue_list_cmd(
 @click.option("--filer", required=True)
 @click.option("--owner", default=None, help="Owner email or shortname (defaults to filer).")
 @click.option("--title", required=True)
-@click.option("--description", required=True)
+@click.option("--description", default="TBD", help="Issue description (default: TBD).")
 @click.option("--severity", required=True)
+@click.option("--linked-tasks", default=None, help="Comma-separated linked task IDs or refs.")
 @click.pass_context
 def issue_add(
     ctx: click.Context,
@@ -2269,9 +2270,12 @@ def issue_add(
     title: str,
     description: str,
     severity: str,
+    linked_tasks: str | None,
 ) -> None:
     root = find_repo_root(_cwd_from_context(ctx))
-    touched = add_issue(root, epic=epic, filer=filer, owner=owner, title=title, description=description, severity=severity)
+    linked = split_csv(linked_tasks) if linked_tasks else None
+    touched = add_issue(root, epic=epic, filer=filer, owner=owner, title=title,
+                         description=description, severity=severity, linked_tasks=linked)
     _echo_touched(root, [touched])
 
 
