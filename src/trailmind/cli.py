@@ -2587,6 +2587,8 @@ def inbox_add(
               help="Sort inbox items (default: created).")
 @click.option("--created-since", default=None, help="Filter inbox items created on or after YYYY-MM-DD.")
 @click.option("--created-before", default=None, help="Filter inbox items created before YYYY-MM-DD.")
+@click.option("--created-today", is_flag=True, help="Show only inbox items created today.")
+@click.option("--created-this-week", is_flag=True, help="Show only inbox items created this week.")
 @click.option("--limit", default=None, type=click.IntRange(min=1), help="Limit number of results.")
 @click.option("--compact", is_flag=True, help="Compact single-line output.")
 @click.option("--ids", "ids_only", is_flag=True, help="Output only entity IDs (one per line, for piping).")
@@ -2597,6 +2599,7 @@ def inbox_add(
 def inbox_list(ctx: click.Context, project_slug: str | None, epic_ref: str | None,
                status: str | None, group_by: str | None, sort_by: str,
                created_since: str | None, created_before: str | None,
+               created_today: bool, created_this_week: bool,
                limit: int | None,
                compact: bool, ids_only: bool, count_only: bool, csv_output: bool, json_output: bool) -> None:
     root = find_repo_root(_cwd_from_context(ctx))
@@ -2606,6 +2609,17 @@ def inbox_list(ctx: click.Context, project_slug: str | None, epic_ref: str | Non
         items.sort(key=lambda i: i.title.lower())
     elif sort_by == "status":
         items.sort(key=lambda i: (0 if i.status == "open" else 1, i.title.lower()))
+    # --created-today and --created-this-week shortcuts
+    if created_today or created_this_week:
+        from datetime import date, timedelta
+        today = date.today()
+        if created_today:
+            today_str = today.isoformat()
+            items = [i for i in items if i.created == today_str]
+        elif created_this_week:
+            week_start = today - timedelta(days=today.weekday())
+            week_start_str = week_start.isoformat()
+            items = [i for i in items if i.created and i.created >= week_start_str]
     # else: created (default order from list_inbox_items)
     if created_since:
         items = [i for i in items if i.created and i.created >= created_since]
@@ -3538,6 +3552,8 @@ def task_group() -> None:
 @click.option("--has-deps", is_flag=True, help="Show only tasks that have dependencies.")
 @click.option("--no-deps", is_flag=True, help="Show only tasks without dependencies.")
 @click.option("--unassigned", is_flag=True, help="Show only tasks without an owner.")
+@click.option("--created-today", is_flag=True, help="Show only tasks created today.")
+@click.option("--created-this-week", is_flag=True, help="Show only tasks created this week.")
 @click.option("--sort", "sort_by", default="created",
               type=click.Choice(("created", "priority", "due", "status", "title"), case_sensitive=False),
               help="Sort tasks (default: created).")
@@ -3577,6 +3593,8 @@ def task_list_cmd(
     has_deps: bool,
     no_deps: bool,
     unassigned: bool,
+    created_today: bool,
+    created_this_week: bool,
     sort_by: str,
     group_by: str | None,
     compact: bool,
@@ -3628,6 +3646,17 @@ def task_list_cmd(
         tasks = [t for t in tasks if not t.get("tags")]
     if unassigned:
         tasks = [t for t in tasks if not t.get("owner")]
+    # --created-today and --created-this-week are shortcuts
+    if created_today or created_this_week:
+        from datetime import date, timedelta
+        today = date.today()
+        if created_today:
+            today_str = today.isoformat()
+            tasks = [t for t in tasks if t.get("created") == today_str]
+        elif created_this_week:
+            week_start = today - timedelta(days=today.weekday())
+            week_start_str = week_start.isoformat()
+            tasks = [t for t in tasks if t.get("created") and t["created"] >= week_start_str]
     if created_since:
         tasks = [t for t in tasks if t.get("created") and t["created"] >= created_since]
     if created_before:
@@ -4132,6 +4161,38 @@ def task_next(ctx: click.Context, owner: str | None, epic_ref: str | None, proje
             click.echo()
 
 
+@task_group.command("start-next")
+@click.option("--owner", default=None, help="Filter by owner shortname.")
+@click.option("--epic", "epic_ref", default=None, help="Filter by epic path.")
+@click.option("--project", "project_ref", default=None, help="Filter by project slug.")
+@click.option("--actor", required=True)
+@click.option("--note", default=None)
+@click.option("--dry-run", is_flag=True, help="Preview without applying.")
+@click.pass_context
+def task_start_next(ctx: click.Context, owner: str | None, epic_ref: str | None,
+                     project_ref: str | None, actor: str, note: str | None,
+                     dry_run: bool) -> None:
+    """Automatically start the next most actionable task."""
+    root = find_repo_root(_cwd_from_context(ctx))
+    tasks = next_tasks(root, owner=owner, epic=epic_ref, project=project_ref, limit=1)
+
+    if not tasks:
+        click.echo("No actionable tasks found. All caught up! 🎉")
+        return
+
+    next_task = tasks[0]
+    task_ref = next_task.get("id", "")
+
+    if dry_run:
+        click.echo(f"[DRY RUN] Would start {task_ref}: {next_task.get('title', '')}")
+        return
+
+    touched, warning = start_task(root, task_ref=task_ref, actor=actor, note=note)
+    _echo_touched(root, [touched])
+    if warning:
+        click.echo(warning)
+
+
 @task_group.command("edit")
 @click.argument("task_ref")
 @click.option("--title", default=None, help="New task title.")
@@ -4621,6 +4682,8 @@ def issue_group() -> None:
 @click.option("--no-linked-tasks", is_flag=True, help="Show only issues without linked tasks.")
 @click.option("--created-since", default=None, help="Filter issues created on or after YYYY-MM-DD.")
 @click.option("--created-before", default=None, help="Filter issues created before YYYY-MM-DD.")
+@click.option("--created-today", is_flag=True, help="Show only issues created today.")
+@click.option("--created-this-week", is_flag=True, help="Show only issues created this week.")
 @click.option("--sort", "sort_by", default="created",
               type=click.Choice(("created", "severity", "status", "title"), case_sensitive=False),
               help="Sort issues (default: created).")
@@ -4647,6 +4710,8 @@ def issue_list_cmd(
     no_linked_tasks: bool,
     created_since: str | None,
     created_before: str | None,
+    created_today: bool,
+    created_this_week: bool,
     sort_by: str,
     group_by: str | None,
     compact: bool,
@@ -4667,6 +4732,17 @@ def issue_list_cmd(
         issues = [i for i in issues if i.get("linked_tasks")]
     if no_linked_tasks:
         issues = [i for i in issues if not i.get("linked_tasks")]
+    # --created-today and --created-this-week shortcuts
+    if created_today or created_this_week:
+        from datetime import date, timedelta
+        today = date.today()
+        if created_today:
+            today_str = today.isoformat()
+            issues = [i for i in issues if i.get("created") == today_str]
+        elif created_this_week:
+            week_start = today - timedelta(days=today.weekday())
+            week_start_str = week_start.isoformat()
+            issues = [i for i in issues if i.get("created") and i["created"] >= week_start_str]
     if created_since:
         issues = [i for i in issues if i.get("created") and i["created"] >= created_since]
     if created_before:
