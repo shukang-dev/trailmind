@@ -6976,6 +6976,188 @@ def task_burnup(ctx: click.Context, epic_ref: str | None, project_ref: str | Non
     click.echo("\n".join(lines))
 
 
+@task_group.command("burndown")
+@click.option("--epic", "epic_ref", default=None, help="Show burndown for a specific epic.")
+@click.option("--project", "project_ref", default=None, help="Show burndown for a specific project.")
+@click.option("--owner", default=None, help="Filter by owner.")
+@click.option("--width", default=40, show_default=True, type=click.IntRange(min=10, max=100),
+              help="Chart width in characters.")
+@click.option("--json", "json_output", is_flag=True, help="Print structured JSON.")
+@click.pass_context
+def task_burndown(ctx: click.Context, epic_ref: str | None, project_ref: str | None,
+                  owner: str | None, width: int, json_output: bool) -> None:
+    """Show a burn-down chart: remaining work over time."""
+    from datetime import date, timedelta
+    from collections import defaultdict
+
+    root = find_repo_root(_cwd_from_context(ctx))
+    today = date.today()
+
+    all_tasks = list_tasks(root, epic_ref=epic_ref, project_ref=project_ref, owner=owner)
+    total_tasks = len(all_tasks)
+
+    if total_tasks == 0:
+        click.echo("No tasks found.")
+        return
+
+    done_tasks = [t for t in all_tasks if t.get("status") == "done"]
+    active_tasks = [t for t in all_tasks if t.get("status") not in ("done", "wontfix")]
+    remaining = len(active_tasks)
+    completed = len(done_tasks)
+
+    # Calculate remaining work by priority
+    remaining_by_priority: dict[str, int] = defaultdict(int)
+    for t in active_tasks:
+        remaining_by_priority[t.get("priority", "unspecified")] += 1
+
+    # Calculate remaining work by due date
+    overdue = [t for t in active_tasks if t.get("due") and t["due"] < today.isoformat()]
+    due_this_week = [t for t in active_tasks
+                     if t.get("due") and today.isoformat() <= t["due"] <= (today + timedelta(days=7)).isoformat()]
+    due_later = [t for t in active_tasks
+                 if t.get("due") and t["due"] > (today + timedelta(days=7)).isoformat()]
+    no_due = [t for t in active_tasks if not t.get("due")]
+
+    pct_remaining = round(remaining / max(total_tasks, 1) * 100, 1)
+    pct_done = round(completed / max(total_tasks, 1) * 100, 1)
+
+    if json_output:
+        data = {
+            "generated": today.isoformat(),
+            "total": total_tasks,
+            "remaining": remaining,
+            "completed": completed,
+            "pct_remaining": pct_remaining,
+            "pct_done": pct_done,
+            "by_priority": dict(remaining_by_priority),
+            "by_due": {
+                "overdue": len(overdue),
+                "this_week": len(due_this_week),
+                "later": len(due_later),
+                "no_due": len(no_due),
+            },
+        }
+        click.echo(json.dumps(data, ensure_ascii=False, indent=2, default=str))
+        return
+
+    # Text output
+    lines = []
+    lines.append(f"📉 Burn-Down Chart")
+    lines.append(f"   Total: {total_tasks}  |  Remaining: {remaining}  |  Done: {completed}")
+    lines.append(f"   Remaining: {pct_remaining}%  |  Done: {pct_done}%")
+    lines.append("")
+
+    # Build the burndown bar (remaining work)
+    bar_width = width
+    remaining_chars = int(pct_remaining / 100 * bar_width)
+    done_chars = bar_width - remaining_chars
+
+    # Burndown: shows remaining work shrinking
+    remaining_bar = "█" * remaining_chars
+    done_bar = "░" * done_chars
+
+    lines.append(f"  Remaining: [{remaining_bar}{done_bar}] {pct_remaining}%")
+    lines.append(f"             0{' ' * (bar_width - 5)}{total_tasks}")
+    lines.append("")
+
+    # Detailed breakdown
+    lines.append("📊 Remaining Work Breakdown:")
+    lines.append("")
+
+    # By due urgency
+    lines.append("  By due date:")
+    if overdue:
+        bar = "█" * min(len(overdue), bar_width)
+        lines.append(f"    ⚠️  Overdue:    {bar} {len(overdue)}")
+    if due_this_week:
+        bar = "█" * min(len(due_this_week), bar_width)
+        lines.append(f"    📍 This week:  {bar} {len(due_this_week)}")
+    if due_later:
+        bar = "█" * min(len(due_later), bar_width)
+        lines.append(f"    📅 Later:      {bar} {len(due_later)}")
+    if no_due:
+        bar = "█" * min(len(no_due), bar_width)
+        lines.append(f"    ❓ No due:     {bar} {len(no_due)}")
+    lines.append("")
+
+    # By priority
+    lines.append("  By priority:")
+    pri_order = [("critical", "🔴"), ("high", "🟠"), ("medium", "🟡"), ("low", "🟢"), ("unspecified", "❓")]
+    for pri, icon in pri_order:
+        count = remaining_by_priority.get(pri, 0)
+        if count > 0:
+            bar = "█" * min(count, bar_width)
+            lines.append(f"    {icon} {pri:12s} {bar} {count}")
+    lines.append("")
+
+    # By status
+    status_counts: dict[str, int] = defaultdict(int)
+    for t in active_tasks:
+        status_counts[t.get("status", "unknown")] += 1
+    lines.append("  By status:")
+    status_order = [("in_progress", "🔧"), ("ready", "⏳"), ("created", "📝"), ("blocked", "🚧")]
+    for status, icon in status_order:
+        count = status_counts.get(status, 0)
+        if count > 0:
+            bar = "█" * min(count, bar_width)
+            lines.append(f"    {icon} {status:12s} {bar} {count}")
+    lines.append("")
+
+    # Urgency indicator
+    if overdue:
+        lines.append(f"⚠️  {len(overdue)} overdue task(s) — immediate action needed!")
+    elif due_this_week:
+        lines.append(f"📍 {len(due_this_week)} due this week — start soon!")
+    elif no_due and len(no_due) > len(active_tasks) * 0.5:
+        lines.append(f"❓ {len(no_due)} tasks without due dates — consider scheduling.")
+    else:
+        lines.append("✅ No immediate deadlines — work is well-scheduled!")
+
+    # Velocity estimate
+    if completed > 0:
+        created_dates = [t.get("created") for t in done_tasks if t.get("created")]
+        if len(created_dates) >= 2:
+            first = date.fromisoformat(min(created_dates))
+            days_elapsed = max((today - first).days, 1)
+            velocity = completed / days_elapsed
+            if velocity > 0:
+                est_days = round(remaining / velocity, 1)
+                est_date = today + timedelta(days=est_days)
+                lines.append("")
+                lines.append(f"📈 Current velocity: {round(velocity, 2)} tasks/day")
+                lines.append(f"🎯 At this rate, all done by: {est_date.isoformat()} (~{est_days} days)")
+
+    click.echo("\n".join(lines))
+
+
+@task_group.command("workload")
+@click.option("--epic", "epic_ref", default=None, help="Analyze workload for a specific epic.")
+@click.option("--project", "project_ref", default=None, help="Analyze workload for a specific project.")
+@click.option("--hours-per-task", default=4, show_default=True, type=click.IntRange(min=1, max=40),
+              help="Estimated hours per task.")
+@click.option("--hours-per-day", default=6, show_default=True, type=click.IntRange(min=1, max=12),
+              help="Available working hours per day per person.")
+@click.option("--json", "json_output", is_flag=True, help="Print structured JSON.")
+@click.pass_context
+def task_workload(ctx: click.Context, epic_ref: str | None, project_ref: str | None,
+                   hours_per_task: int, hours_per_day: int, json_output: bool) -> None:
+    """Alias for capacity-report: show team workload distribution."""
+    # Delegate to capacity_report with same parameters
+    from click.testing import CliRunner
+    args = ["task", "capacity-report"]
+    if epic_ref:
+        args.extend(["--epic", epic_ref])
+    if project_ref:
+        args.extend(["--project", project_ref])
+    args.extend(["--hours-per-task", str(hours_per_task)])
+    args.extend(["--hours-per-day", str(hours_per_day)])
+    if json_output:
+        args.append("--json")
+    result = CliRunner().invoke(cli, args, obj=ctx.obj)
+    if result.output:
+        click.echo(result.output, nl=False)
+
+
 @task_group.command("edit")
 @click.argument("task_ref")
 @click.option("--title", default=None, help="New task title.")
