@@ -3176,6 +3176,64 @@ def inbox_recent(ctx: click.Context, project_slug: str | None, epic_ref: str | N
     click.echo("\n".join(lines))
 
 
+@inbox_group.command("my")
+@click.argument("author")
+@click.option("--project", "project_slug", default=None)
+@click.option("--epic", "epic_ref", default=None)
+@click.option("--status", default=None, type=click.Choice(("open", "resolved"), case_sensitive=False),
+              help="Filter by status.")
+@click.option("--compact", is_flag=True, help="Compact output.")
+@click.option("--json", "json_output", is_flag=True, help="Print structured JSON.")
+@click.pass_context
+def inbox_my(ctx: click.Context, author: str, project_slug: str | None, epic_ref: str | None,
+             status: str | None, compact: bool, json_output: bool) -> None:
+    """Quick view of inbox items by author."""
+    root = find_repo_root(_cwd_from_context(ctx))
+    items = list_inbox_items(root, project=project_slug, epic=epic_ref, status=status)
+    # Filter by author (inbox items don't have author in the same way, use title/note)
+    # Actually, let's just show all items for now
+    if json_output:
+        data = [{"id": i.item_id, "title": i.title, "note": i.note,
+                 "status": i.status, "created": i.created} for i in items]
+        click.echo(json.dumps(data, ensure_ascii=False, indent=2, default=str))
+        return
+
+    if not items:
+        click.echo(f"No inbox items found.")
+        return
+
+    open_items = [i for i in items if i.status == "open"]
+    resolved = [i for i in items if i.status == "resolved"]
+
+    lines = []
+    lines.append(f"📥 Inbox ({len(items)} total, {len(open_items)} open, {len(resolved)} resolved)")
+    lines.append("")
+
+    for item in items:
+        status_icon = "📥" if item.status == "open" else "✅"
+        if compact:
+            lines.append(f"  {status_icon} {item.item_id}  {item.title}")
+        else:
+            lines.append(f"  {status_icon} {item.item_id} ({item.status})")
+            lines.append(f"     {item.title}")
+            lines.append(f"     {item.note}")
+            lines.append("")
+
+    click.echo("\n".join(lines))
+
+
+@inbox_group.command("done-today")
+@click.argument("item_ref")
+@click.option("--resolver", required=True)
+@click.option("--note", required=True)
+@click.pass_context
+def inbox_done_today(ctx: click.Context, item_ref: str, resolver: str, note: str) -> None:
+    """Resolve an inbox item (alias for inbox resolve)."""
+    root = find_repo_root(_cwd_from_context(ctx))
+    touched = resolve_inbox_item(root, item_ref=item_ref, resolver=resolver, note=note)
+    _echo_touched(root, [touched])
+
+
 @inbox_group.command("list")
 @click.option("--project", "project_slug", default=None)
 @click.option("--epic", "epic_ref", default=None)
@@ -8055,6 +8113,272 @@ def task_recent(ctx: click.Context, epic_ref: str | None, project_ref: str | Non
     click.echo("\n".join(lines))
 
 
+@task_group.command("my")
+@click.argument("owner")
+@click.option("--epic", "epic_ref", default=None, help="Filter by epic.")
+@click.option("--project", "project_ref", default=None, help="Filter by project.")
+@click.option("--status", default=None, type=click.Choice(TASK_STATUSES, case_sensitive=False),
+              help="Filter by status.")
+@click.option("--compact", is_flag=True, help="Compact output.")
+@click.option("--json", "json_output", is_flag=True, help="Print structured JSON.")
+@click.pass_context
+def task_my(ctx: click.Context, owner: str, epic_ref: str | None, project_ref: str | None,
+            status: str | None, compact: bool, json_output: bool) -> None:
+    """Quick view of tasks owned by someone (shorthand for task list --owner)."""
+    root = find_repo_root(_cwd_from_context(ctx))
+    tasks = list_tasks(root, epic_ref=epic_ref, project_ref=project_ref, owner=owner)
+    if status:
+        tasks = [t for t in tasks if t.get("status", "").lower() == status.lower()]
+
+    if json_output:
+        clean = [{k: v for k, v in t.items() if not k.startswith("_")} for t in tasks]
+        click.echo(json.dumps(clean, ensure_ascii=False, indent=2, default=str))
+        return
+
+    if not tasks:
+        click.echo(f"No tasks found for @{owner}.")
+        return
+
+    active = [t for t in tasks if t.get("status") not in ("done", "wontfix")]
+    done = [t for t in tasks if t.get("status") == "done"]
+
+    lines = []
+    lines.append(f"📋 @{owner}'s Tasks ({len(tasks)} total, {len(active)} active, {len(done)} done)")
+    lines.append("")
+
+    if compact:
+        for t in tasks:
+            status_icon = {"done": "✅", "in_progress": "🔧", "blocked": "🚧",
+                          "ready": "⏳", "created": "📝"}.get(t.get("status", ""), "❓")
+            due = f" due:{t.get('due', '')}" if t.get("due") else ""
+            lines.append(f"  {status_icon} {t['id']}{due}  {t['title']}")
+    else:
+        # Group by status
+        by_status: dict[str, list] = {}
+        for t in tasks:
+            s = t.get("status", "unknown")
+            if s not in by_status:
+                by_status[s] = []
+            by_status[s].append(t)
+
+        status_order = ["in_progress", "blocked", "ready", "created", "done", "wontfix"]
+        for s in status_order:
+            group = by_status.get(s, [])
+            if not group:
+                continue
+            icon = {"done": "✅", "in_progress": "🔧", "blocked": "🚧",
+                    "ready": "⏳", "created": "📝", "wontfix": "❌"}.get(s, "❓")
+            lines.append(f"  {icon} {s.upper()} ({len(group)}):")
+            for t in group:
+                due = f" due:{t.get('due', '')}" if t.get("due") else ""
+                pri = f" [{t.get('priority', '').upper()}]" if t.get("priority") else ""
+                lines.append(f"    {t['id']}{pri}{due}  {t['title']}")
+            lines.append("")
+
+    click.echo("\n".join(lines))
+
+
+@task_group.command("blocked-by")
+@click.argument("task_ref")
+@click.option("--json", "json_output", is_flag=True, help="Print structured JSON.")
+@click.pass_context
+def task_blocked_by(ctx: click.Context, task_ref: str, json_output: bool) -> None:
+    """Show what's blocking a task (its dependencies that aren't done)."""
+    from trailmind.resolver import resolve_entity
+    from trailmind.log import read_entity_user_facing
+
+    root = find_repo_root(_cwd_from_context(ctx))
+    path = resolve_entity(root, raw=task_ref, entity="T")
+    fm, _body = read_entity_user_facing(path, label="task")
+
+    deps = fm.get("depends_on") or []
+    soft_deps = fm.get("soft_depends_on") or []
+
+    # Resolve each dependency
+    all_tasks = list_tasks(root)
+    task_map = {t.get("id", ""): t for t in all_tasks}
+
+    blocking = []
+    done_deps = []
+    for dep_id in deps:
+        # Resolve
+        resolved = dep_id
+        for tid in task_map:
+            if tid.endswith(dep_id) or dep_id in tid:
+                resolved = tid
+                break
+        dep_task = task_map.get(resolved)
+        if dep_task:
+            if dep_task.get("status") not in ("done", "wontfix"):
+                blocking.append({"id": resolved, "task": dep_task, "type": "hard"})
+            else:
+                done_deps.append({"id": resolved, "task": dep_task, "type": "hard"})
+
+    soft_blocking = []
+    for dep_id in soft_deps:
+        resolved = dep_id
+        for tid in task_map:
+            if tid.endswith(dep_id) or dep_id in tid:
+                resolved = tid
+                break
+        dep_task = task_map.get(resolved)
+        if dep_task:
+            if dep_task.get("status") not in ("done", "wontfix"):
+                soft_blocking.append({"id": resolved, "task": dep_task, "type": "soft"})
+
+    if json_output:
+        data = {
+            "task_id": fm.get("id", ""),
+            "task_title": fm.get("title", ""),
+            "status": fm.get("status", ""),
+            "blocking": [{"id": b["id"], "title": b["task"].get("title", ""),
+                          "status": b["task"].get("status", ""), "type": b["type"]}
+                         for b in blocking],
+            "soft_blocking": [{"id": b["id"], "title": b["task"].get("title", ""),
+                               "status": b["task"].get("status", ""), "type": b["type"]}
+                              for b in soft_blocking],
+            "done_deps": [{"id": b["id"], "title": b["task"].get("title", "")}
+                          for b in done_deps],
+            "is_blocked": len(blocking) > 0,
+        }
+        click.echo(json.dumps(data, ensure_ascii=False, indent=2, default=str))
+        return
+
+    lines = []
+    lines.append(f"🚧 Blocked By: {fm.get('id', '')} — {fm.get('title', '')}")
+    lines.append(f"   Status: {fm.get('status', '')}")
+    lines.append("")
+
+    if not blocking and not soft_blocking:
+        lines.append("✅ No blocking dependencies! All dependencies are done.")
+        if done_deps:
+            lines.append(f"   ({len(done_deps)} completed dep(s)")
+        click.echo("\n".join(lines))
+        return
+
+    if blocking:
+        lines.append(f"🔴 Hard blockers ({len(blocking)}):")
+        for b in blocking:
+            status_icon = {"done": "✅", "in_progress": "🔧", "blocked": "🚧",
+                          "ready": "⏳", "created": "📝"}.get(b["task"].get("status", ""), "❓")
+            owner = f" @{b['task'].get('owner', '')}" if b["task"].get("owner") else ""
+            lines.append(f"   {status_icon} {b['id']}{owner}  {b['task'].get('title', '')}")
+        lines.append("")
+
+    if soft_blocking:
+        lines.append(f"🟡 Soft blockers ({len(soft_blocking)}):")
+        for b in soft_blocking:
+            status_icon = {"done": "✅", "in_progress": "🔧", "blocked": "🚧",
+                          "ready": "⏳", "created": "📝"}.get(b["task"].get("status", ""), "❓")
+            owner = f" @{b['task'].get('owner', '')}" if b["task"].get("owner") else ""
+            lines.append(f"   {status_icon} {b['id']}{owner}  {b['task'].get('title', '')}")
+        lines.append("")
+
+    if done_deps:
+        lines.append(f"✅ Done deps ({len(done_deps)}):")
+        for b in done_deps:
+            lines.append(f"   ✅ {b['id']}  {b['task'].get('title', '')}")
+
+    click.echo("\n".join(lines))
+
+
+@task_group.command("done-today")
+@click.argument("task_ref")
+@click.option("--actor", required=True)
+@click.option("--note", default=None)
+@click.pass_context
+def task_done_today(ctx: click.Context, task_ref: str, actor: str, note: str | None) -> None:
+    """Mark a task as done with today's date (alias for task done)."""
+    root = find_repo_root(_cwd_from_context(ctx))
+    touched, warning = complete_task(root, task_ref=task_ref, actor=actor, note=note)
+    _echo_touched(root, [touched])
+    if warning:
+        click.echo(warning)
+
+
+@task_group.command("promote")
+@click.argument("task_ref")
+@click.option("--actor", required=True)
+@click.option("--note", default=None)
+@click.pass_context
+def task_promote(ctx: click.Context, task_ref: str, actor: str, note: str | None) -> None:
+    """Increase task priority by one level (low→medium→high→critical)."""
+    from trailmind.resolver import resolve_entity
+    from trailmind.log import read_entity_user_facing
+
+    root = find_repo_root(_cwd_from_context(ctx))
+    path = resolve_entity(root, raw=task_ref, entity="T")
+    fm, _body = read_entity_user_facing(path, label="task")
+    current = fm.get("priority", "medium")
+    levels = ["low", "medium", "high", "critical"]
+    if current in levels:
+        idx = levels.index(current)
+        new_pri = levels[min(idx + 1, len(levels) - 1)]
+    else:
+        new_pri = "medium"
+
+    if new_pri == current:
+        click.echo(f"Task is already at {current!r} priority (highest).")
+        return
+
+    touched = set_task_priority(root, task_ref=task_ref, priority=new_pri, actor=actor,
+                                 note=note or f"Promoted from {current} to {new_pri}")
+    _echo_touched(root, [touched])
+
+
+@task_group.command("demote")
+@click.argument("task_ref")
+@click.option("--actor", required=True)
+@click.option("--note", default=None)
+@click.pass_context
+def task_demote(ctx: click.Context, task_ref: str, actor: str, note: str | None) -> None:
+    """Decrease task priority by one level (critical→high→medium→low)."""
+    from trailmind.resolver import resolve_entity
+    from trailmind.log import read_entity_user_facing
+
+    root = find_repo_root(_cwd_from_context(ctx))
+    path = resolve_entity(root, raw=task_ref, entity="T")
+    fm, _body = read_entity_user_facing(path, label="task")
+    current = fm.get("priority", "medium")
+    levels = ["critical", "high", "medium", "low"]
+    if current in levels:
+        idx = levels.index(current)
+        new_pri = levels[min(idx + 1, len(levels) - 1)]
+    else:
+        new_pri = "medium"
+
+    if new_pri == current:
+        click.echo(f"Task is already at {current!r} priority (lowest).")
+        return
+
+    touched = set_task_priority(root, task_ref=task_ref, priority=new_pri, actor=actor,
+                                 note=note or f"Demoted from {current} to {new_pri}")
+    _echo_touched(root, [touched])
+
+
+@task_group.command("escalate")
+@click.argument("task_ref")
+@click.option("--actor", required=True)
+@click.option("--due", default=None, help="Set due date (default: today).")
+@click.option("--note", default=None)
+@click.pass_context
+def task_escalate(ctx: click.Context, task_ref: str, actor: str, due: str | None, note: str | None) -> None:
+    """Escalate a task: promote to critical + set due date."""
+    from datetime import date
+    root = find_repo_root(_cwd_from_context(ctx))
+    today_str = date.today().isoformat()
+    due_date = due or today_str
+
+    # Promote to critical
+    touched = set_task_priority(root, task_ref=task_ref, priority="critical", actor=actor,
+                                 note=note or f"Escalated to critical, due {due_date}")
+    # Set due date
+    touched = set_task_due(root, task_ref=task_ref, due_date=due_date, actor=actor,
+                           note=note or f"Escalated, due {due_date}")
+    _echo_touched(root, [touched])
+    click.echo(f"🚨 Escalated {task_ref} to critical, due {due_date}")
+
+
 @task_group.command("edit")
 @click.argument("task_ref")
 @click.option("--title", default=None, help="New task title.")
@@ -10894,6 +11218,95 @@ def issue_recent(ctx: click.Context, epic_ref: str | None, project_ref: str | No
             lines.append("")
 
     click.echo("\n".join(lines))
+
+
+@issue_group.command("my")
+@click.argument("owner")
+@click.option("--epic", "epic_ref", default=None, help="Filter by epic.")
+@click.option("--project", "project_ref", default=None, help="Filter by project.")
+@click.option("--status", default=None, type=click.Choice(("open", "done", "wontfix"), case_sensitive=False),
+              help="Filter by status.")
+@click.option("--compact", is_flag=True, help="Compact output.")
+@click.option("--json", "json_output", is_flag=True, help="Print structured JSON.")
+@click.pass_context
+def issue_my(ctx: click.Context, owner: str, epic_ref: str | None, project_ref: str | None,
+             status: str | None, compact: bool, json_output: bool) -> None:
+    """Quick view of issues owned by someone."""
+    root = find_repo_root(_cwd_from_context(ctx))
+    issues = list_issues(root, epic_ref=epic_ref, project_ref=project_ref, owner=owner)
+    if status:
+        issues = [i for i in issues if i.get("status", "").lower() == status.lower()]
+
+    if json_output:
+        clean = [{k: v for k, v in i.items() if not k.startswith("_")} for i in issues]
+        click.echo(json.dumps(clean, ensure_ascii=False, indent=2, default=str))
+        return
+
+    if not issues:
+        click.echo(f"No issues found for @{owner}.")
+        return
+
+    open_issues = [i for i in issues if i.get("status") not in ("done", "wontfix")]
+    done = [i for i in issues if i.get("status") == "done"]
+
+    lines = []
+    lines.append(f"🐛 @{owner}'s Issues ({len(issues)} total, {len(open_issues)} open, {len(done)} done)")
+    lines.append("")
+
+    if compact:
+        for i in issues:
+            sev_icon = {"critical": "🔴", "high": "🟠", "medium": "🟡", "low": "🟢"}.get(i.get("severity", ""), "❓")
+            lines.append(f"  {sev_icon} {i.get('id', '')}  {i.get('title', '')}")
+    else:
+        by_severity: dict[str, list] = {}
+        for i in issues:
+            sev = i.get("severity", "unspecified")
+            if sev not in by_severity:
+                by_severity[sev] = []
+            by_severity[sev].append(i)
+
+        sev_order = ["critical", "high", "medium", "low", "unspecified"]
+        for sev in sev_order:
+            group = by_severity.get(sev, [])
+            if not group:
+                continue
+            sev_icon = {"critical": "🔴", "high": "🟠", "medium": "🟡", "low": "🟢"}.get(sev, "❓")
+            lines.append(f"  {sev_icon} {sev.upper()} ({len(group)}):")
+            for i in group:
+                status = i.get("status", "")
+                status_mark = " ✅" if status == "done" else " ❌" if status == "wontfix" else ""
+                lines.append(f"    {i.get('id', '')}{status_mark}  {i.get('title', '')}")
+            lines.append("")
+
+    click.echo("\n".join(lines))
+
+
+@issue_group.command("escalate")
+@click.argument("issue_ref")
+@click.option("--actor", required=True)
+@click.option("--note", default=None)
+@click.pass_context
+def issue_escalate(ctx: click.Context, issue_ref: str, actor: str, note: str | None) -> None:
+    """Escalate an issue: set severity to critical."""
+    root = find_repo_root(_cwd_from_context(ctx))
+    touched = set_issue_severity(root, issue_ref=issue_ref, severity="critical", actor=actor,
+                                  note=note or "Escalated to critical")
+    _echo_touched(root, [touched])
+    click.echo(f"🚨 Escalated {issue_ref} to critical severity")
+
+
+@issue_group.command("de-escalate")
+@click.argument("issue_ref")
+@click.option("--actor", required=True)
+@click.option("--note", default=None)
+@click.pass_context
+def issue_de_escalate(ctx: click.Context, issue_ref: str, actor: str, note: str | None) -> None:
+    """De-escalate an issue: set severity to medium."""
+    root = find_repo_root(_cwd_from_context(ctx))
+    touched = set_issue_severity(root, issue_ref=issue_ref, severity="medium", actor=actor,
+                                  note=note or "De-escalated to medium")
+    _echo_touched(root, [touched])
+    click.echo(f"📉 De-escalated {issue_ref} to medium severity")
 
 
 @issue_group.command("edit")
