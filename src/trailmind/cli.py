@@ -8895,6 +8895,527 @@ def task_daily_review(ctx: click.Context, owner: str, epic_ref: str | None, proj
     click.echo("\n".join(lines))
 
 
+@task_group.command("weekly-review")
+@click.option("--owner", required=True, help="Review for this owner.")
+@click.option("--epic", "epic_ref", default=None, help="Filter by epic.")
+@click.option("--project", "project_ref", default=None, help="Filter by project.")
+@click.option("--json", "json_output", is_flag=True, help="Print structured JSON.")
+@click.pass_context
+def task_weekly_review(ctx: click.Context, owner: str, epic_ref: str | None, project_ref: str | None,
+                        json_output: bool) -> None:
+    """Weekly review: completed this week + tasks for next week."""
+    from datetime import date, timedelta
+
+    root = find_repo_root(_cwd_from_context(ctx))
+    today = date.today()
+    today_str = today.isoformat()
+    week_start = (today - timedelta(days=today.weekday())).isoformat()
+    next_week_end = (today + timedelta(days=14 - today.weekday())).isoformat()
+
+    all_tasks = list_tasks(root, epic_ref=epic_ref, project_ref=project_ref, owner=owner)
+    active_tasks = [t for t in all_tasks if t.get("status") not in ("done", "wontfix")]
+    done_tasks = [t for t in all_tasks if t.get("status") == "done"]
+
+    # Tasks due this week
+    due_this_week = [t for t in active_tasks
+                     if t.get("due") and week_start <= t["due"] <= next_week_end]
+
+    # Overdue
+    overdue = [t for t in active_tasks if t.get("due") and t["due"] < today_str]
+
+    # In progress
+    in_progress = [t for t in active_tasks if t.get("status") == "in_progress"]
+
+    # Ready to start
+    task_map = {t.get("id", ""): t for t in all_tasks}
+    ready = []
+    for t in active_tasks:
+        if t.get("status") in ("ready", "created"):
+            deps = t.get("depends_on") or []
+            all_deps_done = True
+            for dep_id in deps:
+                resolved = dep_id
+                for dep_tid in task_map:
+                    if dep_tid.endswith(dep_id) or dep_id in dep_tid:
+                        resolved = dep_tid
+                        break
+                dep_task = task_map.get(resolved)
+                if dep_task and dep_task.get("status") not in ("done", "wontfix"):
+                    all_deps_done = False
+                    break
+            if all_deps_done:
+                ready.append(t)
+
+    # Stats
+    total = len(all_tasks)
+    completion_rate = round(len(done_tasks) / max(total, 1) * 100, 1)
+
+    if json_output:
+        data = {
+            "week_start": week_start,
+            "owner": owner,
+            "total": total,
+            "done": len(done_tasks),
+            "active": len(active_tasks),
+            "completion_rate": completion_rate,
+            "in_progress": len(in_progress),
+            "overdue": len(overdue),
+            "due_this_week": len(due_this_week),
+            "ready": len(ready),
+        }
+        click.echo(json.dumps(data, ensure_ascii=False, indent=2, default=str))
+        return
+
+    lines = []
+    lines.append(f"📊 Weekly Review — @{owner}")
+    lines.append(f"   {week_start} → {next_week_end}")
+    lines.append("")
+
+    # Summary bar
+    bar_width = 20
+    done_chars = int(completion_rate / 100 * bar_width)
+    progress_bar = "█" * done_chars + "░" * (bar_width - done_chars)
+    lines.append(f"  Progress: [{progress_bar}] {completion_rate}%")
+    lines.append(f"  {len(done_tasks)}/{total} done, {len(active_tasks)} active")
+    lines.append("")
+
+    # Overdue
+    if overdue:
+        lines.append(f"  ⚠️  OVERDUE ({len(overdue)}):")
+        for t in overdue:
+            lines.append(f"     {t['id']} due:{t.get('due', '')}  {t['title']}")
+        lines.append("")
+
+    # In progress
+    if in_progress:
+        lines.append(f"  🔧 IN PROGRESS ({len(in_progress)}):")
+        for t in in_progress:
+            due = f" due:{t.get('due', '')}" if t.get("due") else ""
+            lines.append(f"     {t['id']}{due}  {t['title']}")
+        lines.append("")
+
+    # Due this week
+    if due_this_week:
+        lines.append(f"  📅 DUE THIS WEEK ({len(due_this_week)}):")
+        for t in sorted(due_this_week, key=lambda x: x.get("due", "")):
+            lines.append(f"     {t['id']} due:{t.get('due', '')}  {t['title']}")
+        lines.append("")
+
+    # Ready to start
+    if ready:
+        lines.append(f"  ⏳ READY TO START ({len(ready)}):")
+        for t in sorted(ready, key=lambda x: ({"critical": 0, "high": 1, "medium": 2, "low": 3}.get(x.get("priority", "medium"), 4),
+                                       x.get("due", "9999-99-99")))[:5]:
+            due = f" due:{t.get('due', '')}" if t.get("due") else ""
+            pri = f" [{t.get('priority', '').upper()}]" if t.get("priority") else ""
+            lines.append(f"     {t['id']}{pri}{due}  {t['title']}")
+        if len(ready) > 5:
+            lines.append(f"     ... and {len(ready) - 5} more")
+        lines.append("")
+
+    # Done
+    if done_tasks:
+        lines.append(f"  ✅ COMPLETED ({len(done_tasks)}):")
+        for t in done_tasks[:5]:
+            lines.append(f"     {t['id']}  {t['title']}")
+        if len(done_tasks) > 5:
+            lines.append(f"     ... and {len(done_tasks) - 5} more")
+        lines.append("")
+
+    # Weekly score
+    if completion_rate >= 70:
+        score = "🟢 On track"
+    elif completion_rate >= 40:
+        score = "🟡 Moderate progress"
+    else:
+        score = "🔴 Needs attention"
+    lines.append(f"  {score}")
+
+    if overdue:
+        lines.append(f"  💡 Focus on clearing {len(overdue)} overdue task(s) this week")
+    elif ready:
+        lines.append(f"  💡 {len(ready)} task(s) ready to start — pick one!")
+
+    click.echo("\n".join(lines))
+
+
+@task_group.command("focus")
+@click.argument("task_ref")
+@click.option("--actor", required=True)
+@click.option("--note", default=None)
+@click.pass_context
+def task_focus(ctx: click.Context, task_ref: str, actor: str, note: str | None) -> None:
+    """Mark a task as your focus (sets to in_progress + tags with 'focus')."""
+    from trailmind.resolver import resolve_entity
+    from trailmind.log import read_entity_user_facing
+    from trailmind.entity_io import write_entity
+
+    root = find_repo_root(_cwd_from_context(ctx))
+    path = resolve_entity(root, raw=task_ref, entity="T")
+    fm, body = read_entity_user_facing(path, label="task")
+
+    # Set to in_progress
+    fm["status"] = "in_progress"
+
+    # Add "focus" tag
+    tags = list(fm.get("tags") or [])
+    if "focus" not in tags:
+        tags.append("focus")
+    fm["tags"] = tags
+
+    write_entity(path, frontmatter=fm, body=body)
+    _echo_touched(root, [path])
+    click.echo(f"🎯 Focus set: {task_ref} is now in_progress with 'focus' tag")
+
+
+@task_group.command("unfocus")
+@click.argument("task_ref")
+@click.option("--actor", required=True)
+@click.option("--note", default=None)
+@click.pass_context
+def task_unfocus(ctx: click.Context, task_ref: str, actor: str, note: str | None) -> None:
+    """Remove focus from a task (removes 'focus' tag, sets to ready)."""
+    from trailmind.resolver import resolve_entity
+    from trailmind.log import read_entity_user_facing
+    from trailmind.entity_io import write_entity
+
+    root = find_repo_root(_cwd_from_context(ctx))
+    path = resolve_entity(root, raw=task_ref, entity="T")
+    fm, body = read_entity_user_facing(path, label="task")
+
+    # Remove "focus" tag
+    tags = list(fm.get("tags") or [])
+    if "focus" in tags:
+        tags.remove("focus")
+    fm["tags"] = tags
+
+    # Set to ready if in_progress
+    if fm.get("status") == "in_progress":
+        fm["status"] = "ready"
+
+    write_entity(path, frontmatter=fm, body=body)
+    _echo_touched(root, [path])
+    click.echo(f"🎯 Focus removed: {task_ref}")
+
+
+@task_group.command("focus-list")
+@click.option("--owner", default=None, help="Filter by owner.")
+@click.option("--epic", "epic_ref", default=None, help="Filter by epic.")
+@click.option("--project", "project_ref", default=None, help="Filter by project.")
+@click.option("--json", "json_output", is_flag=True, help="Print structured JSON.")
+@click.pass_context
+def task_focus_list(ctx: click.Context, owner: str | None, epic_ref: str | None,
+                     project_ref: str | None, json_output: bool) -> None:
+    """List tasks with the 'focus' tag."""
+    root = find_repo_root(_cwd_from_context(ctx))
+    all_tasks = list_tasks(root, epic_ref=epic_ref, project_ref=project_ref, owner=owner)
+    focus_tasks = [t for t in all_tasks if "focus" in (t.get("tags") or [])]
+
+    if json_output:
+        clean = [{k: v for k, v in t.items() if not k.startswith("_")} for t in focus_tasks]
+        click.echo(json.dumps(clean, ensure_ascii=False, indent=2, default=str))
+        return
+
+    if not focus_tasks:
+        click.echo("🎯 No focused tasks. Use 'task focus <id>' to set a focus task.")
+        return
+
+    lines = []
+    lines.append(f"🎯 Focus Tasks ({len(focus_tasks)})")
+    lines.append("")
+
+    for t in focus_tasks:
+        status_icon = {"done": "✅", "in_progress": "🔧", "blocked": "🚧",
+                      "ready": "⏳", "created": "📝"}.get(t.get("status", ""), "❓")
+        owner = f" @{t.get('owner', '')}" if t.get("owner") else ""
+        due = f" due:{t.get('due', '')}" if t.get("due") else ""
+        lines.append(f"  {status_icon} {t['id']}{owner}{due}  {t['title']}")
+
+    click.echo("\n".join(lines))
+
+
+@task_group.command("top")
+@click.option("--owner", default=None, help="Filter by owner.")
+@click.option("--epic", "epic_ref", default=None, help="Filter by epic.")
+@click.option("--project", "project_ref", default=None, help="Filter by project.")
+@click.option("--by", "sort_by", default="priority",
+              type=click.Choice(("priority", "due", "created"), case_sensitive=False),
+              help="Sort by priority, due date, or creation date (default: priority).")
+@click.option("--limit", default=10, show_default=True, type=click.IntRange(min=1, max=50),
+              help="Number of tasks to show.")
+@click.option("--compact", is_flag=True, help="Compact output.")
+@click.option("--json", "json_output", is_flag=True, help="Print structured JSON.")
+@click.pass_context
+def task_top(ctx: click.Context, owner: str | None, epic_ref: str | None, project_ref: str | None,
+              sort_by: str, limit: int, compact: bool, json_output: bool) -> None:
+    """Show top tasks sorted by priority, due date, or creation date."""
+    root = find_repo_root(_cwd_from_context(ctx))
+    all_tasks = list_tasks(root, epic_ref=epic_ref, project_ref=project_ref, owner=owner)
+    active_tasks = [t for t in all_tasks if t.get("status") not in ("done", "wontfix")]
+
+    if sort_by == "priority":
+        pri_order = {"critical": 0, "high": 1, "medium": 2, "low": 3, "unspecified": 4}
+        active_tasks.sort(key=lambda t: (pri_order.get(t.get("priority", "unspecified"), 4),
+                                          t.get("due", "9999-99-99")))
+    elif sort_by == "due":
+        active_tasks.sort(key=lambda t: (t.get("due") or "9999-99-99",
+                                          {"critical": 0, "high": 1, "medium": 2, "low": 3}.get(t.get("priority", "medium"), 4)))
+    else:  # created
+        active_tasks.sort(key=lambda t: t.get("created", ""), reverse=True)
+
+    top_tasks = active_tasks[:limit]
+
+    if json_output:
+        clean = [{k: v for k, v in t.items() if not k.startswith("_")} for t in top_tasks]
+        click.echo(json.dumps({"sort_by": sort_by, "total": len(clean), "results": clean},
+                              ensure_ascii=False, indent=2, default=str))
+        return
+
+    if not top_tasks:
+        click.echo("✅ No active tasks!")
+        return
+
+    lines = []
+    sort_label = {"priority": "by priority", "due": "by due date", "created": "by creation date"}[sort_by]
+    lines.append(f"🏆 Top {len(top_tasks)} Tasks ({sort_label})")
+    lines.append("")
+
+    for i, t in enumerate(top_tasks, 1):
+        status_icon = {"done": "✅", "in_progress": "🔧", "blocked": "🚧",
+                      "ready": "⏳", "created": "📝"}.get(t.get("status", ""), "❓")
+        task_id = t.get("id", "")
+        title = t.get("title", "")
+        owner = f" @{t.get('owner', '')}" if t.get("owner") else ""
+        due = f" due:{t.get('due', '')}" if t.get("due") else ""
+        pri = f" [{t.get('priority', '').upper()}]" if t.get("priority") else ""
+        created = f" created:{t.get('created', '')}" if t.get("created") else ""
+
+        if compact:
+            lines.append(f"  {i:2d}. {status_icon} {task_id}{pri}{owner}{due}  {title}")
+        else:
+            lines.append(f"  {i:2d}. {status_icon} {task_id}{pri}{owner}{due}{created}")
+            lines.append(f"       {title}")
+            lines.append("")
+
+    click.echo("\n".join(lines))
+
+
+@task_group.command("stale")
+@click.option("--owner", default=None, help="Filter by owner.")
+@click.option("--epic", "epic_ref", default=None, help="Filter by epic.")
+@click.option("--project", "project_ref", default=None, help="Filter by project.")
+@click.option("--days", default=30, show_default=True, type=click.IntRange(min=7, max=365),
+              help="Tasks created more than N days ago without being done.")
+@click.option("--compact", is_flag=True, help="Compact output.")
+@click.option("--json", "json_output", is_flag=True, help="Print structured JSON.")
+@click.pass_context
+def task_stale(ctx: click.Context, owner: str | None, epic_ref: str | None, project_ref: str | None,
+                days: int, compact: bool, json_output: bool) -> None:
+    """Find stale tasks that haven't been completed in a while."""
+    from datetime import date, timedelta
+
+    root = find_repo_root(_cwd_from_context(ctx))
+    today = date.today()
+    cutoff = (today - timedelta(days=days)).isoformat()
+
+    all_tasks = list_tasks(root, epic_ref=epic_ref, project_ref=project_ref, owner=owner)
+    stale = [t for t in all_tasks
+             if t.get("status") not in ("done", "wontfix")
+             and t.get("created") and t["created"] < cutoff]
+
+    stale.sort(key=lambda t: t.get("created", ""))
+
+    if json_output:
+        clean = [{k: v for k, v in t.items() if not k.startswith("_")} for t in stale]
+        click.echo(json.dumps({"cutoff_days": days, "total": len(clean), "results": clean},
+                              ensure_ascii=False, indent=2, default=str))
+        return
+
+    if not stale:
+        click.echo(f"✅ No stale tasks (>{days} days old).")
+        return
+
+    lines = []
+    lines.append(f"🗑️  Stale Tasks (>{days} days old, {len(stale)} found)")
+    lines.append("")
+
+    for t in stale:
+        created = t.get("created", "")
+        age_days = (today - date.fromisoformat(created)).days if created else 0
+        status_icon = {"done": "✅", "in_progress": "🔧", "blocked": "🚧",
+                      "ready": "⏳", "created": "📝"}.get(t.get("status", ""), "❓")
+        task_id = t.get("id", "")
+        title = t.get("title", "")
+        owner = f" @{t.get('owner', '')}" if t.get("owner") else ""
+
+        if compact:
+            lines.append(f"  {status_icon} {task_id}{owner} ({age_days}d)  {title}")
+        else:
+            lines.append(f"  {status_icon} {task_id}{owner}")
+            lines.append(f"     {title}")
+            lines.append(f"     Created: {created} ({age_days} days ago)")
+            lines.append("")
+
+    lines.append(f"💡 Consider closing or reprioritizing these tasks.")
+
+    click.echo("\n".join(lines))
+
+
+@task_group.command("random")
+@click.option("--owner", default=None, help="Filter by owner.")
+@click.option("--epic", "epic_ref", default=None, help="Filter by epic.")
+@click.option("--project", "project_ref", default=None, help="Filter by project.")
+@click.option("--ready-only", is_flag=True, help="Only pick from ready tasks (deps met).")
+@click.option("--json", "json_output", is_flag=True, help="Print structured JSON.")
+@click.pass_context
+def task_random(ctx: click.Context, owner: str | None, epic_ref: str | None, project_ref: str | None,
+                 ready_only: bool, json_output: bool) -> None:
+    """Pick a random task to work on (for when you can't decide)."""
+    import random
+    from datetime import date
+
+    root = find_repo_root(_cwd_from_context(ctx))
+    all_tasks = list_tasks(root, epic_ref=epic_ref, project_ref=project_ref, owner=owner)
+    active_tasks = [t for t in all_tasks if t.get("status") not in ("done", "wontfix")]
+
+    if ready_only:
+        task_map = {t.get("id", ""): t for t in all_tasks}
+        ready = []
+        for t in active_tasks:
+            if t.get("status") in ("ready", "created"):
+                deps = t.get("depends_on") or []
+                all_deps_done = True
+                for dep_id in deps:
+                    resolved = dep_id
+                    for dep_tid in task_map:
+                        if dep_tid.endswith(dep_id) or dep_id in dep_tid:
+                            resolved = dep_tid
+                            break
+                    dep_task = task_map.get(resolved)
+                    if dep_task and dep_task.get("status") not in ("done", "wontfix"):
+                        all_deps_done = False
+                        break
+                if all_deps_done:
+                    ready.append(t)
+        candidates = ready
+    else:
+        candidates = active_tasks
+
+    if not candidates:
+        click.echo("🎲 No tasks to pick from!")
+        return
+
+    # Weight by priority (higher priority = more likely)
+    weights = []
+    for t in candidates:
+        pri = t.get("priority", "medium")
+        weight = {"critical": 5, "high": 3, "medium": 2, "low": 1, "unspecified": 2}.get(pri, 2)
+        weights.append(weight)
+
+    chosen = random.choices(candidates, weights=weights, k=1)[0]
+
+    if json_output:
+        clean = {k: v for k, v in chosen.items() if not k.startswith("_")}
+        click.echo(json.dumps(clean, ensure_ascii=False, indent=2, default=str))
+        return
+
+    status_icon = {"done": "✅", "in_progress": "🔧", "blocked": "🚧",
+                  "ready": "⏳", "created": "📝"}.get(chosen.get("status", ""), "❓")
+    task_id = chosen.get("id", "")
+    title = chosen.get("title", "")
+    owner_str = f" @{chosen.get('owner', '')}" if chosen.get("owner") else ""
+    due = f" due:{chosen.get('due', '')}" if chosen.get("due") else ""
+    pri = f" [{chosen.get('priority', '').upper()}]" if chosen.get("priority") else ""
+
+    lines = []
+    lines.append(f"🎲 Random pick!")
+    lines.append("")
+    lines.append(f"  {status_icon} {task_id}{pri}{owner_str}{due}")
+    lines.append(f"     {title}")
+    lines.append("")
+    lines.append(f"  💡 Start working on this! Use 'task start {task_id}' to begin.")
+
+    click.echo("\n".join(lines))
+
+
+@task_group.command("complete-deliverable")
+@click.argument("task_ref")
+@click.option("--item", required=True, help="Deliverable item to complete.")
+@click.option("--actor", required=True)
+@click.option("--note", default=None)
+@click.pass_context
+def task_complete_deliverable(ctx: click.Context, task_ref: str, item: str, actor: str,
+                               note: str | None) -> None:
+    """Mark a specific deliverable item as completed."""
+    root = find_repo_root(_cwd_from_context(ctx))
+    touched = complete_task_deliverable(root, task_ref=task_ref, item=item, actor=actor)
+    _echo_touched(root, [touched])
+
+
+@task_group.command("add-deliverable")
+@click.argument("task_ref")
+@click.option("--item", required=True, help="Deliverable item to add.")
+@click.option("--actor", required=True)
+@click.option("--note", default=None)
+@click.pass_context
+def task_add_deliverable(ctx: click.Context, task_ref: str, item: str, actor: str,
+                          note: str | None) -> None:
+    """Add a deliverable item to a task."""
+    root = find_repo_root(_cwd_from_context(ctx))
+    touched = add_task_deliverable(root, task_ref=task_ref, item=item, actor=actor)
+    _echo_touched(root, [touched])
+
+
+@task_group.command("add-tag")
+@click.argument("task_ref")
+@click.argument("tag")
+@click.option("--actor", required=True)
+@click.option("--note", default=None)
+@click.pass_context
+def task_add_tag(ctx: click.Context, task_ref: str, tag: str, actor: str, note: str | None) -> None:
+    """Add a tag to a task (alias for task tag add)."""
+    from trailmind.resolver import resolve_entity
+    from trailmind.log import read_entity_user_facing
+    from trailmind.entity_io import write_entity
+
+    root = find_repo_root(_cwd_from_context(ctx))
+    path = resolve_entity(root, raw=task_ref, entity="T")
+    fm, body = read_entity_user_facing(path, label="task")
+    tags = list(fm.get("tags") or [])
+    if tag not in tags:
+        tags.append(tag)
+        fm["tags"] = tags
+        write_entity(path, frontmatter=fm, body=body)
+        _echo_touched(root, [path])
+    else:
+        click.echo(f"Tag {tag!r} already on task.")
+
+
+@task_group.command("remove-tag")
+@click.argument("task_ref")
+@click.argument("tag")
+@click.option("--actor", required=True)
+@click.option("--note", default=None)
+@click.pass_context
+def task_remove_tag(ctx: click.Context, task_ref: str, tag: str, actor: str, note: str | None) -> None:
+    """Remove a tag from a task (alias for task tag remove)."""
+    from trailmind.resolver import resolve_entity
+    from trailmind.log import read_entity_user_facing
+    from trailmind.entity_io import write_entity
+
+    root = find_repo_root(_cwd_from_context(ctx))
+    path = resolve_entity(root, raw=task_ref, entity="T")
+    fm, body = read_entity_user_facing(path, label="task")
+    tags = list(fm.get("tags") or [])
+    if tag in tags:
+        tags.remove(tag)
+        fm["tags"] = tags
+        write_entity(path, frontmatter=fm, body=body)
+        _echo_touched(root, [path])
+    else:
+        click.echo(f"Tag {tag!r} not found on task.")
+
+
 @task_group.command("edit")
 @click.argument("task_ref")
 @click.option("--title", default=None, help="New task title.")
