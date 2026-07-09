@@ -3044,6 +3044,138 @@ def inbox_bulk_add(
         click.echo(f"\nCreated {len(touched)}/{len(specs)} inbox items.")
 
 
+@inbox_group.command("search")
+@click.argument("query")
+@click.option("--project", "project_slug", default=None)
+@click.option("--epic", "epic_ref", default=None)
+@click.option("--status", default=None, type=click.Choice(("open", "resolved"), case_sensitive=False),
+              help="Filter by inbox item status.")
+@click.option("--case-sensitive", is_flag=True, help="Case-sensitive search.")
+@click.option("--compact", is_flag=True, help="Compact single-line output.")
+@click.option("--limit", default=20, show_default=True, type=click.IntRange(min=1, max=100),
+              help="Maximum results to show.")
+@click.option("--json", "json_output", is_flag=True, help="Print structured JSON.")
+@click.pass_context
+def inbox_search(ctx: click.Context, query: str, project_slug: str | None, epic_ref: str | None,
+                 status: str | None, case_sensitive: bool, compact: bool, limit: int,
+                 json_output: bool) -> None:
+    """Search inbox items by title or note."""
+    root = find_repo_root(_cwd_from_context(ctx))
+    all_items = list_inbox_items(root, project=project_slug, epic=epic_ref, status=status)
+
+    needle = query if case_sensitive else query.lower()
+    results = []
+    for item in all_items:
+        haystack = f"{item.title} {item.note}"
+        if not case_sensitive:
+            haystack = haystack.lower()
+        if needle in haystack:
+            # Score
+            title_lower = item.title if case_sensitive else item.title.lower()
+            if needle == title_lower:
+                score = 100
+            elif needle in title_lower:
+                score = 80
+            else:
+                score = 50
+            results.append((score, item))
+
+    results.sort(key=lambda x: -x[0])
+    results = results[:limit]
+
+    if json_output:
+        data = [{
+            "id": item.item_id,
+            "title": item.title,
+            "note": item.note,
+            "status": item.status,
+            "created": item.created,
+            "score": score,
+        } for score, item in results]
+        click.echo(json.dumps({"query": query, "total": len(data), "results": data},
+                              ensure_ascii=False, indent=2, default=str))
+        return
+
+    if not results:
+        click.echo(f"No inbox items found matching {query!r}.")
+        return
+
+    lines = []
+    lines.append(f"🔍 Inbox Search: {query!r} ({len(results)} results)")
+    lines.append("")
+
+    for score, item in results:
+        status_icon = "📥" if item.status == "open" else "✅"
+        if compact:
+            lines.append(f"  {status_icon} {item.item_id}  {item.title}")
+        else:
+            score_bar = "█" * (score // 10) + "░" * (10 - score // 10)
+            lines.append(f"  {status_icon} {item.item_id} ({item.status})")
+            lines.append(f"     {item.title}")
+            lines.append(f"     {item.note}")
+            lines.append(f"     Relevance: [{score_bar}] {score}")
+            lines.append("")
+
+    click.echo("\n".join(lines))
+
+
+@inbox_group.command("recent")
+@click.option("--project", "project_slug", default=None)
+@click.option("--epic", "epic_ref", default=None)
+@click.option("--days", default=7, show_default=True, type=click.IntRange(min=1, max=90),
+              help="Show items created in the last N days.")
+@click.option("--compact", is_flag=True, help="Compact single-line output.")
+@click.option("--limit", default=20, show_default=True, type=click.IntRange(min=1, max=100),
+              help="Maximum results to show.")
+@click.option("--json", "json_output", is_flag=True, help="Print structured JSON.")
+@click.pass_context
+def inbox_recent(ctx: click.Context, project_slug: str | None, epic_ref: str | None,
+                 days: int, compact: bool, limit: int, json_output: bool) -> None:
+    """Show inbox items created recently."""
+    from datetime import date, timedelta
+
+    root = find_repo_root(_cwd_from_context(ctx))
+    today = date.today()
+    cutoff = (today - timedelta(days=days)).isoformat()
+
+    all_items = list_inbox_items(root, project=project_slug, epic=epic_ref)
+    recent = [i for i in all_items if i.created and i.created >= cutoff]
+    recent.sort(key=lambda i: i.created or "", reverse=True)
+    recent = recent[:limit]
+
+    if json_output:
+        data = [{
+            "id": item.item_id,
+            "title": item.title,
+            "note": item.note,
+            "status": item.status,
+            "created": item.created,
+        } for item in recent]
+        click.echo(json.dumps({"days": days, "total": len(data), "results": data},
+                              ensure_ascii=False, indent=2, default=str))
+        return
+
+    if not recent:
+        click.echo(f"No inbox items created in the last {days} day(s).")
+        return
+
+    lines = []
+    lines.append(f"🆕 Recent Inbox (last {days} days, {len(recent)} found)")
+    lines.append("")
+
+    for item in recent:
+        status_icon = "📥" if item.status == "open" else "✅"
+        if compact:
+            lines.append(f"  {item.created}  {status_icon} {item.item_id}  {item.title}")
+        else:
+            lines.append(f"  {item.created}  {status_icon} {item.item_id} ({item.status})")
+            lines.append(f"     {item.title}")
+            lines.append(f"     {item.note}")
+            lines.append("")
+
+    click.echo("\n".join(lines))
+
+
 @inbox_group.command("list")
 @click.option("--project", "project_slug", default=None)
 @click.option("--epic", "epic_ref", default=None)
@@ -7746,6 +7878,183 @@ def task_progress_report(ctx: click.Context, epic_ref: str | None, project_ref: 
     click.echo("\n".join(lines))
 
 
+@task_group.command("search")
+@click.argument("query")
+@click.option("--epic", "epic_ref", default=None, help="Search within a specific epic.")
+@click.option("--project", "project_ref", default=None, help="Search within a specific project.")
+@click.option("--owner", default=None, help="Filter by owner.")
+@click.option("--status", default=None, type=click.Choice(TASK_STATUSES, case_sensitive=False),
+              help="Filter by task status.")
+@click.option("--in-title/--in-all", default=True,
+              help="Search in title only (default) or all fields.")
+@click.option("--case-sensitive", is_flag=True, help="Case-sensitive search.")
+@click.option("--compact", is_flag=True, help="Compact single-line output.")
+@click.option("--limit", default=20, show_default=True, type=click.IntRange(min=1, max=100),
+              help="Maximum results to show.")
+@click.option("--json", "json_output", is_flag=True, help="Print structured JSON.")
+@click.pass_context
+def task_search(ctx: click.Context, query: str, epic_ref: str | None, project_ref: str | None,
+                owner: str | None, status: str | None, in_title: bool, case_sensitive: bool,
+                compact: bool, limit: int, json_output: bool) -> None:
+    """Search tasks by title, body, or metadata."""
+    root = find_repo_root(_cwd_from_context(ctx))
+    all_tasks = list_tasks(root, epic_ref=epic_ref, project_ref=project_ref, owner=owner)
+
+    # Apply status filter
+    if status:
+        all_tasks = [t for t in all_tasks if t.get("status", "").lower() == status.lower()]
+
+    # Search
+    needle = query if case_sensitive else query.lower()
+    results = []
+    for t in all_tasks:
+        if in_title:
+            haystack = t.get("title", "")
+            if not case_sensitive:
+                haystack = haystack.lower()
+        else:
+            # Search in all text fields
+            haystack_parts = [t.get("title", ""), t.get("body", ""),
+                              t.get("id", ""), t.get("path", "")]
+            # Include tags
+            for tag in (t.get("tags") or []):
+                haystack_parts.append(str(tag))
+            # Include deliverables
+            for d in (t.get("deliverables") or []):
+                haystack_parts.append(str(d))
+            haystack = " ".join(haystack_parts)
+            if not case_sensitive:
+                haystack = haystack.lower()
+
+        if needle in haystack:
+            # Calculate relevance score
+            title = t.get("title", "")
+            title_lower = title.lower()
+            score = 0
+            if needle == (title if case_sensitive else title_lower):
+                score = 100  # Exact title match
+            elif needle in (title if case_sensitive else title_lower):
+                score = 80  # Title contains
+            elif needle in (t.get("id", "") if case_sensitive else t.get("id", "").lower()):
+                score = 90  # ID match
+            else:
+                score = 50  # Body match
+            results.append((score, t))
+
+    # Sort by score descending
+    results.sort(key=lambda x: -x[0])
+    results = results[:limit]
+
+    if json_output:
+        data = [{
+            "id": t.get("id", ""),
+            "title": t.get("title", ""),
+            "status": t.get("status", ""),
+            "owner": t.get("owner", ""),
+            "priority": t.get("priority", ""),
+            "due": t.get("due", ""),
+            "path": t.get("path", ""),
+            "score": score,
+        } for score, t in results]
+        click.echo(json.dumps({"query": query, "total": len(data), "results": data},
+                              ensure_ascii=False, indent=2, default=str))
+        return
+
+    if not results:
+        click.echo(f"No tasks found matching {query!r}.")
+        return
+
+    lines = []
+    lines.append(f"🔍 Search: {query!r} ({len(results)} results)")
+    lines.append("")
+
+    for score, t in results:
+        task_id = t.get("id", "")
+        title = t.get("title", "")
+        status = t.get("status", "")
+        owner = f" @{t.get('owner', '')}" if t.get("owner") else ""
+        due = f" due:{t.get('due', '')}" if t.get("due") else ""
+        pri = f" [{t.get('priority', '').upper()}]" if t.get("priority") else ""
+
+        if compact:
+            lines.append(f"  {task_id}{pri}{owner}{due}  {title}")
+        else:
+            status_icon = {"done": "✅", "in_progress": "🔧", "blocked": "🚧",
+                          "ready": "⏳", "created": "📝"}.get(status, "❓")
+            score_bar = "█" * (score // 10) + "░" * (10 - score // 10)
+            lines.append(f"  {status_icon} {task_id}{pri}{owner}{due}")
+            lines.append(f"     {title}")
+            lines.append(f"     Relevance: [{score_bar}] {score}")
+            lines.append("")
+
+    click.echo("\n".join(lines))
+
+
+@task_group.command("recent")
+@click.option("--epic", "epic_ref", default=None, help="Filter by epic.")
+@click.option("--project", "project_ref", default=None, help="Filter by project.")
+@click.option("--owner", default=None, help="Filter by owner.")
+@click.option("--days", default=7, show_default=True, type=click.IntRange(min=1, max=90),
+              help="Show tasks created in the last N days.")
+@click.option("--compact", is_flag=True, help="Compact single-line output.")
+@click.option("--limit", default=20, show_default=True, type=click.IntRange(min=1, max=100),
+              help="Maximum results to show.")
+@click.option("--json", "json_output", is_flag=True, help="Print structured JSON.")
+@click.pass_context
+def task_recent(ctx: click.Context, epic_ref: str | None, project_ref: str | None,
+                owner: str | None, days: int, compact: bool, limit: int, json_output: bool) -> None:
+    """Show tasks created recently."""
+    from datetime import date, timedelta
+
+    root = find_repo_root(_cwd_from_context(ctx))
+    today = date.today()
+    cutoff = (today - timedelta(days=days)).isoformat()
+
+    all_tasks = list_tasks(root, epic_ref=epic_ref, project_ref=project_ref, owner=owner)
+    recent = [t for t in all_tasks if t.get("created") and t["created"] >= cutoff]
+    recent.sort(key=lambda t: t.get("created", ""), reverse=True)
+    recent = recent[:limit]
+
+    if json_output:
+        data = [{
+            "id": t.get("id", ""),
+            "title": t.get("title", ""),
+            "created": t.get("created", ""),
+            "status": t.get("status", ""),
+            "owner": t.get("owner", ""),
+            "priority": t.get("priority", ""),
+        } for t in recent]
+        click.echo(json.dumps({"days": days, "total": len(data), "results": data},
+                              ensure_ascii=False, indent=2, default=str))
+        return
+
+    if not recent:
+        click.echo(f"No tasks created in the last {days} day(s).")
+        return
+
+    lines = []
+    lines.append(f"🆕 Recent Tasks (last {days} days, {len(recent)} found)")
+    lines.append("")
+
+    for t in recent:
+        task_id = t.get("id", "")
+        title = t.get("title", "")
+        created = t.get("created", "")
+        status_icon = {"done": "✅", "in_progress": "🔧", "blocked": "🚧",
+                      "ready": "⏳", "created": "📝"}.get(t.get("status", ""), "❓")
+        owner = f" @{t.get('owner', '')}" if t.get("owner") else ""
+        pri = f" [{t.get('priority', '').upper()}]" if t.get("priority") else ""
+
+        if compact:
+            lines.append(f"  {created}  {status_icon} {task_id}{pri}{owner}  {title}")
+        else:
+            lines.append(f"  {created}  {status_icon} {task_id}{pri}{owner}")
+            lines.append(f"     {title}")
+            lines.append("")
+
+    click.echo("\n".join(lines))
+
+
 @task_group.command("edit")
 @click.argument("task_ref")
 @click.option("--title", default=None, help="New task title.")
@@ -10416,6 +10725,175 @@ def issue_bulk_unassign(
             click.echo(f"  ⚠ {issue_ref}: {exc}", err=True)
     if touched:
         _echo_touched(root, touched)
+
+
+@issue_group.command("search")
+@click.argument("query")
+@click.option("--epic", "epic_ref", default=None, help="Search within a specific epic.")
+@click.option("--project", "project_ref", default=None, help="Search within a specific project.")
+@click.option("--owner", default=None, help="Filter by owner.")
+@click.option("--status", default=None, type=click.Choice(("open", "done", "wontfix"), case_sensitive=False),
+              help="Filter by issue status.")
+@click.option("--severity", default=None, type=click.Choice(ISSUE_SEVERITIES, case_sensitive=False),
+              help="Filter by severity.")
+@click.option("--in-title/--in-all", default=True,
+              help="Search in title only (default) or all fields.")
+@click.option("--case-sensitive", is_flag=True, help="Case-sensitive search.")
+@click.option("--compact", is_flag=True, help="Compact single-line output.")
+@click.option("--limit", default=20, show_default=True, type=click.IntRange(min=1, max=100),
+              help="Maximum results to show.")
+@click.option("--json", "json_output", is_flag=True, help="Print structured JSON.")
+@click.pass_context
+def issue_search(ctx: click.Context, query: str, epic_ref: str | None, project_ref: str | None,
+                 owner: str | None, status: str | None, severity: str | None, in_title: bool,
+                 case_sensitive: bool, compact: bool, limit: int, json_output: bool) -> None:
+    """Search issues by title, description, or metadata."""
+    root = find_repo_root(_cwd_from_context(ctx))
+    all_issues = list_issues(root, epic_ref=epic_ref, project_ref=project_ref, owner=owner)
+
+    # Apply filters
+    if status:
+        all_issues = [i for i in all_issues if i.get("status", "").lower() == status.lower()]
+    if severity:
+        all_issues = [i for i in all_issues if i.get("severity", "").lower() == severity.lower()]
+
+    # Search
+    needle = query if case_sensitive else query.lower()
+    results = []
+    for i in all_issues:
+        if in_title:
+            haystack = i.get("title", "")
+            if not case_sensitive:
+                haystack = haystack.lower()
+        else:
+            haystack_parts = [i.get("title", ""), i.get("body", ""),
+                              i.get("id", ""), i.get("path", ""),
+                              i.get("description", "")]
+            haystack = " ".join(haystack_parts)
+            if not case_sensitive:
+                haystack = haystack.lower()
+
+        if needle in haystack:
+            title = i.get("title", "")
+            title_lower = title.lower()
+            score = 0
+            if needle == (title if case_sensitive else title_lower):
+                score = 100
+            elif needle in (title if case_sensitive else title_lower):
+                score = 80
+            elif needle in (i.get("id", "") if case_sensitive else i.get("id", "").lower()):
+                score = 90
+            else:
+                score = 50
+            results.append((score, i))
+
+    results.sort(key=lambda x: -x[0])
+    results = results[:limit]
+
+    if json_output:
+        data = [{
+            "id": i.get("id", ""),
+            "title": i.get("title", ""),
+            "status": i.get("status", ""),
+            "severity": i.get("severity", ""),
+            "owner": i.get("owner", ""),
+            "score": score,
+        } for score, i in results]
+        click.echo(json.dumps({"query": query, "total": len(data), "results": data},
+                              ensure_ascii=False, indent=2, default=str))
+        return
+
+    if not results:
+        click.echo(f"No issues found matching {query!r}.")
+        return
+
+    lines = []
+    lines.append(f"🔍 Issue Search: {query!r} ({len(results)} results)")
+    lines.append("")
+
+    for score, i in results:
+        issue_id = i.get("id", "")
+        title = i.get("title", "")
+        status = i.get("status", "")
+        sev = i.get("severity", "")
+        owner = f" @{i.get('owner', '')}" if i.get("owner") else ""
+
+        if compact:
+            sev_icon = {"critical": "🔴", "high": "🟠", "medium": "🟡", "low": "🟢"}.get(sev, "❓")
+            lines.append(f"  {sev_icon} {issue_id}{owner}  {title}")
+        else:
+            sev_icon = {"critical": "🔴", "high": "🟠", "medium": "🟡", "low": "🟢"}.get(sev, "❓")
+            score_bar = "█" * (score // 10) + "░" * (10 - score // 10)
+            lines.append(f"  {sev_icon} {issue_id} [{sev.upper()}]{owner}")
+            lines.append(f"     {title}")
+            lines.append(f"     Relevance: [{score_bar}] {score}")
+            lines.append("")
+
+    click.echo("\n".join(lines))
+
+
+@issue_group.command("recent")
+@click.option("--epic", "epic_ref", default=None, help="Filter by epic.")
+@click.option("--project", "project_ref", default=None, help="Filter by project.")
+@click.option("--owner", default=None, help="Filter by owner.")
+@click.option("--days", default=7, show_default=True, type=click.IntRange(min=1, max=90),
+              help="Show issues created in the last N days.")
+@click.option("--compact", is_flag=True, help="Compact single-line output.")
+@click.option("--limit", default=20, show_default=True, type=click.IntRange(min=1, max=100),
+              help="Maximum results to show.")
+@click.option("--json", "json_output", is_flag=True, help="Print structured JSON.")
+@click.pass_context
+def issue_recent(ctx: click.Context, epic_ref: str | None, project_ref: str | None,
+                 owner: str | None, days: int, compact: bool, limit: int, json_output: bool) -> None:
+    """Show issues created recently."""
+    from datetime import date, timedelta
+
+    root = find_repo_root(_cwd_from_context(ctx))
+    today = date.today()
+    cutoff = (today - timedelta(days=days)).isoformat()
+
+    all_issues = list_issues(root, epic_ref=epic_ref, project_ref=project_ref, owner=owner)
+    recent = [i for i in all_issues if i.get("created") and i["created"] >= cutoff]
+    recent.sort(key=lambda i: i.get("created", ""), reverse=True)
+    recent = recent[:limit]
+
+    if json_output:
+        data = [{
+            "id": i.get("id", ""),
+            "title": i.get("title", ""),
+            "created": i.get("created", ""),
+            "status": i.get("status", ""),
+            "severity": i.get("severity", ""),
+            "owner": i.get("owner", ""),
+        } for i in recent]
+        click.echo(json.dumps({"days": days, "total": len(data), "results": data},
+                              ensure_ascii=False, indent=2, default=str))
+        return
+
+    if not recent:
+        click.echo(f"No issues created in the last {days} day(s).")
+        return
+
+    lines = []
+    lines.append(f"🆕 Recent Issues (last {days} days, {len(recent)} found)")
+    lines.append("")
+
+    for i in recent:
+        issue_id = i.get("id", "")
+        title = i.get("title", "")
+        created = i.get("created", "")
+        sev = i.get("severity", "")
+        sev_icon = {"critical": "🔴", "high": "🟠", "medium": "🟡", "low": "🟢"}.get(sev, "❓")
+        owner = f" @{i.get('owner', '')}" if i.get("owner") else ""
+
+        if compact:
+            lines.append(f"  {created}  {sev_icon} {issue_id}{owner}  {title}")
+        else:
+            lines.append(f"  {created}  {sev_icon} {issue_id} [{sev.upper()}]{owner}")
+            lines.append(f"     {title}")
+            lines.append("")
+
+    click.echo("\n".join(lines))
 
 
 @issue_group.command("edit")
