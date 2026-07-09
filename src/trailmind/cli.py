@@ -9488,6 +9488,87 @@ def task_remove_tag(ctx: click.Context, task_ref: str, tag: str, actor: str, not
         click.echo(f"Tag {tag!r} not found on task.")
 
 
+@task_group.command("link-issue")
+@click.argument("task_ref")
+@click.argument("issue_ref")
+@click.option("--actor", required=True)
+@click.option("--note", default=None)
+@click.pass_context
+def task_link_issue(ctx: click.Context, task_ref: str, issue_ref: str, actor: str,
+                     note: str | None) -> None:
+    """Link a task to an issue (bidirectional)."""
+    root = find_repo_root(_cwd_from_context(ctx))
+    touched = link_issue(root, raw_issue=issue_ref, raw_task=task_ref)
+    _echo_touched(root, touched)
+
+
+@task_group.command("unlink-issue")
+@click.argument("task_ref")
+@click.argument("issue_ref")
+@click.option("--actor", required=True)
+@click.option("--note", default=None)
+@click.pass_context
+def task_unlink_issue(ctx: click.Context, task_ref: str, issue_ref: str, actor: str,
+                       note: str | None) -> None:
+    """Unlink a task from an issue."""
+    from trailmind.resolver import resolve_entity
+    from trailmind.log import read_entity_user_facing
+    from trailmind.entity_io import write_entity
+
+    root = find_repo_root(_cwd_from_context(ctx))
+
+    # Remove from task's known_issues
+    task_path = resolve_entity(root, raw=task_ref, entity="T")
+    task_fm, task_body = read_entity_user_facing(task_path, label="task")
+    known_issues = list(task_fm.get("known_issues") or [])
+    if issue_ref in known_issues:
+        known_issues.remove(issue_ref)
+        task_fm["known_issues"] = known_issues
+        write_entity(task_path, frontmatter=task_fm, body=task_body)
+
+    # Remove from issue's linked_tasks
+    issue_path = resolve_entity(root, raw=issue_ref, entity="I")
+    issue_fm, issue_body = read_entity_user_facing(issue_path, label="issue")
+    linked_tasks = list(issue_fm.get("linked_tasks") or [])
+    if task_ref in linked_tasks:
+        linked_tasks.remove(task_ref)
+        issue_fm["linked_tasks"] = linked_tasks
+        write_entity(issue_path, frontmatter=issue_fm, body=issue_body)
+
+    _echo_touched(root, [task_path, issue_path])
+
+
+@task_group.command("copy-to")
+@click.argument("task_ref")
+@click.argument("target_epic")
+@click.option("--actor", required=True)
+@click.option("--title", default=None, help="New title (defaults to original).")
+@click.option("--owner", default=None, help="New owner (defaults to original).")
+@click.option("--note", default=None)
+@click.pass_context
+def task_copy_to(ctx: click.Context, task_ref: str, target_epic: str, actor: str,
+                  title: str | None, owner: str | None, note: str | None) -> None:
+    """Copy a task to another epic."""
+    root = find_repo_root(_cwd_from_context(ctx))
+    touched = clone_task(root, task_ref=task_ref, actor=actor, title=title,
+                          owner=owner, target_epic=target_epic, note=note)
+    _echo_touched(root, [touched])
+
+
+@task_group.command("move-to")
+@click.argument("task_ref")
+@click.argument("target_epic")
+@click.option("--actor", required=True)
+@click.option("--note", default=None)
+@click.pass_context
+def task_move_to(ctx: click.Context, task_ref: str, target_epic: str, actor: str,
+                  note: str | None) -> None:
+    """Move a task to another epic (alias for task move)."""
+    root = find_repo_root(_cwd_from_context(ctx))
+    touched = move_task(root, task_ref=task_ref, target_epic=target_epic, actor=actor, note=note)
+    _echo_touched(root, [touched])
+
+
 @task_group.command("due-today")
 @click.option("--owner", default=None, help="Filter by owner.")
 @click.option("--epic", "epic_ref", default=None, help="Filter by epic.")
@@ -9658,6 +9739,313 @@ def task_overdue(ctx: click.Context, owner: str | None, epic_ref: str | None, pr
             lines.append(f"     {title}")
             lines.append(f"     Due: {due} ({days_overdue} days overdue)")
             lines.append("")
+
+    click.echo("\n".join(lines))
+
+
+@task_group.command("check")
+@click.argument("task_ref")
+@click.option("--json", "json_output", is_flag=True, help="Print structured JSON.")
+@click.pass_context
+def task_check(ctx: click.Context, task_ref: str, json_output: bool) -> None:
+    """Check task completion status: deliverables, dependencies, readiness."""
+    from trailmind.resolver import resolve_entity
+    from trailmind.log import read_entity_user_facing
+
+    root = find_repo_root(_cwd_from_context(ctx))
+    path = resolve_entity(root, raw=task_ref, entity="T")
+    fm, _body = read_entity_user_facing(path, label="task")
+
+    task_id = fm.get("id", "")
+    title = fm.get("title", "")
+    status = fm.get("status", "")
+    deliverables = fm.get("deliverables") or []
+    deps = fm.get("depends_on") or []
+    soft_deps = fm.get("soft_depends_on") or []
+    known_issues = fm.get("known_issues") or []
+    owner = fm.get("owner", "")
+    due = fm.get("due", "")
+
+    # Check deliverables completion
+    completed_deliverables = 0
+    for d in deliverables:
+        d_str = str(d).lower()
+        if d_str.startswith("[x]") or d_str.endswith("(done)") or d_str.endswith("(completed)"):
+            completed_deliverables += 1
+    deliverables_done = completed_deliverables == len(deliverables) if deliverables else True
+
+    # Check dependencies
+    all_tasks = list_tasks(root)
+    task_map = {t.get("id", ""): t for t in all_tasks}
+    deps_done = True
+    incomplete_deps = []
+    for dep_id in deps:
+        resolved = dep_id
+        for tid in task_map:
+            if tid.endswith(dep_id) or dep_id in tid:
+                resolved = tid
+                break
+        dep_task = task_map.get(resolved)
+        if dep_task and dep_task.get("status") not in ("done", "wontfix"):
+            deps_done = False
+            incomplete_deps.append(resolved)
+
+    # Check readiness
+    is_ready = status in ("ready", "created") and deps_done
+    is_complete = status == "done"
+    is_blocked = status == "blocked" or (not deps_done and status in ("ready", "created"))
+
+    # Overall assessment
+    if is_complete:
+        assessment = "✅ COMPLETE"
+    elif is_blocked:
+        assessment = "🚧 BLOCKED"
+    elif status == "in_progress":
+        assessment = "🔧 IN PROGRESS"
+    elif is_ready:
+        assessment = "⏳ READY TO START"
+    else:
+        assessment = "❓ UNKNOWN"
+
+    if json_output:
+        data = {
+            "id": task_id,
+            "title": title,
+            "status": status,
+            "assessment": assessment,
+            "deliverables": {
+                "total": len(deliverables),
+                "completed": completed_deliverables,
+                "all_done": deliverables_done,
+            },
+            "dependencies": {
+                "total": len(deps),
+                "incomplete": incomplete_deps,
+                "all_done": deps_done,
+            },
+            "soft_dependencies": len(soft_deps),
+            "known_issues": len(known_issues),
+            "owner": owner,
+            "due": due,
+            "is_ready": is_ready,
+            "is_blocked": is_blocked,
+        }
+        click.echo(json.dumps(data, ensure_ascii=False, indent=2, default=str))
+        return
+
+    lines = []
+    lines.append(f"📋 Task Check: {task_id}")
+    lines.append(f"   {title}")
+    lines.append(f"   {assessment}")
+    lines.append("")
+
+    # Status
+    lines.append(f"  Status: {status}")
+    if owner:
+        lines.append(f"  Owner: @{owner}")
+    if due:
+        lines.append(f"  Due: {due}")
+    lines.append("")
+
+    # Deliverables
+    if deliverables:
+        lines.append(f"  📦 Deliverables ({completed_deliverables}/{len(deliverables)} done):")
+        for d in deliverables:
+            d_str = str(d)
+            d_lower = d_str.lower()
+            is_done = d_lower.startswith("[x]") or d_lower.endswith("(done)") or d_lower.endswith("(completed)")
+            icon = "✅" if is_done else "⬜"
+            lines.append(f"     {icon} {d_str}")
+        if deliverables_done:
+            lines.append(f"     ✅ All deliverables complete!")
+        else:
+            lines.append(f"     ⬜ {len(deliverables) - completed_deliverables} deliverable(s) remaining")
+        lines.append("")
+
+    # Dependencies
+    if deps:
+        lines.append(f"  🔗 Dependencies ({len(deps) - len(incomplete_deps)}/{len(deps)} done):")
+        for dep_id in deps:
+            resolved = dep_id
+            for tid in task_map:
+                if tid.endswith(dep_id) or dep_id in tid:
+                    resolved = tid
+                    break
+            dep_task = task_map.get(resolved)
+            dep_status = dep_task.get("status", "?") if dep_task else "?"
+            icon = "✅" if dep_status == "done" else "❌"
+            lines.append(f"     {icon} {resolved} [{dep_status}]")
+        if not deps_done:
+            lines.append(f"     🚧 Blocked by: {', '.join(incomplete_deps)}")
+        lines.append("")
+
+    # Known issues
+    if known_issues:
+        lines.append(f"  ⚠️  Known Issues ({len(known_issues)}):")
+        for issue in known_issues:
+            lines.append(f"     - {issue}")
+        lines.append("")
+
+    # Recommendations
+    lines.append("  💡 Recommendations:")
+    if is_complete:
+        lines.append("     Task is complete! 🎉")
+    elif is_blocked:
+        lines.append(f"     Unblock dependencies first: {', '.join(incomplete_deps)}")
+    elif status == "in_progress":
+        lines.append("     Keep going!")
+        if not deliverables_done and deliverables:
+            lines.append(f"     {len(deliverables) - completed_deliverables} deliverable(s) to go")
+    elif is_ready:
+        lines.append("     Ready to start! Use 'task start' to begin.")
+    else:
+        lines.append("     Review task status.")
+
+    click.echo("\n".join(lines))
+
+
+@task_group.command("review")
+@click.option("--owner", default=None, help="Review tasks for this owner.")
+@click.option("--epic", "epic_ref", default=None, help="Filter by epic.")
+@click.option("--project", "project_ref", default=None, help="Filter by project.")
+@click.option("--json", "json_output", is_flag=True, help="Print structured JSON.")
+@click.pass_context
+def task_review(ctx: click.Context, owner: str | None, epic_ref: str | None, project_ref: str | None,
+                 json_output: bool) -> None:
+    """Review all tasks: check each for readiness, blockers, completion."""
+    from datetime import date
+
+    root = find_repo_root(_cwd_from_context(ctx))
+    today_str = date.today().isoformat()
+    all_tasks = list_tasks(root, epic_ref=epic_ref, project_ref=project_ref, owner=owner)
+    active_tasks = [t for t in all_tasks if t.get("status") not in ("done", "wontfix")]
+
+    # Build task map for dependency checking
+    task_map = {t.get("id", ""): t for t in all_tasks}
+
+    # Categorize tasks
+    ready = []
+    blocked = []
+    in_progress = []
+    needs_attention = []
+
+    for t in active_tasks:
+        tid = t.get("id", "")
+        status = t.get("status", "")
+        deps = t.get("depends_on") or []
+
+        # Check if deps are done
+        deps_done = True
+        for dep_id in deps:
+            resolved = dep_id
+            for dep_tid in task_map:
+                if dep_tid.endswith(dep_id) or dep_id in dep_tid:
+                    resolved = dep_tid
+                    break
+            dep_task = task_map.get(resolved)
+            if dep_task and dep_task.get("status") not in ("done", "wontfix"):
+                deps_done = False
+                break
+
+        # Check if overdue
+        is_overdue = t.get("due") and t["due"] < today_str
+
+        if status == "in_progress":
+            in_progress.append(t)
+        elif status == "blocked" or (not deps_done and status in ("ready", "created")):
+            blocked.append(t)
+        elif deps_done and status in ("ready", "created"):
+            ready.append(t)
+
+        if is_overdue or status == "blocked":
+            needs_attention.append(t)
+
+    # Stats
+    total = len(all_tasks)
+    done = len([t for t in all_tasks if t.get("status") == "done"])
+    completion_rate = round(done / max(total, 1) * 100, 1)
+
+    if json_output:
+        data = {
+            "total": total,
+            "done": done,
+            "active": len(active_tasks),
+            "completion_rate": completion_rate,
+            "ready": len(ready),
+            "blocked": len(blocked),
+            "in_progress": len(in_progress),
+            "needs_attention": len(needs_attention),
+            "ready_tasks": [t.get("id", "") for t in ready],
+            "blocked_tasks": [t.get("id", "") for t in blocked],
+            "in_progress_tasks": [t.get("id", "") for t in in_progress],
+        }
+        click.echo(json.dumps(data, ensure_ascii=False, indent=2, default=str))
+        return
+
+    lines = []
+    lines.append(f"🔍 Task Review")
+    lines.append(f"   {today_str}")
+    lines.append("")
+
+    # Summary
+    bar_width = 20
+    done_chars = int(completion_rate / 100 * bar_width)
+    progress_bar = "█" * done_chars + "░" * (bar_width - done_chars)
+    lines.append(f"  Progress: [{progress_bar}] {completion_rate}%")
+    lines.append(f"  {done}/{total} done, {len(active_tasks)} active")
+    lines.append("")
+
+    # In progress
+    if in_progress:
+        lines.append(f"  🔧 IN PROGRESS ({len(in_progress)}):")
+        for t in in_progress:
+            owner_str = f" @{t.get('owner', '')}" if t.get("owner") else ""
+            due = f" due:{t.get('due', '')}" if t.get("due") else ""
+            overdue = " ⚠️" if (t.get("due") and t["due"] < today_str) else ""
+            lines.append(f"     {t['id']}{owner_str}{due}{overdue}  {t['title']}")
+        lines.append("")
+
+    # Ready to start
+    if ready:
+        lines.append(f"  ⏳ READY TO START ({len(ready)}):")
+        for t in ready:
+            owner_str = f" @{t.get('owner', '')}" if t.get("owner") else ""
+            due = f" due:{t.get('due', '')}" if t.get("due") else ""
+            pri = f" [{t.get('priority', '').upper()}]" if t.get("priority") else ""
+            lines.append(f"     {t['id']}{pri}{owner_str}{due}  {t['title']}")
+        lines.append("")
+
+    # Blocked
+    if blocked:
+        lines.append(f"  🚧 BLOCKED ({len(blocked)}):")
+        for t in blocked:
+            owner_str = f" @{t.get('owner', '')}" if t.get("owner") else ""
+            due = f" due:{t.get('due', '')}" if t.get("due") else ""
+            lines.append(f"     {t['id']}{owner_str}{due}  {t['title']}")
+        lines.append("")
+
+    # Needs attention
+    if needs_attention:
+        lines.append(f"  ⚠️  NEEDS ATTENTION ({len(needs_attention)}):")
+        for t in needs_attention:
+            reasons = []
+            if t.get("due") and t["due"] < today_str:
+                reasons.append("overdue")
+            if t.get("status") == "blocked":
+                reasons.append("blocked")
+            lines.append(f"     {t['id']} [{', '.join(reasons)}]  {t['title']}")
+        lines.append("")
+
+    # Recommendations
+    lines.append("  💡 Action Items:")
+    if blocked:
+        lines.append(f"     - Unblock {len(blocked)} task(s)")
+    if ready:
+        lines.append(f"     - Start {len(ready)} ready task(s)")
+    if needs_attention:
+        lines.append(f"     - Review {len(needs_attention)} task(s) needing attention")
+    if not needs_attention and not blocked:
+        lines.append("     - All clear! 🎉")
 
     click.echo("\n".join(lines))
 
