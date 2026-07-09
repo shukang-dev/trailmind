@@ -9416,6 +9416,180 @@ def task_remove_tag(ctx: click.Context, task_ref: str, tag: str, actor: str, not
         click.echo(f"Tag {tag!r} not found on task.")
 
 
+@task_group.command("due-today")
+@click.option("--owner", default=None, help="Filter by owner.")
+@click.option("--epic", "epic_ref", default=None, help="Filter by epic.")
+@click.option("--project", "project_ref", default=None, help="Filter by project.")
+@click.option("--compact", is_flag=True, help="Compact output.")
+@click.option("--json", "json_output", is_flag=True, help="Print structured JSON.")
+@click.pass_context
+def task_due_today(ctx: click.Context, owner: str | None, epic_ref: str | None, project_ref: str | None,
+                    compact: bool, json_output: bool) -> None:
+    """Show tasks due today."""
+    from datetime import date
+
+    root = find_repo_root(_cwd_from_context(ctx))
+    today_str = date.today().isoformat()
+    all_tasks = list_tasks(root, epic_ref=epic_ref, project_ref=project_ref, owner=owner)
+    due_today = [t for t in all_tasks
+                 if t.get("due") == today_str and t.get("status") not in ("done", "wontfix")]
+
+    if json_output:
+        clean = [{k: v for k, v in t.items() if not k.startswith("_")} for t in due_today]
+        click.echo(json.dumps({"date": today_str, "total": len(clean), "results": clean},
+                              ensure_ascii=False, indent=2, default=str))
+        return
+
+    if not due_today:
+        click.echo(f"✅ No tasks due today ({today_str}).")
+        return
+
+    lines = []
+    lines.append(f"📍 Tasks Due Today ({today_str}, {len(due_today)} found)")
+    lines.append("")
+
+    for t in due_today:
+        status_icon = {"done": "✅", "in_progress": "🔧", "blocked": "🚧",
+                      "ready": "⏳", "created": "📝"}.get(t.get("status", ""), "❓")
+        task_id = t.get("id", "")
+        title = t.get("title", "")
+        owner_str = f" @{t.get('owner', '')}" if t.get("owner") else ""
+        pri = f" [{t.get('priority', '').upper()}]" if t.get("priority") else ""
+
+        if compact:
+            lines.append(f"  {status_icon} {task_id}{pri}{owner_str}  {title}")
+        else:
+            lines.append(f"  {status_icon} {task_id}{pri}{owner_str}")
+            lines.append(f"     {title}")
+            lines.append("")
+
+    click.echo("\n".join(lines))
+
+
+@task_group.command("due-this-week")
+@click.option("--owner", default=None, help="Filter by owner.")
+@click.option("--epic", "epic_ref", default=None, help="Filter by epic.")
+@click.option("--project", "project_ref", default=None, help="Filter by project.")
+@click.option("--compact", is_flag=True, help="Compact output.")
+@click.option("--json", "json_output", is_flag=True, help="Print structured JSON.")
+@click.pass_context
+def task_due_this_week(ctx: click.Context, owner: str | None, epic_ref: str | None,
+                        project_ref: str | None, compact: bool, json_output: bool) -> None:
+    """Show tasks due this week (next 7 days)."""
+    from datetime import date, timedelta
+
+    root = find_repo_root(_cwd_from_context(ctx))
+    today = date.today()
+    today_str = today.isoformat()
+    week_end = (today + timedelta(days=7)).isoformat()
+
+    all_tasks = list_tasks(root, epic_ref=epic_ref, project_ref=project_ref, owner=owner)
+    due_this_week = [t for t in all_tasks
+                     if t.get("due") and today_str <= t["due"] <= week_end
+                     and t.get("status") not in ("done", "wontfix")]
+    due_this_week.sort(key=lambda t: t.get("due", ""))
+
+    if json_output:
+        clean = [{k: v for k, v in t.items() if not k.startswith("_")} for t in due_this_week]
+        click.echo(json.dumps({"week_start": today_str, "week_end": week_end,
+                               "total": len(clean), "results": clean},
+                              ensure_ascii=False, indent=2, default=str))
+        return
+
+    if not due_this_week:
+        click.echo(f"✅ No tasks due this week ({today_str} → {week_end}).")
+        return
+
+    lines = []
+    lines.append(f"📅 Tasks Due This Week ({today_str} → {week_end}, {len(due_this_week)} found)")
+    lines.append("")
+
+    # Group by day
+    by_day: dict[str, list] = {}
+    for t in due_this_week:
+        d = t.get("due", "")
+        if d not in by_day:
+            by_day[d] = []
+        by_day[d].append(t)
+
+    for day in sorted(by_day.keys()):
+        tasks = by_day[day]
+        weekday = date.fromisoformat(day).strftime("%a")
+        lines.append(f"  {day} ({weekday}) — {len(tasks)} task(s):")
+        for t in tasks:
+            status_icon = {"done": "✅", "in_progress": "🔧", "blocked": "🚧",
+                          "ready": "⏳", "created": "📝"}.get(t.get("status", ""), "❓")
+            task_id = t.get("id", "")
+            title = t.get("title", "")
+            owner_str = f" @{t.get('owner', '')}" if t.get("owner") else ""
+            pri = f" [{t.get('priority', '').upper()}]" if t.get("priority") else ""
+
+            if compact:
+                lines.append(f"    {status_icon} {task_id}{pri}{owner_str}  {title}")
+            else:
+                lines.append(f"    {status_icon} {task_id}{pri}{owner_str}  {title}")
+        lines.append("")
+
+    click.echo("\n".join(lines))
+
+
+@task_group.command("overdue")
+@click.option("--owner", default=None, help="Filter by owner.")
+@click.option("--epic", "epic_ref", default=None, help="Filter by epic.")
+@click.option("--project", "project_ref", default=None, help="Filter by project.")
+@click.option("--compact", is_flag=True, help="Compact output.")
+@click.option("--json", "json_output", is_flag=True, help="Print structured JSON.")
+@click.pass_context
+def task_overdue(ctx: click.Context, owner: str | None, epic_ref: str | None, project_ref: str | None,
+                  compact: bool, json_output: bool) -> None:
+    """Show overdue tasks."""
+    from datetime import date
+
+    root = find_repo_root(_cwd_from_context(ctx))
+    today_str = date.today().isoformat()
+    all_tasks = list_tasks(root, epic_ref=epic_ref, project_ref=project_ref, owner=owner)
+    overdue = [t for t in all_tasks
+               if t.get("due") and t["due"] < today_str
+               and t.get("status") not in ("done", "wontfix")]
+    overdue.sort(key=lambda t: t.get("due", ""))
+
+    if json_output:
+        clean = [{k: v for k, v in t.items() if not k.startswith("_")} for t in overdue]
+        click.echo(json.dumps({"today": today_str, "total": len(clean), "results": clean},
+                              ensure_ascii=False, indent=2, default=str))
+        return
+
+    if not overdue:
+        click.echo(f"✅ No overdue tasks (as of {today_str}).")
+        return
+
+    lines = []
+    lines.append(f"⚠️  Overdue Tasks ({today_str}, {len(overdue)} found)")
+    lines.append("")
+
+    for t in overdue:
+        status_icon = {"done": "✅", "in_progress": "🔧", "blocked": "🚧",
+                      "ready": "⏳", "created": "📝"}.get(t.get("status", ""), "❓")
+        task_id = t.get("id", "")
+        title = t.get("title", "")
+        owner_str = f" @{t.get('owner', '')}" if t.get("owner") else ""
+        due = t.get("due", "")
+        pri = f" [{t.get('priority', '').upper()}]" if t.get("priority") else ""
+
+        # Calculate days overdue
+        days_overdue = (date.today() - date.fromisoformat(due)).days
+
+        if compact:
+            lines.append(f"  {status_icon} {task_id}{pri}{owner_str} due:{due} ({days_overdue}d)  {title}")
+        else:
+            lines.append(f"  {status_icon} {task_id}{pri}{owner_str}")
+            lines.append(f"     {title}")
+            lines.append(f"     Due: {due} ({days_overdue} days overdue)")
+            lines.append("")
+
+    click.echo("\n".join(lines))
+
+
 @task_group.command("edit")
 @click.argument("task_ref")
 @click.option("--title", default=None, help="New task title.")
@@ -12467,6 +12641,158 @@ def issue_assign_cmd(ctx: click.Context, issue_ref: str, owner: str, actor: str,
     root = find_repo_root(_cwd_from_context(ctx))
     touched = assign_issue(root, issue_ref=issue_ref, owner=owner, actor=actor, note=note)
     _echo_touched(root, [touched])
+
+
+@issue_group.command("due-today")
+@click.option("--owner", default=None, help="Filter by owner.")
+@click.option("--epic", "epic_ref", default=None, help="Filter by epic.")
+@click.option("--project", "project_ref", default=None, help="Filter by project.")
+@click.option("--compact", is_flag=True, help="Compact output.")
+@click.option("--json", "json_output", is_flag=True, help="Print structured JSON.")
+@click.pass_context
+def issue_due_today(ctx: click.Context, owner: str | None, epic_ref: str | None,
+                     project_ref: str | None, compact: bool, json_output: bool) -> None:
+    """Show issues due today (by created date approximation)."""
+    from datetime import date
+
+    root = find_repo_root(_cwd_from_context(ctx))
+    today_str = date.today().isoformat()
+    all_issues = list_issues(root, epic_ref=epic_ref, project_ref=project_ref, owner=owner)
+    open_issues = [i for i in all_issues if i.get("status") not in ("done", "wontfix")]
+
+    # Issues don't have due dates, use created date as a proxy for "recent"
+    due_today = [i for i in open_issues if i.get("created") == today_str]
+
+    if json_output:
+        clean = [{k: v for k, v in i.items() if not k.startswith("_")} for i in due_today]
+        click.echo(json.dumps({"date": today_str, "total": len(clean), "results": clean},
+                              ensure_ascii=False, indent=2, default=str))
+        return
+
+    if not due_today:
+        click.echo(f"✅ No issues created today ({today_str}).")
+        return
+
+    lines = []
+    lines.append(f"📍 Issues Created Today ({today_str}, {len(due_today)} found)")
+    lines.append("")
+
+    for i in due_today:
+        sev_icon = {"critical": "🔴", "high": "🟠", "medium": "🟡", "low": "🟢"}.get(i.get("severity", ""), "❓")
+        issue_id = i.get("id", "")
+        title = i.get("title", "")
+        owner_str = f" @{i.get('owner', '')}" if i.get("owner") else ""
+
+        if compact:
+            lines.append(f"  {sev_icon} {issue_id}{owner_str}  {title}")
+        else:
+            lines.append(f"  {sev_icon} {issue_id} [{i.get('severity', '').upper()}]{owner_str}")
+            lines.append(f"     {title}")
+            lines.append("")
+
+    click.echo("\n".join(lines))
+
+
+@issue_group.command("open-list")
+@click.option("--owner", default=None, help="Filter by owner.")
+@click.option("--epic", "epic_ref", default=None, help="Filter by epic.")
+@click.option("--project", "project_ref", default=None, help="Filter by project.")
+@click.option("--compact", is_flag=True, help="Compact output.")
+@click.option("--json", "json_output", is_flag=True, help="Print structured JSON.")
+@click.pass_context
+def issue_open_list(ctx: click.Context, owner: str | None, epic_ref: str | None,
+                     project_ref: str | None, compact: bool, json_output: bool) -> None:
+    """Show all open issues."""
+    root = find_repo_root(_cwd_from_context(ctx))
+    all_issues = list_issues(root, epic_ref=epic_ref, project_ref=project_ref, owner=owner)
+    open_issues = [i for i in all_issues if i.get("status") not in ("done", "wontfix")]
+
+    if json_output:
+        clean = [{k: v for k, v in i.items() if not k.startswith("_")} for i in open_issues]
+        click.echo(json.dumps({"total": len(clean), "results": clean},
+                              ensure_ascii=False, indent=2, default=str))
+        return
+
+    if not open_issues:
+        click.echo("✅ No open issues!")
+        return
+
+    lines = []
+    lines.append(f"🐛 Open Issues ({len(open_issues)})")
+    lines.append("")
+
+    # Group by severity
+    by_severity: dict[str, list] = {}
+    for i in open_issues:
+        sev = i.get("severity", "unspecified")
+        if sev not in by_severity:
+            by_severity[sev] = []
+        by_severity[sev].append(i)
+
+    sev_order = ["critical", "high", "medium", "low", "unspecified"]
+    for sev in sev_order:
+        issues = by_severity.get(sev, [])
+        if not issues:
+            continue
+        sev_icon = {"critical": "🔴", "high": "🟠", "medium": "🟡", "low": "🟢"}.get(sev, "❓")
+        lines.append(f"  {sev_icon} {sev.upper()} ({len(issues)}):")
+        for i in issues:
+            issue_id = i.get("id", "")
+            title = i.get("title", "")
+            owner_str = f" @{i.get('owner', '')}" if i.get("owner") else ""
+
+            if compact:
+                lines.append(f"    {issue_id}{owner_str}  {title}")
+            else:
+                lines.append(f"    {issue_id}{owner_str}  {title}")
+        lines.append("")
+
+    click.echo("\n".join(lines))
+
+
+@issue_group.command("critical")
+@click.option("--owner", default=None, help="Filter by owner.")
+@click.option("--epic", "epic_ref", default=None, help="Filter by epic.")
+@click.option("--project", "project_ref", default=None, help="Filter by project.")
+@click.option("--compact", is_flag=True, help="Compact output.")
+@click.option("--json", "json_output", is_flag=True, help="Print structured JSON.")
+@click.pass_context
+def issue_critical(ctx: click.Context, owner: str | None, epic_ref: str | None,
+                    project_ref: str | None, compact: bool, json_output: bool) -> None:
+    """Show critical severity issues."""
+    root = find_repo_root(_cwd_from_context(ctx))
+    all_issues = list_issues(root, epic_ref=epic_ref, project_ref=project_ref, owner=owner)
+    critical = [i for i in all_issues
+                if i.get("severity") == "critical" and i.get("status") not in ("done", "wontfix")]
+
+    if json_output:
+        clean = [{k: v for k, v in i.items() if not k.startswith("_")} for i in critical]
+        click.echo(json.dumps({"total": len(clean), "results": clean},
+                              ensure_ascii=False, indent=2, default=str))
+        return
+
+    if not critical:
+        click.echo("✅ No critical issues!")
+        return
+
+    lines = []
+    lines.append(f"🔴 Critical Issues ({len(critical)})")
+    lines.append("")
+
+    for i in critical:
+        issue_id = i.get("id", "")
+        title = i.get("title", "")
+        owner_str = f" @{i.get('owner', '')}" if i.get("owner") else ""
+        status = i.get("status", "")
+
+        if compact:
+            lines.append(f"  🔴 {issue_id}{owner_str} [{status}]  {title}")
+        else:
+            lines.append(f"  🔴 {issue_id}{owner_str} [{status}]")
+            lines.append(f"     {title}")
+            lines.append("")
+
+    click.echo("\n".join(lines))
 
 
 @issue_group.command("edit")
