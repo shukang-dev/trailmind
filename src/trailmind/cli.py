@@ -10622,6 +10622,433 @@ def task_reorder(ctx: click.Context, task_refs: tuple[str, ...], epic_ref: str,
     click.echo("\n💡 Note: This displays the desired order. To persist, use task edit to adjust metadata.")
 
 
+@task_group.command("sprint-add")
+@click.argument("task_refs", nargs=-1)
+@click.option("--sprint", "sprint_name", default=None, help="Sprint name (default: auto-generated from date).")
+@click.option("--actor", required=True)
+@click.option("--from-file", "from_file", default=None,
+              help="Read task IDs from file (one per line), or '-' for stdin.")
+@click.option("--dry-run", is_flag=True, help="Preview without applying.")
+@click.pass_context
+def task_sprint_add(ctx: click.Context, task_refs: tuple[str, ...], sprint_name: str | None,
+                     actor: str, from_file: str | None, dry_run: bool) -> None:
+    """Add tasks to a sprint (tags with 'sprint-<name>')."""
+    from datetime import date
+
+    root = find_repo_root(_cwd_from_context(ctx))
+    refs = list(task_refs)
+    if from_file:
+        refs.extend(_read_ids_from_file(from_file))
+    if not refs:
+        raise TrailmindError("no task IDs provided (pass as args or use --from-file)")
+
+    # Generate sprint name if not provided
+    if not sprint_name:
+        today = date.today()
+        # ISO week number
+        year, week, _ = today.isocalendar()
+        sprint_name = f"{year}-W{week:02d}"
+
+    tag = f"sprint-{sprint_name}"
+
+    if dry_run:
+        click.echo(f"[DRY RUN] Would tag {len(refs)} task(s) with {tag!r}:")
+        for r in refs:
+            click.echo(f"  - {r}")
+        return
+
+    touched = []
+    for task_ref in refs:
+        try:
+            path = add_task_tag(root, task_ref=task_ref, tag=tag, actor=actor)
+            touched.append(path)
+        except Exception as exc:
+            click.echo(f"  ⚠ {task_ref}: {exc}", err=True)
+    if touched:
+        _echo_touched(root, touched)
+        click.echo(f"\n🏃 Added {len(touched)} task(s) to sprint {sprint_name!r}")
+
+
+@task_group.command("sprint-remove")
+@click.argument("task_refs", nargs=-1)
+@click.option("--sprint", "sprint_name", default=None, help="Sprint name (default: current week).")
+@click.option("--actor", required=True)
+@click.option("--from-file", "from_file", default=None,
+              help="Read task IDs from file (one per line), or '-' for stdin.")
+@click.option("--dry-run", is_flag=True, help="Preview without applying.")
+@click.pass_context
+def task_sprint_remove(ctx: click.Context, task_refs: tuple[str, ...], sprint_name: str | None,
+                        actor: str, from_file: str | None, dry_run: bool) -> None:
+    """Remove tasks from a sprint."""
+    from datetime import date
+
+    root = find_repo_root(_cwd_from_context(ctx))
+    refs = list(task_refs)
+    if from_file:
+        refs.extend(_read_ids_from_file(from_file))
+    if not refs:
+        raise TrailmindError("no task IDs provided")
+
+    if not sprint_name:
+        today = date.today()
+        year, week, _ = today.isocalendar()
+        sprint_name = f"{year}-W{week:02d}"
+
+    tag = f"sprint-{sprint_name}"
+
+    if dry_run:
+        click.echo(f"[DRY RUN] Would remove {tag!r} tag from {len(refs)} task(s):")
+        for r in refs:
+            click.echo(f"  - {r}")
+        return
+
+    touched = []
+    for task_ref in refs:
+        try:
+            path = remove_task_tag(root, task_ref=task_ref, tag=tag, actor=actor)
+            touched.append(path)
+        except Exception as exc:
+            click.echo(f"  ⚠ {task_ref}: {exc}", err=True)
+    if touched:
+        _echo_touched(root, touched)
+        click.echo(f"\nRemoved {len(touched)} task(s) from sprint {sprint_name!r}")
+
+
+@task_group.command("sprint-list")
+@click.option("--sprint", "sprint_name", default=None, help="Sprint name (default: current week).")
+@click.option("--owner", default=None, help="Filter by owner.")
+@click.option("--compact", is_flag=True, help="Compact output.")
+@click.option("--json", "json_output", is_flag=True, help="Print structured JSON.")
+@click.pass_context
+def task_sprint_list(ctx: click.Context, sprint_name: str | None, owner: str | None,
+                      compact: bool, json_output: bool) -> None:
+    """List tasks in a sprint."""
+    from datetime import date
+
+    root = find_repo_root(_cwd_from_context(ctx))
+    if not sprint_name:
+        today = date.today()
+        year, week, _ = today.isocalendar()
+        sprint_name = f"{year}-W{week:02d}"
+
+    tag = f"sprint-{sprint_name}"
+    all_tasks = list_tasks(root, owner=owner)
+    sprint_tasks = [t for t in all_tasks if tag in (t.get("tags") or [])]
+
+    if json_output:
+        clean = [{k: v for k, v in t.items() if not k.startswith("_")} for t in sprint_tasks]
+        click.echo(json.dumps({"sprint": sprint_name, "tag": tag, "total": len(clean), "tasks": clean},
+                              ensure_ascii=False, indent=2, default=str))
+        return
+
+    if not sprint_tasks:
+        click.echo(f"🏃 No tasks in sprint {sprint_name!r} (tag: {tag}).")
+        click.echo(f"   Use 'task sprint-add' to add tasks.")
+        return
+
+    lines = []
+    lines.append(f"🏃 Sprint {sprint_name} ({len(sprint_tasks)} tasks)")
+    lines.append(f"   Tag: {tag}")
+    lines.append("")
+
+    done = [t for t in sprint_tasks if t.get("status") == "done"]
+    active = [t for t in sprint_tasks if t.get("status") not in ("done", "wontfix")]
+    lines.append(f"  Done: {len(done)}  |  Active: {len(active)}")
+
+    # Progress bar
+    pct = round(len(done) / max(len(sprint_tasks), 1) * 100, 1)
+    bar_width = 20
+    done_chars = int(pct / 100 * bar_width)
+    bar = "█" * done_chars + "░" * (bar_width - done_chars)
+    lines.append(f"  [{bar}] {pct}%")
+    lines.append("")
+
+    for t in sprint_tasks:
+        status_icon = {"done": "✅", "in_progress": "🔧", "blocked": "🚧",
+                      "ready": "⏳", "created": "📝"}.get(t.get("status", ""), "❓")
+        owner_str = f" @{t.get('owner', '')}" if t.get("owner") else ""
+        due = f" due:{t.get('due', '')}" if t.get("due") else ""
+        pri = f" [{t.get('priority', '').upper()}]" if t.get("priority") else ""
+
+        if compact:
+            lines.append(f"  {status_icon} {t['id']}{pri}{owner_str}{due}  {t['title']}")
+        else:
+            lines.append(f"  {status_icon} {t['id']}{pri}{owner_str}{due}")
+            lines.append(f"     {t['title']}")
+            lines.append("")
+
+    click.echo("\n".join(lines))
+
+
+@task_group.command("bulk-delete")
+@click.argument("task_refs", nargs=-1)
+@click.option("--actor", required=True)
+@click.option("--from-file", "from_file", default=None,
+              help="Read task IDs from file (one per line), or '-' for stdin.")
+@click.option("--force", is_flag=True, help="Skip confirmation prompt.")
+@click.option("--dry-run", is_flag=True, help="Preview without applying.")
+@click.pass_context
+def task_bulk_delete(ctx: click.Context, task_refs: tuple[str, ...], actor: str,
+                      from_file: str | None, force: bool, dry_run: bool) -> None:
+    """Bulk-delete tasks (marks as wontfix with 'deleted' note)."""
+    root = find_repo_root(_cwd_from_context(ctx))
+    refs = list(task_refs)
+    if from_file:
+        refs.extend(_read_ids_from_file(from_file))
+    if not refs:
+        raise TrailmindError("no task IDs provided (pass as args or use --from-file)")
+
+    if dry_run:
+        click.echo(f"[DRY RUN] Would delete {len(refs)} task(s):")
+        for r in refs:
+            click.echo(f"  - {r}")
+        return
+
+    if not force:
+        click.echo(f"⚠️  This will mark {len(refs)} task(s) as wontfix (deleted).")
+        if not click.confirm("Continue?"):
+            click.echo("Cancelled.")
+            return
+
+    touched = []
+    for task_ref in refs:
+        try:
+            path, warning = set_task_status(root, task_ref=task_ref, status="wontfix",
+                                              actor=actor, note="Deleted")
+            touched.append(path)
+        except Exception as exc:
+            click.echo(f"  ⚠ {task_ref}: {exc}", err=True)
+    if touched:
+        _echo_touched(root, touched)
+        click.echo(f"\n🗑️  Deleted {len(touched)} task(s).")
+
+
+@task_group.command("rename")
+@click.argument("task_ref")
+@click.argument("new_title")
+@click.option("--actor", required=True)
+@click.option("--note", default=None)
+@click.pass_context
+def task_rename(ctx: click.Context, task_ref: str, new_title: str, actor: str,
+                 note: str | None) -> None:
+    """Rename a task (alias for task edit --title)."""
+    root = find_repo_root(_cwd_from_context(ctx))
+    touched = edit_task(root, task_ref=task_ref, actor=actor, title=new_title, note=note)
+    _echo_touched(root, [touched])
+
+
+@task_group.command("template")
+@click.argument("template_name")
+@click.option("--epic", required=True)
+@click.option("--filer", required=True)
+@click.option("--owner", default=None, help="Owner (defaults to filer).")
+@click.option("--actor", required=True)
+@click.option("--vars", "template_vars", default=None,
+              help="Template variables as key=value pairs (comma-separated).")
+@click.pass_context
+def task_template(ctx: click.Context, template_name: str, epic: str, filer: str,
+                   owner: str | None, actor: str, template_vars: str | None) -> None:
+    """Create a task from a built-in template (bugfix, feature, research, hotfix, chore)."""
+    templates = {
+        "bugfix": {
+            "title": "Fix {component} bug",
+            "priority": "high",
+            "tags": ["bug"],
+            "deliverables": ["[ ] Reproduce issue", "[ ] Identify root cause", "[ ] Implement fix", "[ ] Verify fix"],
+            "body": "## Bug Report\n\n### Description\n{description}\n\n### Steps to Reproduce\n1. \n2. \n3. \n\n### Expected Behavior\n\n### Actual Behavior\n",
+        },
+        "feature": {
+            "title": "Implement {feature}",
+            "priority": "medium",
+            "tags": ["feature"],
+            "deliverables": ["[ ] Design", "[ ] Implementation", "[ ] Tests", "[ ] Documentation"],
+            "body": "## Feature Request\n\n### Description\n{description}\n\n### Acceptance Criteria\n- [ ] \n- [ ] \n- [ ] \n",
+        },
+        "research": {
+            "title": "Research {topic}",
+            "priority": "medium",
+            "tags": ["research"],
+            "deliverables": ["[ ] Literature review", "[ ] Prototype", "[ ] Findings doc"],
+            "body": "## Research\n\n### Topic\n{topic}\n\n### Questions\n1. \n2. \n\n### Resources\n- \n",
+        },
+        "hotfix": {
+            "title": "Hotfix: {issue}",
+            "priority": "critical",
+            "tags": ["hotfix", "urgent"],
+            "deliverables": ["[ ] Diagnose", "[ ] Fix", "[ ] Deploy", "[ ] Monitor"],
+            "body": "## Hotfix\n\n### Urgent Issue\n{issue}\n\n### Impact\n\n### Root Cause\n",
+        },
+        "chore": {
+            "title": "Chore: {task}",
+            "priority": "low",
+            "tags": ["chore"],
+            "deliverables": ["[ ] Complete task"],
+            "body": "## Chore\n\n{task}\n",
+        },
+        "refactor": {
+            "title": "Refactor {component}",
+            "priority": "medium",
+            "tags": ["refactor", "tech-debt"],
+            "deliverables": ["[ ] Analyze current code", "[ ] Design new structure", "[ ] Implement refactor", "[ ] Verify tests pass"],
+            "body": "## Refactor\n\n### Component\n{component}\n\n### Motivation\n\n### Plan\n1. \n2. \n3. \n",
+        },
+        "test": {
+            "title": "Add tests for {component}",
+            "priority": "medium",
+            "tags": ["testing"],
+            "deliverables": ["[ ] Unit tests", "[ ] Integration tests", "[ ] Edge cases"],
+            "body": "## Test Coverage\n\n### Component\n{component}\n\n### Test Cases\n- [ ] Happy path\n- [ ] Edge cases\n- [ ] Error conditions\n",
+        },
+        "docs": {
+            "title": "Document {component}",
+            "priority": "low",
+            "tags": ["documentation"],
+            "deliverables": ["[ ] API docs", "[ ] Usage examples", "[ ] README update"],
+            "body": "## Documentation\n\n### Component\n{component}\n\n### Overview\n\n### Usage\n\n### Examples\n",
+        },
+    }
+
+    template = templates.get(template_name.lower())
+    if not template:
+        available = ", ".join(sorted(templates.keys()))
+        raise TrailmindError(f"unknown template {template_name!r}. Available: {available}")
+
+    # Parse template variables
+    vars_dict = {}
+    if template_vars:
+        for pair in template_vars.split(","):
+            if "=" in pair:
+                k, v = pair.split("=", 1)
+                vars_dict[k.strip()] = v.strip()
+
+    # Default variable values
+    defaults = {"component": "the component", "feature": "new feature", "topic": "the topic",
+                "issue": "critical issue", "task": "routine task", "description": "TBD"}
+    for k, v in defaults.items():
+        if k not in vars_dict:
+            vars_dict[k] = v
+
+    # Apply template variables
+    try:
+        title = template["title"].format(**vars_dict)
+    except KeyError:
+        title = template["title"]
+
+    try:
+        body = template["body"].format(**vars_dict)
+    except KeyError:
+        body = template["body"]
+
+    deliverables = template.get("deliverables", [])
+    tags = template.get("tags", [])
+    priority = template.get("priority", "medium")
+    task_owner = owner or filer
+
+    root = find_repo_root(_cwd_from_context(ctx))
+    touched = add_task(
+        root,
+        epic=epic,
+        filer=filer,
+        owner=task_owner,
+        title=title,
+        priority=priority,
+        tags=tags,
+        deliverables=deliverables,
+        note=f"Created from template '{template_name}'",
+    )
+    _echo_touched(root, [touched])
+
+    # Write body to the task file
+    from trailmind.resolver import resolve_entity
+    from trailmind.log import read_entity_user_facing
+    from trailmind.entity_io import write_entity
+    path = resolve_entity(root, raw=touched if isinstance(touched, str) else str(touched), entity="T")
+    fm, _ = read_entity_user_facing(path, label="task")
+    write_entity(path, frontmatter=fm, body=body)
+    click.echo(f"📋 Created task from template '{template_name}': {title}")
+
+
+@task_group.command("id")
+@click.argument("partial_id")
+@click.option("--json", "json_output", is_flag=True, help="Print structured JSON.")
+@click.pass_context
+def task_id(ctx: click.Context, partial_id: str, json_output: bool) -> None:
+    """Resolve a partial task ID to the full ID."""
+    root = find_repo_root(_cwd_from_context(ctx))
+    all_tasks = list_tasks(root)
+
+    matches = []
+    for t in all_tasks:
+        tid = t.get("id", "")
+        if partial_id in tid or tid.endswith(partial_id) or tid.startswith(partial_id):
+            matches.append(t)
+
+    if not matches:
+        click.echo(f"No tasks found matching {partial_id!r}")
+        return
+
+    if len(matches) == 1:
+        tid = matches[0].get("id", "")
+        if json_output:
+            click.echo(json.dumps({"id": tid, "title": matches[0].get("title", ""),
+                                   "path": matches[0].get("path", "")},
+                                  ensure_ascii=False, indent=2, default=str))
+        else:
+            click.echo(f"{tid}  {matches[0].get('title', '')}")
+        return
+
+    # Multiple matches
+    if json_output:
+        data = [{"id": t.get("id", ""), "title": t.get("title", ""), "path": t.get("path", "")}
+                for t in matches]
+        click.echo(json.dumps({"matches": len(data), "results": data},
+                              ensure_ascii=False, indent=2, default=str))
+    else:
+        click.echo(f"Multiple matches for {partial_id!r}:")
+        for t in matches[:10]:
+            click.echo(f"  {t.get('id', '')}  {t.get('title', '')}")
+        if len(matches) > 10:
+            click.echo(f"  ... and {len(matches) - 10} more")
+
+
+@task_group.command("bulk-status")
+@click.argument("task_refs", nargs=-1)
+@click.option("--status", required=True, type=click.Choice(TASK_STATUSES, case_sensitive=False),
+              help="New status.")
+@click.option("--actor", required=True)
+@click.option("--from-file", "from_file", default=None,
+              help="Read task IDs from file (one per line), or '-' for stdin.")
+@click.option("--dry-run", is_flag=True, help="Preview without applying.")
+@click.pass_context
+def task_bulk_status(ctx: click.Context, task_refs: tuple[str, ...], status: str,
+                      actor: str, from_file: str | None, dry_run: bool) -> None:
+    """Bulk-set status on multiple tasks."""
+    root = find_repo_root(_cwd_from_context(ctx))
+    refs = list(task_refs)
+    if from_file:
+        refs.extend(_read_ids_from_file(from_file))
+    if not refs:
+        raise TrailmindError("no task IDs provided (pass as args or use --from-file)")
+
+    if dry_run:
+        click.echo(f"[DRY RUN] Would set {len(refs)} task(s) to {status!r}:")
+        for r in refs:
+            click.echo(f"  - {r}")
+        return
+
+    touched = []
+    for task_ref in refs:
+        try:
+            path, warning = set_task_status(root, task_ref=task_ref, status=status,
+                                              actor=actor, note=f"Bulk set to {status}")
+            touched.append(path)
+        except Exception as exc:
+            click.echo(f"  ⚠ {task_ref}: {exc}", err=True)
+    if touched:
+        _echo_touched(root, touched)
+        click.echo(f"\nSet {len(touched)} task(s) to {status!r}")
+
+
 @task_group.command("export")
 @click.option("--epic", "epic_ref", default=None, help="Export tasks from a specific epic.")
 @click.option("--project", "project_ref", default=None, help="Export tasks from a specific project.")
@@ -14328,6 +14755,140 @@ def issue_sync(ctx: click.Context, epic_ref: str | None, project_ref: str | None
             click.echo(c)
     else:
         click.echo(f"✅ All {len(all_issues)} issues are in sync!")
+
+
+@issue_group.command("bulk-delete")
+@click.argument("issue_refs", nargs=-1)
+@click.option("--closer", required=True)
+@click.option("--from-file", "from_file", default=None,
+              help="Read issue IDs from file (one per line), or '-' for stdin.")
+@click.option("--force", is_flag=True, help="Skip confirmation prompt.")
+@click.option("--dry-run", is_flag=True, help="Preview without applying.")
+@click.pass_context
+def issue_bulk_delete(ctx: click.Context, issue_refs: tuple[str, ...], closer: str,
+                       from_file: str | None, force: bool, dry_run: bool) -> None:
+    """Bulk-delete issues (marks as wontfix with 'deleted' note)."""
+    root = find_repo_root(_cwd_from_context(ctx))
+    refs = list(issue_refs)
+    if from_file:
+        refs.extend(_read_ids_from_file(from_file))
+    if not refs:
+        raise TrailmindError("no issue IDs provided (pass as args or use --from-file)")
+
+    if dry_run:
+        click.echo(f"[DRY RUN] Would delete {len(refs)} issue(s):")
+        for r in refs:
+            click.echo(f"  - {r}")
+        return
+
+    if not force:
+        click.echo(f"⚠️  This will mark {len(refs)} issue(s) as wontfix (deleted).")
+        if not click.confirm("Continue?"):
+            click.echo("Cancelled.")
+            return
+
+    touched = []
+    for issue_ref in refs:
+        try:
+            path = close_issue(root, raw_id=issue_ref, closer=closer,
+                                status="wontfix", note="Deleted")
+            touched.append(path)
+        except Exception as exc:
+            click.echo(f"  ⚠ {issue_ref}: {exc}", err=True)
+    if touched:
+        _echo_touched(root, touched)
+        click.echo(f"\n🗑️  Deleted {len(touched)} issue(s).")
+
+
+@issue_group.command("rename")
+@click.argument("issue_ref")
+@click.argument("new_title")
+@click.option("--actor", required=True)
+@click.option("--note", default=None)
+@click.pass_context
+def issue_rename(ctx: click.Context, issue_ref: str, new_title: str, actor: str,
+                  note: str | None) -> None:
+    """Rename an issue (alias for issue edit --title)."""
+    root = find_repo_root(_cwd_from_context(ctx))
+    touched = edit_issue(root, issue_ref=issue_ref, actor=actor, title=new_title, note=note)
+    _echo_touched(root, [touched])
+
+
+@issue_group.command("template")
+@click.argument("template_name")
+@click.option("--epic", required=True)
+@click.option("--filer", required=True)
+@click.option("--owner", default=None, help="Owner (defaults to filer).")
+@click.option("--actor", required=True)
+@click.option("--vars", "template_vars", default=None,
+              help="Template variables as key=value pairs (comma-separated).")
+@click.pass_context
+def issue_template(ctx: click.Context, template_name: str, epic: str, filer: str,
+                    owner: str | None, actor: str, template_vars: str | None) -> None:
+    """Create an issue from a built-in template (bug, feature-request, question)."""
+    templates = {
+        "bug": {
+            "title": "Bug: {component} fails when {condition}",
+            "severity": "high",
+            "description": "## Bug Report\n\n### Description\n{description}\n\n### Steps to Reproduce\n1. \n2. \n3. \n\n### Expected Behavior\n\n### Actual Behavior\n\n### Environment\n- OS: \n- Version: \n",
+        },
+        "feature-request": {
+            "title": "Feature: {feature}",
+            "severity": "medium",
+            "description": "## Feature Request\n\n### Description\n{description}\n\n### Motivation\n\n### Proposed Solution\n\n### Acceptance Criteria\n- [ ] \n- [ ] \n",
+        },
+        "question": {
+            "title": "Question: {question}",
+            "severity": "low",
+            "description": "## Question\n\n{question}\n\n### Context\n\n### What I've Tried\n",
+        },
+    }
+
+    template = templates.get(template_name.lower())
+    if not template:
+        available = ", ".join(sorted(templates.keys()))
+        raise TrailmindError(f"unknown template {template_name!r}. Available: {available}")
+
+    # Parse template variables
+    vars_dict = {}
+    if template_vars:
+        for pair in template_vars.split(","):
+            if "=" in pair:
+                k, v = pair.split("=", 1)
+                vars_dict[k.strip()] = v.strip()
+
+    defaults = {"component": "component", "condition": "doing X", "feature": "new feature",
+                "description": "TBD", "question": "how does this work?"}
+    for k, v in defaults.items():
+        if k not in vars_dict:
+            vars_dict[k] = v
+
+    try:
+        title = template["title"].format(**vars_dict)
+    except KeyError:
+        title = template["title"]
+
+    try:
+        description = template["description"].format(**vars_dict)
+    except KeyError:
+        description = template["description"]
+
+    severity = template.get("severity", "medium")
+    issue_owner = owner or filer
+
+    root = find_repo_root(_cwd_from_context(ctx))
+    touched = add_issue(
+        root,
+        epic=epic,
+        filer=filer,
+        owner=issue_owner,
+        title=title,
+        description=description,
+        severity=severity,
+        note=f"Created from template '{template_name}'",
+    )
+    _echo_touched(root, [touched])
+    click.echo(f"📋 Created issue from template '{template_name}': {title}")
 
 
 @issue_group.command("export")
