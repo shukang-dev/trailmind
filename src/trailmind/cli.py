@@ -10229,6 +10229,399 @@ def task_set_owner(ctx: click.Context, task_ref: str, owner: str, actor: str, no
     _echo_touched(root, [touched])
 
 
+@task_group.command("deps")
+@click.argument("task_ref")
+@click.option("--json", "json_output", is_flag=True, help="Print structured JSON.")
+@click.pass_context
+def task_deps(ctx: click.Context, task_ref: str, json_output: bool) -> None:
+    """View task dependencies (what this task depends on)."""
+    from trailmind.resolver import resolve_entity
+    from trailmind.log import read_entity_user_facing
+
+    root = find_repo_root(_cwd_from_context(ctx))
+    path = resolve_entity(root, raw=task_ref, entity="T")
+    fm, _body = read_entity_user_facing(path, label="task")
+
+    hard_deps = fm.get("depends_on") or []
+    soft_deps = fm.get("soft_depends_on") or []
+
+    # Resolve each dependency
+    all_tasks = list_tasks(root)
+    task_map = {t.get("id", ""): t for t in all_tasks}
+
+    def resolve_dep(dep_id: str) -> dict | None:
+        for tid in task_map:
+            if tid.endswith(dep_id) or dep_id in tid:
+                return task_map[tid]
+        return None
+
+    hard_resolved = [(dep, resolve_dep(dep)) for dep in hard_deps]
+    soft_resolved = [(dep, resolve_dep(dep)) for dep in soft_deps]
+
+    if json_output:
+        data = {
+            "task_id": fm.get("id", ""),
+            "title": fm.get("title", ""),
+            "hard_deps": [{"id": dep, "title": t.get("title", "") if t else "(not found)",
+                           "status": t.get("status", "") if t else "?"}
+                          for dep, t in hard_resolved],
+            "soft_deps": [{"id": dep, "title": t.get("title", "") if t else "(not found)",
+                           "status": t.get("status", "") if t else "?"}
+                          for dep, t in soft_resolved],
+        }
+        click.echo(json.dumps(data, ensure_ascii=False, indent=2, default=str))
+        return
+
+    lines = []
+    lines.append(f"🔗 Dependencies: {fm.get('id', '')} — {fm.get('title', '')}")
+    lines.append("")
+
+    if hard_deps:
+        lines.append(f"  🔴 Hard ({len(hard_deps)}):")
+        for dep, t in hard_resolved:
+            if t:
+                status_icon = {"done": "✅", "in_progress": "🔧", "blocked": "🚧",
+                              "ready": "⏳", "created": "📝"}.get(t.get("status", ""), "❓")
+                lines.append(f"     {status_icon} {t['id']} [{t.get('status', '')}]  {t.get('title', '')}")
+            else:
+                lines.append(f"     ❓ {dep} (not found)")
+        lines.append("")
+
+    if soft_deps:
+        lines.append(f"  🟡 Soft ({len(soft_deps)}):")
+        for dep, t in soft_resolved:
+            if t:
+                status_icon = {"done": "✅", "in_progress": "🔧", "blocked": "🚧",
+                              "ready": "⏳", "created": "📝"}.get(t.get("status", ""), "❓")
+                lines.append(f"     {status_icon} {t['id']} [{t.get('status', '')}]  {t.get('title', '')}")
+            else:
+                lines.append(f"     ❓ {dep} (not found)")
+        lines.append("")
+
+    if not hard_deps and not soft_deps:
+        lines.append("  ✅ No dependencies!")
+
+    click.echo("\n".join(lines))
+
+
+@task_group.command("dependents")
+@click.argument("task_ref")
+@click.option("--json", "json_output", is_flag=True, help="Print structured JSON.")
+@click.pass_context
+def task_dependents(ctx: click.Context, task_ref: str, json_output: bool) -> None:
+    """View tasks that depend on this task (reverse dependencies)."""
+    root = find_repo_root(_cwd_from_context(ctx))
+    all_tasks = list_tasks(root)
+
+    # Find the target task
+    target = None
+    for t in all_tasks:
+        if t.get("id") == task_ref or task_ref in t.get("path", ""):
+            target = t
+            break
+
+    if not target:
+        raise TrailmindError(f"task not found: {task_ref}")
+
+    target_id = target.get("id", "")
+
+    # Find tasks that depend on this
+    hard_dependents = []
+    soft_dependents = []
+    for t in all_tasks:
+        deps = t.get("depends_on") or []
+        for dep in deps:
+            if dep == target_id or target_id.endswith(dep) or dep in target_id:
+                hard_dependents.append(t)
+                break
+        soft_deps = t.get("soft_depends_on") or []
+        for dep in soft_deps:
+            if dep == target_id or target_id.endswith(dep) or dep in target_id:
+                if t not in hard_dependents:
+                    soft_dependents.append(t)
+                break
+
+    if json_output:
+        data = {
+            "task_id": target_id,
+            "title": target.get("title", ""),
+            "hard_dependents": [{"id": t["id"], "title": t.get("title", ""),
+                                 "status": t.get("status", "")} for t in hard_dependents],
+            "soft_dependents": [{"id": t["id"], "title": t.get("title", ""),
+                                 "status": t.get("status", "")} for t in soft_dependents],
+        }
+        click.echo(json.dumps(data, ensure_ascii=False, indent=2, default=str))
+        return
+
+    lines = []
+    lines.append(f"🔗 Dependents: {target_id} — {target.get('title', '')}")
+    lines.append("")
+
+    if hard_dependents:
+        lines.append(f"  🔴 Hard dependents ({len(hard_dependents)}):")
+        for t in hard_dependents:
+            status_icon = {"done": "✅", "in_progress": "🔧", "blocked": "🚧",
+                          "ready": "⏳", "created": "📝"}.get(t.get("status", ""), "❓")
+            lines.append(f"     {status_icon} {t['id']} [{t.get('status', '')}]  {t.get('title', '')}")
+        lines.append("")
+
+    if soft_dependents:
+        lines.append(f"  🟡 Soft dependents ({len(soft_dependents)}):")
+        for t in soft_dependents:
+            status_icon = {"done": "✅", "in_progress": "🔧", "blocked": "🚧",
+                          "ready": "⏳", "created": "📝"}.get(t.get("status", ""), "❓")
+            lines.append(f"     {status_icon} {t['id']} [{t.get('status', '')}]  {t.get('title', '')}")
+        lines.append("")
+
+    if not hard_dependents and not soft_dependents:
+        lines.append("  ✅ No tasks depend on this task!")
+
+    click.echo("\n".join(lines))
+
+
+@task_group.command("validate")
+@click.option("--epic", "epic_ref", default=None, help="Validate tasks in a specific epic.")
+@click.option("--project", "project_ref", default=None, help="Validate tasks in a specific project.")
+@click.option("--json", "json_output", is_flag=True, help="Print structured JSON.")
+@click.pass_context
+def task_validate(ctx: click.Context, epic_ref: str | None, project_ref: str | None,
+                   json_output: bool) -> None:
+    """Validate task data: check for missing fields, broken references, etc."""
+    from datetime import date
+
+    root = find_repo_root(_cwd_from_context(ctx))
+    today_str = date.today().isoformat()
+    all_tasks = list_tasks(root, epic_ref=epic_ref, project_ref=project_ref)
+    all_task_ids = {t.get("id", "") for t in all_tasks}
+
+    issues = []
+    for t in all_tasks:
+        tid = t.get("id", "")
+        title = t.get("title", "")
+
+        # Check for missing title
+        if not title:
+            issues.append({"task": tid, "severity": "error", "type": "missing_title",
+                          "message": "Task has no title"})
+
+        # Check for missing owner in active tasks
+        if not t.get("owner") and t.get("status") not in ("done", "wontfix"):
+            issues.append({"task": tid, "severity": "warning", "type": "missing_owner",
+                          "message": "Active task has no owner"})
+
+        # Check for missing due date in high priority tasks
+        if not t.get("due") and t.get("priority") in ("critical", "high") and t.get("status") not in ("done", "wontfix"):
+            issues.append({"task": tid, "severity": "warning", "type": "missing_due",
+                          "message": f"{t.get('priority').upper()} priority task has no due date"})
+
+        # Check for broken dependency references
+        deps = t.get("depends_on") or []
+        for dep in deps:
+            found = any(dep in tid or tid.endswith(dep) for tid in all_task_ids)
+            if not found:
+                issues.append({"task": tid, "severity": "error", "type": "broken_dep",
+                              "message": f"Broken dependency reference: {dep}"})
+
+        # Check for self-dependency
+        if tid in deps:
+            issues.append({"task": tid, "severity": "error", "type": "self_dep",
+                          "message": "Task depends on itself"})
+
+        # Check for overdue tasks without known issues
+        if (t.get("due") and t["due"] < today_str
+                and t.get("status") not in ("done", "wontfix")
+                and not t.get("known_issues")):
+            issues.append({"task": tid, "severity": "info", "type": "overdue_no_issues",
+                          "message": "Overdue task has no documented known issues"})
+
+        # Check for empty deliverables in done tasks
+        if t.get("status") == "done" and not t.get("deliverables"):
+            issues.append({"task": tid, "severity": "info", "type": "done_no_deliverables",
+                          "message": "Done task has no defined deliverables"})
+
+    # Summary
+    errors = [i for i in issues if i["severity"] == "error"]
+    warnings = [i for i in issues if i["severity"] == "warning"]
+    infos = [i for i in issues if i["severity"] == "info"]
+
+    if json_output:
+        data = {
+            "total_tasks": len(all_tasks),
+            "total_issues": len(issues),
+            "errors": len(errors),
+            "warnings": len(warnings),
+            "infos": len(infos),
+            "issues": issues,
+        }
+        click.echo(json.dumps(data, ensure_ascii=False, indent=2, default=str))
+        return
+
+    lines = []
+    lines.append(f"🔍 Task Validation ({len(all_tasks)} tasks)")
+    lines.append(f"   {len(issues)} issues found: {len(errors)} errors, {len(warnings)} warnings, {len(infos)} info")
+    lines.append("")
+
+    if not issues:
+        lines.append("✅ All tasks pass validation!")
+        click.echo("\n".join(lines))
+        return
+
+    severity_icons = {"error": "🔴", "warning": "🟡", "info": "🔵"}
+    for issue in sorted(issues, key=lambda i: {"error": 0, "warning": 1, "info": 2}.get(i["severity"], 99)):
+        icon = severity_icons.get(issue["severity"], "❓")
+        lines.append(f"  {icon} [{issue['severity'].upper()}] {issue['task']}: {issue['message']}")
+
+    click.echo("\n".join(lines))
+
+
+@task_group.command("sync")
+@click.option("--epic", "epic_ref", default=None, help="Sync tasks in a specific epic.")
+@click.option("--project", "project_ref", default=None, help="Sync tasks in a specific project.")
+@click.option("--actor", required=True)
+@click.option("--dry-run", is_flag=True, help="Preview without applying.")
+@click.pass_context
+def task_sync(ctx: click.Context, epic_ref: str | None, project_ref: str | None,
+               actor: str, dry_run: bool) -> None:
+    """Sync task metadata: fix broken deps, normalize statuses, clean up stale data."""
+    from trailmind.resolver import resolve_entity
+    from trailmind.log import read_entity_user_facing
+    from trailmind.entity_io import write_entity
+
+    root = find_repo_root(_cwd_from_context(ctx))
+    all_tasks = list_tasks(root, epic_ref=epic_ref, project_ref=project_ref)
+    all_task_ids = {t.get("id", "") for t in all_tasks}
+
+    changes = []
+    for t in all_tasks:
+        tid = t.get("id", "")
+        path = resolve_entity(root, raw=tid, entity="T")
+        fm, body = read_entity_user_facing(path, label="task")
+        modified = False
+
+        # Fix broken dependencies
+        deps = list(fm.get("depends_on") or [])
+        valid_deps = []
+        for dep in deps:
+            found = any(dep in d or d.endswith(dep) for d in all_task_ids)
+            if found:
+                valid_deps.append(dep)
+            else:
+                modified = True
+                changes.append(f"  {tid}: removed broken dep '{dep}'")
+        if modified and deps != valid_deps:
+            fm["depends_on"] = valid_deps
+
+        # Fix soft dependencies
+        soft_deps = list(fm.get("soft_depends_on") or [])
+        valid_soft = []
+        for dep in soft_deps:
+            found = any(dep in d or d.endswith(dep) for d in all_task_ids)
+            if found:
+                valid_soft.append(dep)
+            else:
+                modified = True
+                changes.append(f"  {tid}: removed broken soft dep '{dep}'")
+        if modified and soft_deps != valid_soft:
+            fm["soft_depends_on"] = valid_soft
+
+        # Normalize status
+        status = fm.get("status", "")
+        valid_statuses = {"done", "in_progress", "blocked", "ready", "created", "wontfix"}
+        if status and status.lower() not in valid_statuses:
+            fm["status"] = "created"
+            modified = True
+            changes.append(f"  {tid}: normalized status '{status}' → 'created'")
+
+        # Normalize priority
+        priority = fm.get("priority", "")
+        valid_priorities = {"critical", "high", "medium", "low", "unspecified"}
+        if priority and priority.lower() not in valid_priorities:
+            fm["priority"] = "medium"
+            modified = True
+            changes.append(f"  {tid}: normalized priority '{priority}' → 'medium'")
+
+        # Remove self-dependencies
+        if tid in (fm.get("depends_on") or []):
+            deps = list(fm.get("depends_on") or [])
+            deps.remove(tid)
+            fm["depends_on"] = deps
+            modified = True
+            changes.append(f"  {tid}: removed self-dependency")
+
+        if modified and not dry_run:
+            write_entity(path, frontmatter=fm, body=body)
+
+    if dry_run:
+        click.echo(f"[DRY RUN] Would apply {len(changes)} change(s):")
+        for c in changes:
+            click.echo(c)
+        if not changes:
+            click.echo("  No changes needed!")
+        return
+
+    if changes:
+        click.echo(f"🔄 Synced {len(all_tasks)} tasks, applied {len(changes)} fix(es):")
+        for c in changes:
+            click.echo(c)
+    else:
+        click.echo(f"✅ All {len(all_tasks)} tasks are in sync!")
+
+
+@task_group.command("reorder")
+@click.argument("task_refs", nargs=-1)
+@click.option("--epic", "epic_ref", required=True, help="Epic to reorder tasks in.")
+@click.option("--actor", required=True)
+@click.option("--by", "sort_by", default="priority",
+              type=click.Choice(("priority", "due", "created", "manual"), case_sensitive=False),
+              help="Sort order (default: priority).")
+@click.option("--dry-run", is_flag=True, help="Preview without applying.")
+@click.pass_context
+def task_reorder(ctx: click.Context, task_refs: tuple[str, ...], epic_ref: str,
+                  actor: str, sort_by: str, dry_run: bool) -> None:
+    """Reorder tasks in an epic (by priority, due date, creation date, or manual order)."""
+    from datetime import date
+
+    root = find_repo_root(_cwd_from_context(ctx))
+    today_str = date.today().isoformat()
+    all_tasks = list_tasks(root, epic_ref=epic_ref)
+
+    if sort_by == "manual" and task_refs:
+        # Manual order from args
+        ordered = []
+        task_map = {t.get("id", ""): t for t in all_tasks}
+        for ref in task_refs:
+            for tid, t in task_map.items():
+                if ref in tid or tid.endswith(ref):
+                    ordered.append(t)
+                    break
+    elif sort_by == "priority":
+        pri_order = {"critical": 0, "high": 1, "medium": 2, "low": 3, "unspecified": 4}
+        ordered = sorted(all_tasks, key=lambda t: (pri_order.get(t.get("priority", "unspecified"), 4),
+                                                     t.get("due", "9999-99-99")))
+    elif sort_by == "due":
+        ordered = sorted(all_tasks, key=lambda t: (t.get("due") or "9999-99-99",
+                                                     {"critical": 0, "high": 1, "medium": 2, "low": 3}.get(t.get("priority", "medium"), 4)))
+    else:  # created
+        ordered = sorted(all_tasks, key=lambda t: t.get("created", ""))
+
+    if dry_run:
+        click.echo(f"[DRY RUN] Reordered {len(ordered)} tasks by {sort_by}:")
+        for i, t in enumerate(ordered, 1):
+            pri = f"[{t.get('priority', '').upper()}]" if t.get("priority") else ""
+            due = f" due:{t.get('due', '')}" if t.get("due") else ""
+            click.echo(f"  {i:2d}. {t['id']}{pri}{due}  {t['title']}")
+        return
+
+    # For now, just display the order (actual file reordering would require
+    # modifying the epic's task list or file naming convention)
+    click.echo(f"🔄 Reordered {len(ordered)} tasks by {sort_by}:")
+    for i, t in enumerate(ordered, 1):
+        pri = f"[{t.get('priority', '').upper()}]" if t.get("priority") else ""
+        due = f" due:{t.get('due', '')}" if t.get("due") else ""
+        click.echo(f"  {i:2d}. {t['id']}{pri}{due}  {t['title']}")
+    click.echo("\n💡 Note: This displays the desired order. To persist, use task edit to adjust metadata.")
+
+
 @task_group.command("export")
 @click.option("--epic", "epic_ref", default=None, help="Export tasks from a specific epic.")
 @click.option("--project", "project_ref", default=None, help="Export tasks from a specific project.")
@@ -13736,6 +14129,205 @@ def issue_set_severity_cmd(ctx: click.Context, issue_ref: str, severity: str, ac
     root = find_repo_root(_cwd_from_context(ctx))
     touched = set_issue_severity(root, issue_ref=issue_ref, severity=severity, actor=actor, note=note)
     _echo_touched(root, [touched])
+
+
+@issue_group.command("linked-tasks")
+@click.argument("issue_ref")
+@click.option("--json", "json_output", is_flag=True, help="Print structured JSON.")
+@click.pass_context
+def issue_linked_tasks(ctx: click.Context, issue_ref: str, json_output: bool) -> None:
+    """View tasks linked to this issue."""
+    from trailmind.resolver import resolve_entity
+    from trailmind.log import read_entity_user_facing
+
+    root = find_repo_root(_cwd_from_context(ctx))
+    path = resolve_entity(root, raw=issue_ref, entity="I")
+    fm, _body = read_entity_user_facing(path, label="issue")
+
+    linked = fm.get("linked_tasks") or []
+    all_tasks = list_tasks(root)
+    task_map = {t.get("id", ""): t for t in all_tasks}
+
+    def resolve_task(task_id: str) -> dict | None:
+        for tid in task_map:
+            if tid.endswith(task_id) or task_id in tid:
+                return task_map[tid]
+        return None
+
+    resolved = [(tid, resolve_task(tid)) for tid in linked]
+
+    if json_output:
+        data = {
+            "issue_id": fm.get("id", ""),
+            "title": fm.get("title", ""),
+            "linked_tasks": [{"id": tid, "title": t.get("title", "") if t else "(not found)",
+                              "status": t.get("status", "") if t else "?"}
+                             for tid, t in resolved],
+        }
+        click.echo(json.dumps(data, ensure_ascii=False, indent=2, default=str))
+        return
+
+    lines = []
+    lines.append(f"🔗 Linked Tasks: {fm.get('id', '')} — {fm.get('title', '')}")
+    lines.append("")
+
+    if resolved:
+        for tid, t in resolved:
+            if t:
+                status_icon = {"done": "✅", "in_progress": "🔧", "blocked": "🚧",
+                              "ready": "⏳", "created": "📝"}.get(t.get("status", ""), "❓")
+                lines.append(f"  {status_icon} {t['id']} [{t.get('status', '')}]  {t.get('title', '')}")
+            else:
+                lines.append(f"  ❓ {tid} (not found)")
+    else:
+        lines.append("  ✅ No linked tasks!")
+
+    click.echo("\n".join(lines))
+
+
+@issue_group.command("validate")
+@click.option("--epic", "epic_ref", default=None, help="Validate issues in a specific epic.")
+@click.option("--project", "project_ref", default=None, help="Validate issues in a specific project.")
+@click.option("--json", "json_output", is_flag=True, help="Print structured JSON.")
+@click.pass_context
+def issue_validate(ctx: click.Context, epic_ref: str | None, project_ref: str | None,
+                    json_output: bool) -> None:
+    """Validate issue data: check for missing fields, broken references, etc."""
+    root = find_repo_root(_cwd_from_context(ctx))
+    all_issues = list_issues(root, epic_ref=epic_ref, project_ref=project_ref)
+    all_tasks = list_tasks(root)
+    all_task_ids = {t.get("id", "") for t in all_tasks}
+
+    issues = []
+    for i in all_issues:
+        iid = i.get("id", "")
+        title = i.get("title", "")
+
+        if not title:
+            issues.append({"issue": iid, "severity": "error", "type": "missing_title",
+                          "message": "Issue has no title"})
+
+        if not i.get("owner") and i.get("status") not in ("done", "wontfix"):
+            issues.append({"issue": iid, "severity": "warning", "type": "missing_owner",
+                          "message": "Open issue has no owner"})
+
+        if not i.get("severity") or i.get("severity") == "unspecified":
+            issues.append({"issue": iid, "severity": "info", "type": "missing_severity",
+                          "message": "Issue has no severity set"})
+
+        # Check for broken linked task references
+        linked = i.get("linked_tasks") or []
+        for task_id in linked:
+            found = any(task_id in tid or tid.endswith(task_id) for tid in all_task_ids)
+            if not found:
+                issues.append({"issue": iid, "severity": "error", "type": "broken_link",
+                              "message": f"Broken linked task reference: {task_id}"})
+
+    errors = [i for i in issues if i["severity"] == "error"]
+    warnings = [i for i in issues if i["severity"] == "warning"]
+    infos = [i for i in issues if i["severity"] == "info"]
+
+    if json_output:
+        data = {
+            "total_issues": len(all_issues),
+            "total_problems": len(issues),
+            "errors": len(errors),
+            "warnings": len(warnings),
+            "infos": len(infos),
+            "problems": issues,
+        }
+        click.echo(json.dumps(data, ensure_ascii=False, indent=2, default=str))
+        return
+
+    lines = []
+    lines.append(f"🔍 Issue Validation ({len(all_issues)} issues)")
+    lines.append(f"   {len(issues)} problems: {len(errors)} errors, {len(warnings)} warnings, {len(infos)} info")
+    lines.append("")
+
+    if not issues:
+        lines.append("✅ All issues pass validation!")
+        click.echo("\n".join(lines))
+        return
+
+    severity_icons = {"error": "🔴", "warning": "🟡", "info": "🔵"}
+    for problem in sorted(issues, key=lambda p: {"error": 0, "warning": 1, "info": 2}.get(p["severity"], 99)):
+        icon = severity_icons.get(problem["severity"], "❓")
+        lines.append(f"  {icon} [{problem['severity'].upper()}] {problem['issue']}: {problem['message']}")
+
+    click.echo("\n".join(lines))
+
+
+@issue_group.command("sync")
+@click.option("--epic", "epic_ref", default=None, help="Sync issues in a specific epic.")
+@click.option("--project", "project_ref", default=None, help="Sync issues in a specific project.")
+@click.option("--actor", required=True)
+@click.option("--dry-run", is_flag=True, help="Preview without applying.")
+@click.pass_context
+def issue_sync(ctx: click.Context, epic_ref: str | None, project_ref: str | None,
+                actor: str, dry_run: bool) -> None:
+    """Sync issue metadata: fix broken references, normalize statuses/severities."""
+    from trailmind.resolver import resolve_entity
+    from trailmind.log import read_entity_user_facing
+    from trailmind.entity_io import write_entity
+
+    root = find_repo_root(_cwd_from_context(ctx))
+    all_issues = list_issues(root, epic_ref=epic_ref, project_ref=project_ref)
+    all_tasks = list_tasks(root)
+    all_task_ids = {t.get("id", "") for t in all_tasks}
+
+    changes = []
+    for i in all_issues:
+        iid = i.get("id", "")
+        path = resolve_entity(root, raw=iid, entity="I")
+        fm, body = read_entity_user_facing(path, label="issue")
+        modified = False
+
+        # Fix broken linked tasks
+        linked = list(fm.get("linked_tasks") or [])
+        valid_linked = []
+        for task_id in linked:
+            found = any(task_id in tid or tid.endswith(task_id) for tid in all_task_ids)
+            if found:
+                valid_linked.append(task_id)
+            else:
+                modified = True
+                changes.append(f"  {iid}: removed broken linked task '{task_id}'")
+        if modified and linked != valid_linked:
+            fm["linked_tasks"] = valid_linked
+
+        # Normalize status
+        status = fm.get("status", "")
+        valid_statuses = {"open", "done", "wontfix"}
+        if status and status.lower() not in valid_statuses:
+            fm["status"] = "open"
+            modified = True
+            changes.append(f"  {iid}: normalized status '{status}' → 'open'")
+
+        # Normalize severity
+        severity = fm.get("severity", "")
+        valid_severities = {"critical", "high", "medium", "low", "unspecified"}
+        if severity and severity.lower() not in valid_severities:
+            fm["severity"] = "medium"
+            modified = True
+            changes.append(f"  {iid}: normalized severity '{severity}' → 'medium'")
+
+        if modified and not dry_run:
+            write_entity(path, frontmatter=fm, body=body)
+
+    if dry_run:
+        click.echo(f"[DRY RUN] Would apply {len(changes)} fix(es):")
+        for c in changes:
+            click.echo(c)
+        if not changes:
+            click.echo("  No changes needed!")
+        return
+
+    if changes:
+        click.echo(f"🔄 Synced {len(all_issues)} issues, applied {len(changes)} fix(es):")
+        for c in changes:
+            click.echo(c)
+    else:
+        click.echo(f"✅ All {len(all_issues)} issues are in sync!")
 
 
 @issue_group.command("export")
