@@ -8379,6 +8379,87 @@ def task_escalate(ctx: click.Context, task_ref: str, actor: str, due: str | None
     click.echo(f"🚨 Escalated {task_ref} to critical, due {due_date}")
 
 
+@task_group.command("quick-add")
+@click.argument("title")
+@click.option("--epic", required=True)
+@click.option("--filer", required=True)
+@click.option("--owner", default=None, help="Owner (defaults to filer).")
+@click.option("--priority", default="medium", show_default=True,
+              type=click.Choice(TASK_PRIORITIES, case_sensitive=False),
+              help="Task priority.")
+@click.option("--due", default=None, help="Due date YYYY-MM-DD.")
+@click.option("--tags", default=None, help="Comma-separated tags.")
+@click.pass_context
+def task_quick_add(ctx: click.Context, title: str, epic: str, filer: str, owner: str | None,
+                    priority: str, due: str | None, tags: str | None) -> None:
+    """Quickly add a task with minimal required options."""
+    root = find_repo_root(_cwd_from_context(ctx))
+    tag_list = split_csv(tags) if tags else []
+    task_owner = owner or filer
+    touched = add_task(
+        root,
+        epic=epic,
+        filer=filer,
+        owner=task_owner,
+        title=title,
+        priority=priority,
+        due=due,
+        tags=tag_list,
+    )
+    _echo_touched(root, [touched])
+
+
+@task_group.command("note")
+@click.argument("task_ref")
+@click.argument("note_text")
+@click.option("--actor", required=True)
+@click.pass_context
+def task_note(ctx: click.Context, task_ref: str, note_text: str, actor: str) -> None:
+    """Quickly add a note to a task (alias for task edit --note)."""
+    root = find_repo_root(_cwd_from_context(ctx))
+    touched = edit_task(root, task_ref=task_ref, actor=actor, note=note_text)
+    _echo_touched(root, [touched])
+
+
+@task_group.command("set-due")
+@click.argument("task_ref")
+@click.argument("due_date")
+@click.option("--actor", required=True)
+@click.option("--note", default=None)
+@click.pass_context
+def task_set_due(ctx: click.Context, task_ref: str, due_date: str, actor: str, note: str | None) -> None:
+    """Set due date for a task (alias for task due)."""
+    root = find_repo_root(_cwd_from_context(ctx))
+    touched = set_task_due(root, task_ref=task_ref, due_date=due_date, actor=actor, note=note)
+    _echo_touched(root, [touched])
+
+
+@task_group.command("clear-due")
+@click.argument("task_ref")
+@click.option("--actor", required=True)
+@click.option("--note", default=None)
+@click.pass_context
+def task_clear_due(ctx: click.Context, task_ref: str, actor: str, note: str | None) -> None:
+    """Clear due date for a task."""
+    root = find_repo_root(_cwd_from_context(ctx))
+    touched = set_task_due(root, task_ref=task_ref, due_date=None, actor=actor, note=note)
+    _echo_touched(root, [touched])
+
+
+@task_group.command("set-priority")
+@click.argument("task_ref")
+@click.argument("priority", type=click.Choice(TASK_PRIORITIES, case_sensitive=False))
+@click.option("--actor", required=True)
+@click.option("--note", default=None)
+@click.pass_context
+def task_set_priority_cmd(ctx: click.Context, task_ref: str, priority: str, actor: str,
+                           note: str | None) -> None:
+    """Set priority for a task (alias for task set-priority)."""
+    root = find_repo_root(_cwd_from_context(ctx))
+    touched = set_task_priority(root, task_ref=task_ref, priority=priority, actor=actor, note=note)
+    _echo_touched(root, [touched])
+
+
 @task_group.command("edit")
 @click.argument("task_ref")
 @click.option("--title", default=None, help="New task title.")
@@ -11307,6 +11388,59 @@ def issue_de_escalate(ctx: click.Context, issue_ref: str, actor: str, note: str 
                                   note=note or "De-escalated to medium")
     _echo_touched(root, [touched])
     click.echo(f"📉 De-escalated {issue_ref} to medium severity")
+
+
+@issue_group.command("quick-add")
+@click.argument("title")
+@click.option("--epic", required=True)
+@click.option("--filer", required=True)
+@click.option("--owner", default=None, help="Owner (defaults to filer).")
+@click.option("--severity", default="medium", show_default=True,
+              type=click.Choice(ISSUE_SEVERITIES, case_sensitive=False),
+              help="Issue severity.")
+@click.option("--description", default="TBD", help="Issue description.")
+@click.pass_context
+def issue_quick_add(ctx: click.Context, title: str, epic: str, filer: str, owner: str | None,
+                     severity: str, description: str) -> None:
+    """Quickly add an issue with minimal required options."""
+    root = find_repo_root(_cwd_from_context(ctx))
+    issue_owner = owner or filer
+    touched = add_issue(
+        root,
+        epic=epic,
+        filer=filer,
+        owner=issue_owner,
+        title=title,
+        description=description,
+        severity=severity,
+    )
+    _echo_touched(root, [touched])
+
+
+@issue_group.command("note")
+@click.argument("issue_ref")
+@click.argument("note_text")
+@click.option("--actor", required=True)
+@click.pass_context
+def issue_note(ctx: click.Context, issue_ref: str, note_text: str, actor: str) -> None:
+    """Quickly add a note to an issue."""
+    root = find_repo_root(_cwd_from_context(ctx))
+    touched = edit_issue(root, issue_ref=issue_ref, actor=actor, note=note_text)
+    _echo_touched(root, [touched])
+
+
+@issue_group.command("set-severity")
+@click.argument("issue_ref")
+@click.argument("severity", type=click.Choice(ISSUE_SEVERITIES, case_sensitive=False))
+@click.option("--actor", required=True)
+@click.option("--note", default=None)
+@click.pass_context
+def issue_set_severity_cmd(ctx: click.Context, issue_ref: str, severity: str, actor: str,
+                            note: str | None) -> None:
+    """Set severity for an issue (alias for issue set-severity)."""
+    root = find_repo_root(_cwd_from_context(ctx))
+    touched = set_issue_severity(root, issue_ref=issue_ref, severity=severity, actor=actor, note=note)
+    _echo_touched(root, [touched])
 
 
 @issue_group.command("edit")
