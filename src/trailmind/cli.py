@@ -9488,6 +9488,476 @@ def task_remove_tag(ctx: click.Context, task_ref: str, tag: str, actor: str, not
         click.echo(f"Tag {tag!r} not found on task.")
 
 
+@task_group.command("add-dep")
+@click.argument("task_ref")
+@click.argument("dep_ref")
+@click.option("--soft", is_flag=True, help="Add as soft dependency instead of hard.")
+@click.option("--actor", required=True)
+@click.option("--note", default=None)
+@click.pass_context
+def task_add_dep(ctx: click.Context, task_ref: str, dep_ref: str, soft: bool, actor: str,
+                  note: str | None) -> None:
+    """Add a dependency to a task (hard or soft)."""
+    from trailmind.resolver import resolve_entity
+    from trailmind.log import read_entity_user_facing
+    from trailmind.entity_io import write_entity
+
+    root = find_repo_root(_cwd_from_context(ctx))
+    path = resolve_entity(root, raw=task_ref, entity="T")
+    fm, body = read_entity_user_facing(path, label="task")
+
+    dep_field = "soft_depends_on" if soft else "depends_on"
+    deps = list(fm.get(dep_field) or [])
+    if dep_ref not in deps:
+        deps.append(dep_ref)
+        fm[dep_field] = deps
+        write_entity(path, frontmatter=fm, body=body)
+        _echo_touched(root, [path])
+        dep_type = "soft" if soft else "hard"
+        click.echo(f"🔗 Added {dep_type} dependency {dep_ref!r} to {task_ref}")
+    else:
+        click.echo(f"Dependency {dep_ref!r} already on {task_ref}")
+
+
+@task_group.command("remove-dep")
+@click.argument("task_ref")
+@click.argument("dep_ref")
+@click.option("--soft", is_flag=True, help="Remove from soft dependencies.")
+@click.option("--actor", required=True)
+@click.option("--note", default=None)
+@click.pass_context
+def task_remove_dep(ctx: click.Context, task_ref: str, dep_ref: str, soft: bool, actor: str,
+                     note: str | None) -> None:
+    """Remove a dependency from a task."""
+    from trailmind.resolver import resolve_entity
+    from trailmind.log import read_entity_user_facing
+    from trailmind.entity_io import write_entity
+
+    root = find_repo_root(_cwd_from_context(ctx))
+    path = resolve_entity(root, raw=task_ref, entity="T")
+    fm, body = read_entity_user_facing(path, label="task")
+
+    dep_field = "soft_depends_on" if soft else "depends_on"
+    deps = list(fm.get(dep_field) or [])
+    if dep_ref in deps:
+        deps.remove(dep_ref)
+        fm[dep_field] = deps
+        write_entity(path, frontmatter=fm, body=body)
+        _echo_touched(root, [path])
+        dep_type = "soft" if soft else "hard"
+        click.echo(f"🔗 Removed {dep_type} dependency {dep_ref!r} from {task_ref}")
+    else:
+        dep_type = "soft" if soft else "hard"
+        click.echo(f"No {dep_type} dependency {dep_ref!r} on {task_ref}")
+
+
+@task_group.command("add-known-issue")
+@click.argument("task_ref")
+@click.argument("issue_ref")
+@click.option("--actor", required=True)
+@click.option("--note", default=None)
+@click.pass_context
+def task_add_known_issue(ctx: click.Context, task_ref: str, issue_ref: str, actor: str,
+                          note: str | None) -> None:
+    """Add a known issue reference to a task."""
+    from trailmind.resolver import resolve_entity
+    from trailmind.log import read_entity_user_facing
+    from trailmind.entity_io import write_entity
+
+    root = find_repo_root(_cwd_from_context(ctx))
+    path = resolve_entity(root, raw=task_ref, entity="T")
+    fm, body = read_entity_user_facing(path, label="task")
+
+    issues = list(fm.get("known_issues") or [])
+    if issue_ref not in issues:
+        issues.append(issue_ref)
+        fm["known_issues"] = issues
+        write_entity(path, frontmatter=fm, body=body)
+        _echo_touched(root, [path])
+        click.echo(f"⚠️  Added known issue {issue_ref!r} to {task_ref}")
+    else:
+        click.echo(f"Known issue {issue_ref!r} already on {task_ref}")
+
+
+@task_group.command("remove-known-issue")
+@click.argument("task_ref")
+@click.argument("issue_ref")
+@click.option("--actor", required=True)
+@click.option("--note", default=None)
+@click.pass_context
+def task_remove_known_issue(ctx: click.Context, task_ref: str, issue_ref: str, actor: str,
+                              note: str | None) -> None:
+    """Remove a known issue reference from a task."""
+    from trailmind.resolver import resolve_entity
+    from trailmind.log import read_entity_user_facing
+    from trailmind.entity_io import write_entity
+
+    root = find_repo_root(_cwd_from_context(ctx))
+    path = resolve_entity(root, raw=task_ref, entity="T")
+    fm, body = read_entity_user_facing(path, label="task")
+
+    issues = list(fm.get("known_issues") or [])
+    if issue_ref in issues:
+        issues.remove(issue_ref)
+        fm["known_issues"] = issues
+        write_entity(path, frontmatter=fm, body=body)
+        _echo_touched(root, [path])
+        click.echo(f"⚠️  Removed known issue {issue_ref!r} from {task_ref}")
+    else:
+        click.echo(f"No known issue {issue_ref!r} on {task_ref}")
+
+
+@task_group.command("add-code-path")
+@click.argument("task_ref")
+@click.argument("code_path")
+@click.option("--actor", required=True)
+@click.option("--note", default=None)
+@click.pass_context
+def task_add_code_path(ctx: click.Context, task_ref: str, code_path: str, actor: str,
+                        note: str | None) -> None:
+    """Add a code path reference to a task."""
+    from trailmind.resolver import resolve_entity
+    from trailmind.log import read_entity_user_facing
+    from trailmind.entity_io import write_entity
+
+    root = find_repo_root(_cwd_from_context(ctx))
+    path = resolve_entity(root, raw=task_ref, entity="T")
+    fm, body = read_entity_user_facing(path, label="task")
+
+    code_paths = list(fm.get("code_paths") or [])
+    if code_path not in code_paths:
+        code_paths.append(code_path)
+        fm["code_paths"] = code_paths
+        write_entity(path, frontmatter=fm, body=body)
+        _echo_touched(root, [path])
+        click.echo(f"📁 Added code path {code_path!r} to {task_ref}")
+    else:
+        click.echo(f"Code path {code_path!r} already on {task_ref}")
+
+
+@task_group.command("remove-code-path")
+@click.argument("task_ref")
+@click.argument("code_path")
+@click.option("--actor", required=True)
+@click.option("--note", default=None)
+@click.pass_context
+def task_remove_code_path(ctx: click.Context, task_ref: str, code_path: str, actor: str,
+                           note: str | None) -> None:
+    """Remove a code path reference from a task."""
+    from trailmind.resolver import resolve_entity
+    from trailmind.log import read_entity_user_facing
+    from trailmind.entity_io import write_entity
+
+    root = find_repo_root(_cwd_from_context(ctx))
+    path = resolve_entity(root, raw=task_ref, entity="T")
+    fm, body = read_entity_user_facing(path, label="task")
+
+    code_paths = list(fm.get("code_paths") or [])
+    if code_path in code_paths:
+        code_paths.remove(code_path)
+        fm["code_paths"] = code_paths
+        write_entity(path, frontmatter=fm, body=body)
+        _echo_touched(root, [path])
+        click.echo(f"📁 Removed code path {code_path!r} from {task_ref}")
+    else:
+        click.echo(f"No code path {code_path!r} on {task_ref}")
+
+
+@task_group.command("set-design-doc")
+@click.argument("task_ref")
+@click.argument("design_doc")
+@click.option("--actor", required=True)
+@click.option("--note", default=None)
+@click.pass_context
+def task_set_design_doc(ctx: click.Context, task_ref: str, design_doc: str, actor: str,
+                         note: str | None) -> None:
+    """Set the design document path for a task."""
+    root = find_repo_root(_cwd_from_context(ctx))
+    touched = edit_task(root, task_ref=task_ref, actor=actor, design_doc=design_doc, note=note)
+    _echo_touched(root, [touched])
+
+
+@task_group.command("clear-design-doc")
+@click.argument("task_ref")
+@click.option("--actor", required=True)
+@click.option("--note", default=None)
+@click.pass_context
+def task_clear_design_doc(ctx: click.Context, task_ref: str, actor: str, note: str | None) -> None:
+    """Clear the design document path for a task."""
+    root = find_repo_root(_cwd_from_context(ctx))
+    touched = edit_task(root, task_ref=task_ref, actor=actor, design_doc="", note=note)
+    _echo_touched(root, [touched])
+
+
+@task_group.command("remove-deliverable")
+@click.argument("task_ref")
+@click.option("--item", required=True, help="Deliverable item to remove.")
+@click.option("--actor", required=True)
+@click.option("--note", default=None)
+@click.pass_context
+def task_remove_deliverable(ctx: click.Context, task_ref: str, item: str, actor: str,
+                              note: str | None) -> None:
+    """Remove a deliverable item from a task."""
+    from trailmind.resolver import resolve_entity
+    from trailmind.log import read_entity_user_facing
+    from trailmind.entity_io import write_entity
+
+    root = find_repo_root(_cwd_from_context(ctx))
+    path = resolve_entity(root, raw=task_ref, entity="T")
+    fm, body = read_entity_user_facing(path, label="task")
+
+    deliverables = list(fm.get("deliverables") or [])
+    if item in deliverables:
+        deliverables.remove(item)
+        fm["deliverables"] = deliverables
+        write_entity(path, frontmatter=fm, body=body)
+        _echo_touched(root, [path])
+        click.echo(f"📦 Removed deliverable {item!r} from {task_ref}")
+    else:
+        click.echo(f"No deliverable {item!r} on {task_ref}")
+
+
+@task_group.command("deliverables")
+@click.argument("task_ref")
+@click.option("--json", "json_output", is_flag=True, help="Print structured JSON.")
+@click.pass_context
+def task_deliverables(ctx: click.Context, task_ref: str, json_output: bool) -> None:
+    """View deliverables for a task."""
+    from trailmind.resolver import resolve_entity
+    from trailmind.log import read_entity_user_facing
+
+    root = find_repo_root(_cwd_from_context(ctx))
+    path = resolve_entity(root, raw=task_ref, entity="T")
+    fm, _body = read_entity_user_facing(path, label="task")
+
+    deliverables = fm.get("deliverables") or []
+
+    if json_output:
+        click.echo(json.dumps({"task_id": fm.get("id", ""), "title": fm.get("title", ""),
+                               "deliverables": deliverables},
+                              ensure_ascii=False, indent=2, default=str))
+        return
+
+    if not deliverables:
+        click.echo(f"📦 No deliverables for {task_ref}")
+        return
+
+    lines = []
+    lines.append(f"📦 Deliverables: {fm.get('id', '')} — {fm.get('title', '')}")
+    lines.append("")
+
+    completed = 0
+    for d in deliverables:
+        d_str = str(d)
+        d_lower = d_str.lower()
+        is_done = d_lower.startswith("[x]") or d_lower.endswith("(done)") or d_lower.endswith("(completed)")
+        if is_done:
+            completed += 1
+        icon = "✅" if is_done else "⬜"
+        lines.append(f"  {icon} {d_str}")
+
+    lines.append("")
+    lines.append(f"  {completed}/{len(deliverables)} complete")
+
+    click.echo("\n".join(lines))
+
+
+@task_group.command("milestone-add")
+@click.argument("task_ref")
+@click.argument("milestone_ref")
+@click.option("--actor", required=True)
+@click.option("--note", default=None)
+@click.pass_context
+def task_milestone_add(ctx: click.Context, task_ref: str, milestone_ref: str, actor: str,
+                        note: str | None) -> None:
+    """Add a task to a milestone (tags with milestone name)."""
+    from trailmind.resolver import resolve_entity
+    from trailmind.log import read_entity_user_facing
+
+    root = find_repo_root(_cwd_from_context(ctx))
+    ms_path = resolve_entity(root, raw=milestone_ref, entity="M")
+    ms_fm, _ = read_entity_user_facing(ms_path, label="milestone")
+    ms_title = ms_fm.get("title", milestone_ref)
+
+    # Create a tag from milestone title
+    ms_tag = f"ms-{ms_title.lower().replace(' ', '-').replace('/', '-')}"
+
+    touched = add_task_tag(root, task_ref=task_ref, tag=ms_tag, actor=actor)
+    _echo_touched(root, [touched])
+    click.echo(f"🏁 Added {task_ref} to milestone {ms_title!r} (tag: {ms_tag})")
+
+
+@task_group.command("milestone-remove")
+@click.argument("task_ref")
+@click.argument("milestone_ref")
+@click.option("--actor", required=True)
+@click.option("--note", default=None)
+@click.pass_context
+def task_milestone_remove(ctx: click.Context, task_ref: str, milestone_ref: str, actor: str,
+                           note: str | None) -> None:
+    """Remove a task from a milestone."""
+    from trailmind.resolver import resolve_entity
+    from trailmind.log import read_entity_user_facing
+
+    root = find_repo_root(_cwd_from_context(ctx))
+    ms_path = resolve_entity(root, raw=milestone_ref, entity="M")
+    ms_fm, _ = read_entity_user_facing(ms_path, label="milestone")
+    ms_title = ms_fm.get("title", milestone_ref)
+
+    ms_tag = f"ms-{ms_title.lower().replace(' ', '-').replace('/', '-')}"
+
+    touched = remove_task_tag(root, task_ref=task_ref, tag=ms_tag, actor=actor)
+    _echo_touched(root, [touched])
+    click.echo(f"🏁 Removed {task_ref} from milestone {ms_title!r}")
+
+
+@task_group.command("estimate")
+@click.argument("task_ref")
+@click.argument("hours", type=click.IntRange(min=1, max=1000))
+@click.option("--actor", required=True)
+@click.option("--note", default=None)
+@click.pass_context
+def task_estimate(ctx: click.Context, task_ref: str, hours: int, actor: str, note: str | None) -> None:
+    """Set estimated hours for a task (stored as a tag 'est-Nh')."""
+    from trailmind.resolver import resolve_entity
+    from trailmind.log import read_entity_user_facing
+    from trailmind.entity_io import write_entity
+
+    root = find_repo_root(_cwd_from_context(ctx))
+    path = resolve_entity(root, raw=task_ref, entity="T")
+    fm, body = read_entity_user_facing(path, label="task")
+
+    # Remove existing est- tags
+    tags = [t for t in (fm.get("tags") or []) if not str(t).startswith("est-")]
+    tags.append(f"est-{hours}h")
+    fm["tags"] = tags
+
+    write_entity(path, frontmatter=fm, body=body)
+    _echo_touched(root, [path])
+    click.echo(f"⏱️  Estimated {hours}h for {task_ref}")
+
+
+@task_group.command("actual")
+@click.argument("task_ref")
+@click.argument("hours", type=click.IntRange(min=1, max=1000))
+@click.option("--actor", required=True)
+@click.option("--note", default=None)
+@click.pass_context
+def task_actual(ctx: click.Context, task_ref: str, hours: int, actor: str, note: str | None) -> None:
+    """Log actual hours spent on a task (stored as a tag 'actual-Nh')."""
+    from trailmind.resolver import resolve_entity
+    from trailmind.log import read_entity_user_facing
+    from trailmind.entity_io import write_entity
+
+    root = find_repo_root(_cwd_from_context(ctx))
+    path = resolve_entity(root, raw=task_ref, entity="T")
+    fm, body = read_entity_user_facing(path, label="task")
+
+    # Remove existing actual- tags
+    tags = [t for t in (fm.get("tags") or []) if not str(t).startswith("actual-")]
+    tags.append(f"actual-{hours}h")
+    fm["tags"] = tags
+
+    write_entity(path, frontmatter=fm, body=body)
+    _echo_touched(root, [path])
+    click.echo(f"⏱️  Logged {hours}h actual for {task_ref}")
+
+
+@task_group.command("time-report")
+@click.option("--owner", default=None, help="Filter by owner.")
+@click.option("--epic", "epic_ref", default=None, help="Filter by epic.")
+@click.option("--project", "project_ref", default=None, help="Filter by project.")
+@click.option("--json", "json_output", is_flag=True, help="Print structured JSON.")
+@click.pass_context
+def task_time_report(ctx: click.Context, owner: str | None, epic_ref: str | None,
+                      project_ref: str | None, json_output: bool) -> None:
+    """Report estimated vs actual hours from task tags."""
+    from collections import defaultdict
+
+    root = find_repo_root(_cwd_from_context(ctx))
+    all_tasks = list_tasks(root, epic_ref=epic_ref, project_ref=project_ref, owner=owner)
+
+    report = []
+    total_est = 0
+    total_actual = 0
+
+    for t in all_tasks:
+        tags = t.get("tags") or []
+        est_hours = 0
+        actual_hours = 0
+        for tag in tags:
+            tag_str = str(tag)
+            if tag_str.startswith("est-") and tag_str.endswith("h"):
+                try:
+                    est_hours = int(tag_str[4:-1])
+                except ValueError:
+                    pass
+            if tag_str.startswith("actual-") and tag_str.endswith("h"):
+                try:
+                    actual_hours = int(tag_str[7:-1])
+                except ValueError:
+                    pass
+
+        if est_hours > 0 or actual_hours > 0:
+            variance = actual_hours - est_hours if est_hours > 0 else 0
+            report.append({
+                "id": t.get("id", ""),
+                "title": t.get("title", ""),
+                "owner": t.get("owner", ""),
+                "status": t.get("status", ""),
+                "estimated": est_hours,
+                "actual": actual_hours,
+                "variance": variance,
+            })
+            total_est += est_hours
+            total_actual += actual_hours
+
+    if json_output:
+        click.echo(json.dumps({
+            "tasks": report,
+            "total_estimated": total_est,
+            "total_actual": total_actual,
+            "total_variance": total_actual - total_est,
+        }, ensure_ascii=False, indent=2, default=str))
+        return
+
+    if not report:
+        click.echo("⏱️  No tasks with time estimates found. Use 'task estimate' to set estimates.")
+        return
+
+    lines = []
+    lines.append(f"⏱️  Time Report ({len(report)} tasks with estimates)")
+    lines.append("")
+
+    # Header
+    lines.append(f"  {'ID':15s} {'Owner':10s} {'Status':12s} {'Est':>5s} {'Actual':>7s} {'Var':>5s}  Title")
+    lines.append(f"  {'─' * 15} {'─' * 10} {'─' * 12} {'─' * 5} {'─' * 7} {'─' * 5}  {'─' * 30}")
+
+    for r in sorted(report, key=lambda x: x["id"]):
+        var_str = f"+{r['variance']}" if r["variance"] > 0 else str(r["variance"]) if r["variance"] < 0 else "0"
+        var_color = "🟢" if r["variance"] <= 0 else "🔴" if r["variance"] > r["estimated"] * 0.5 else "🟡"
+        lines.append(f"  {r['id']:15s} @{r['owner']:9s} {r['status']:12s} {r['estimated']:5d} {r['actual']:7d} {var_color}{var_str:>4s}  {r['title'][:30]}")
+
+    lines.append("")
+    lines.append(f"  Totals: Est={total_est}h  Actual={total_actual}h  Variance={total_actual - total_est:+d}h")
+
+    # By owner
+    by_owner: dict[str, tuple[int, int]] = defaultdict(lambda: (0, 0))
+    for r in report:
+        o = r["owner"] or "unassigned"
+        est, act = by_owner[o]
+        by_owner[o] = (est + r["estimated"], act + r["actual"])
+
+    if len(by_owner) > 1:
+        lines.append("")
+        lines.append("  By Owner:")
+        for o, (est, act) in sorted(by_owner.items()):
+            var = act - est
+            lines.append(f"    @{o:12s} Est={est:4d}h  Actual={act:4d}h  Var={var:+d}h")
+
+    click.echo("\n".join(lines))
+
+
 @task_group.command("link-issue")
 @click.argument("task_ref")
 @click.argument("issue_ref")
@@ -15448,6 +15918,71 @@ def issue_compare(ctx: click.Context, issue_ref_a: str, issue_ref_b: str, json_o
     lines.append(f"  Summary: {same_count} same, {diff_count} different")
 
     click.echo("\n".join(lines))
+
+
+@issue_group.command("add-linked-task")
+@click.argument("issue_ref")
+@click.argument("task_ref")
+@click.option("--actor", required=True)
+@click.option("--note", default=None)
+@click.pass_context
+def issue_add_linked_task(ctx: click.Context, issue_ref: str, task_ref: str, actor: str,
+                           note: str | None) -> None:
+    """Link a task to an issue."""
+    root = find_repo_root(_cwd_from_context(ctx))
+    touched = link_issue(root, raw_issue=issue_ref, raw_task=task_ref)
+    _echo_touched(root, touched)
+
+
+@issue_group.command("remove-linked-task")
+@click.argument("issue_ref")
+@click.argument("task_ref")
+@click.option("--actor", required=True)
+@click.option("--note", default=None)
+@click.pass_context
+def issue_remove_linked_task(ctx: click.Context, issue_ref: str, task_ref: str, actor: str,
+                              note: str | None) -> None:
+    """Unlink a task from an issue."""
+    from trailmind.resolver import resolve_entity
+    from trailmind.log import read_entity_user_facing
+    from trailmind.entity_io import write_entity
+
+    root = find_repo_root(_cwd_from_context(ctx))
+
+    # Remove from issue's linked_tasks
+    issue_path = resolve_entity(root, raw=issue_ref, entity="I")
+    issue_fm, issue_body = read_entity_user_facing(issue_path, label="issue")
+    linked_tasks = list(issue_fm.get("linked_tasks") or [])
+    if task_ref in linked_tasks:
+        linked_tasks.remove(task_ref)
+        issue_fm["linked_tasks"] = linked_tasks
+        write_entity(issue_path, frontmatter=issue_fm, body=issue_body)
+
+    # Remove from task's known_issues
+    task_path = resolve_entity(root, raw=task_ref, entity="T")
+    task_fm, task_body = read_entity_user_facing(task_path, label="task")
+    known_issues = list(task_fm.get("known_issues") or [])
+    if issue_ref in known_issues:
+        known_issues.remove(issue_ref)
+        task_fm["known_issues"] = known_issues
+        write_entity(task_path, frontmatter=task_fm, body=task_body)
+
+    _echo_touched(root, [issue_path, task_path])
+    click.echo(f"🔗 Unlinked {task_ref} from {issue_ref}")
+
+
+@issue_group.command("set-description")
+@click.argument("issue_ref")
+@click.argument("description")
+@click.option("--actor", required=True)
+@click.option("--note", default=None)
+@click.pass_context
+def issue_set_description(ctx: click.Context, issue_ref: str, description: str, actor: str,
+                            note: str | None) -> None:
+    """Set the description for an issue."""
+    root = find_repo_root(_cwd_from_context(ctx))
+    touched = edit_issue(root, issue_ref=issue_ref, actor=actor, description=description, note=note)
+    _echo_touched(root, [touched])
 
 
 @issue_group.command("export")
