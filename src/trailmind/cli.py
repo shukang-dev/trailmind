@@ -10050,6 +10050,185 @@ def task_review(ctx: click.Context, owner: str | None, epic_ref: str | None, pro
     click.echo("\n".join(lines))
 
 
+@task_group.command("comment")
+@click.argument("task_ref")
+@click.argument("comment_text")
+@click.option("--actor", required=True)
+@click.pass_context
+def task_comment(ctx: click.Context, task_ref: str, comment_text: str, actor: str) -> None:
+    """Add a comment to a task (appends to body)."""
+    from trailmind.resolver import resolve_entity
+    from trailmind.log import read_entity_user_facing
+    from trailmind.entity_io import write_entity
+    from datetime import datetime
+
+    root = find_repo_root(_cwd_from_context(ctx))
+    path = resolve_entity(root, raw=task_ref, entity="T")
+    fm, body = read_entity_user_facing(path, label="task")
+
+    # Append comment to body
+    timestamp = datetime.now().strftime("%Y-%m-%d %H:%M")
+    new_comment = f"\n---\n**@{actor}** ({timestamp}):\n{comment_text}\n"
+    new_body = (body or "") + new_comment
+
+    write_entity(path, frontmatter=fm, body=new_body)
+    _echo_touched(root, [path])
+    click.echo(f"💬 Comment added to {task_ref}")
+
+
+@task_group.command("comments")
+@click.argument("task_ref")
+@click.option("--json", "json_output", is_flag=True, help="Print structured JSON.")
+@click.pass_context
+def task_comments(ctx: click.Context, task_ref: str, json_output: bool) -> None:
+    """View comments on a task."""
+    from trailmind.resolver import resolve_entity
+    from trailmind.log import read_entity_user_facing
+    import re
+
+    root = find_repo_root(_cwd_from_context(ctx))
+    path = resolve_entity(root, raw=task_ref, entity="T")
+    fm, body = read_entity_user_facing(path, label="task")
+
+    # Parse comments from body (format: --- **@actor** (timestamp): text)
+    comments = []
+    if body:
+        pattern = r'---\n\*\*@(\w+)\*\* \(([^)]+)\):\n(.*?)(?=\n---|\Z)'
+        matches = re.findall(pattern, body, re.DOTALL)
+        for actor, timestamp, text in matches:
+            comments.append({"actor": actor, "timestamp": timestamp, "text": text.strip()})
+
+    if json_output:
+        click.echo(json.dumps({"task_id": fm.get("id", ""), "comments": comments},
+                              ensure_ascii=False, indent=2, default=str))
+        return
+
+    if not comments:
+        click.echo(f"💬 No comments on {task_ref}")
+        return
+
+    lines = []
+    lines.append(f"💬 Comments on {task_ref} ({len(comments)}):")
+    lines.append("")
+    for c in comments:
+        lines.append(f"  @{c['actor']} ({c['timestamp']}):")
+        lines.append(f"    {c['text']}")
+        lines.append("")
+
+    click.echo("\n".join(lines))
+
+
+@task_group.command("history")
+@click.argument("task_ref")
+@click.option("--json", "json_output", is_flag=True, help="Print structured JSON.")
+@click.pass_context
+def task_history(ctx: click.Context, task_ref: str, json_output: bool) -> None:
+    """View task change history (from frontmatter metadata)."""
+    from trailmind.resolver import resolve_entity
+    from trailmind.log import read_entity_user_facing
+
+    root = find_repo_root(_cwd_from_context(ctx))
+    path = resolve_entity(root, raw=task_ref, entity="T")
+    fm, _body = read_entity_user_facing(path, label="task")
+
+    # Build history from available metadata
+    history = []
+    if fm.get("created"):
+        history.append({"event": "created", "date": fm["created"], "actor": fm.get("filer", "unknown")})
+    if fm.get("status"):
+        history.append({"event": f"status: {fm['status']}", "date": fm.get("updated", ""), "actor": ""})
+
+    # Add known info
+    info = {
+        "id": fm.get("id", ""),
+        "title": fm.get("title", ""),
+        "status": fm.get("status", ""),
+        "priority": fm.get("priority", ""),
+        "owner": fm.get("owner", ""),
+        "created": fm.get("created", ""),
+        "updated": fm.get("updated", ""),
+        "filer": fm.get("filer", ""),
+        "due": fm.get("due", ""),
+        "tags": list(fm.get("tags") or []),
+        "deliverables": list(fm.get("deliverables") or []),
+        "depends_on": list(fm.get("depends_on") or []),
+        "known_issues": list(fm.get("known_issues") or []),
+        "code_paths": list(fm.get("code_paths") or []),
+    }
+
+    if json_output:
+        click.echo(json.dumps({"task": info, "history": history},
+                              ensure_ascii=False, indent=2, default=str))
+        return
+
+    lines = []
+    lines.append(f"📜 Task History: {info['id']}")
+    lines.append(f"   {info['title']}")
+    lines.append("")
+
+    lines.append(f"  Status: {info['status']}")
+    lines.append(f"  Priority: {info['priority']}")
+    lines.append(f"  Owner: @{info['owner']}")
+    lines.append(f"  Created: {info['created']}")
+    lines.append(f"  Filer: @{info['filer']}")
+    if info.get("due"):
+        lines.append(f"  Due: {info['due']}")
+    if info.get("updated"):
+        lines.append(f"  Updated: {info['updated']}")
+    if info.get("tags"):
+        lines.append(f"  Tags: {', '.join(info['tags'])}")
+    if info.get("deliverables"):
+        lines.append(f"  Deliverables ({len(info['deliverables'])}):")
+        for d in info["deliverables"]:
+            lines.append(f"    - {d}")
+    if info.get("depends_on"):
+        lines.append(f"  Depends on: {', '.join(info['depends_on'])}")
+    if info.get("known_issues"):
+        lines.append(f"  Known issues: {', '.join(info['known_issues'])}")
+    if info.get("code_paths"):
+        lines.append(f"  Code paths: {', '.join(info['code_paths'])}")
+
+    click.echo("\n".join(lines))
+
+
+@task_group.command("assign")
+@click.argument("task_ref")
+@click.argument("owner")
+@click.option("--actor", required=True)
+@click.option("--note", default=None)
+@click.pass_context
+def task_assign_cmd(ctx: click.Context, task_ref: str, owner: str, actor: str, note: str | None) -> None:
+    """Assign a task to an owner."""
+    root = find_repo_root(_cwd_from_context(ctx))
+    touched = assign_task(root, task_ref=task_ref, owner=owner, actor=actor, note=note)
+    _echo_touched(root, [touched])
+
+
+@task_group.command("unassign")
+@click.argument("task_ref")
+@click.option("--actor", required=True)
+@click.option("--note", default=None)
+@click.pass_context
+def task_unassign_cmd(ctx: click.Context, task_ref: str, actor: str, note: str | None) -> None:
+    """Unassign a task (clear owner)."""
+    root = find_repo_root(_cwd_from_context(ctx))
+    touched = edit_task(root, task_ref=task_ref, actor=actor, owner="", note=note or "Unassigned")
+    _echo_touched(root, [touched])
+
+
+@task_group.command("set-owner")
+@click.argument("task_ref")
+@click.argument("owner")
+@click.option("--actor", required=True)
+@click.option("--note", default=None)
+@click.pass_context
+def task_set_owner(ctx: click.Context, task_ref: str, owner: str, actor: str, note: str | None) -> None:
+    """Set task owner (alias for task assign)."""
+    root = find_repo_root(_cwd_from_context(ctx))
+    touched = assign_task(root, task_ref=task_ref, owner=owner, actor=actor, note=note)
+    _echo_touched(root, [touched])
+
+
 @task_group.command("export")
 @click.option("--epic", "epic_ref", default=None, help="Export tasks from a specific epic.")
 @click.option("--project", "project_ref", default=None, help="Export tasks from a specific project.")
@@ -13403,6 +13582,160 @@ def issue_critical(ctx: click.Context, owner: str | None, epic_ref: str | None,
             lines.append("")
 
     click.echo("\n".join(lines))
+
+
+@issue_group.command("comment")
+@click.argument("issue_ref")
+@click.argument("comment_text")
+@click.option("--actor", required=True)
+@click.pass_context
+def issue_comment(ctx: click.Context, issue_ref: str, comment_text: str, actor: str) -> None:
+    """Add a comment to an issue (appends to body)."""
+    from trailmind.resolver import resolve_entity
+    from trailmind.log import read_entity_user_facing
+    from trailmind.entity_io import write_entity
+    from datetime import datetime
+
+    root = find_repo_root(_cwd_from_context(ctx))
+    path = resolve_entity(root, raw=issue_ref, entity="I")
+    fm, body = read_entity_user_facing(path, label="issue")
+
+    timestamp = datetime.now().strftime("%Y-%m-%d %H:%M")
+    new_comment = f"\n---\n**@{actor}** ({timestamp}):\n{comment_text}\n"
+    new_body = (body or "") + new_comment
+
+    write_entity(path, frontmatter=fm, body=new_body)
+    _echo_touched(root, [path])
+    click.echo(f"💬 Comment added to {issue_ref}")
+
+
+@issue_group.command("comments")
+@click.argument("issue_ref")
+@click.option("--json", "json_output", is_flag=True, help="Print structured JSON.")
+@click.pass_context
+def issue_comments(ctx: click.Context, issue_ref: str, json_output: bool) -> None:
+    """View comments on an issue."""
+    from trailmind.resolver import resolve_entity
+    from trailmind.log import read_entity_user_facing
+    import re
+
+    root = find_repo_root(_cwd_from_context(ctx))
+    path = resolve_entity(root, raw=issue_ref, entity="I")
+    fm, body = read_entity_user_facing(path, label="issue")
+
+    comments = []
+    if body:
+        pattern = r'---\n\*\*@(\w+)\*\* \(([^)]+)\):\n(.*?)(?=\n---|\Z)'
+        matches = re.findall(pattern, body, re.DOTALL)
+        for actor, timestamp, text in matches:
+            comments.append({"actor": actor, "timestamp": timestamp, "text": text.strip()})
+
+    if json_output:
+        click.echo(json.dumps({"issue_id": fm.get("id", ""), "comments": comments},
+                              ensure_ascii=False, indent=2, default=str))
+        return
+
+    if not comments:
+        click.echo(f"💬 No comments on {issue_ref}")
+        return
+
+    lines = []
+    lines.append(f"💬 Comments on {issue_ref} ({len(comments)}):")
+    lines.append("")
+    for c in comments:
+        lines.append(f"  @{c['actor']} ({c['timestamp']}):")
+        lines.append(f"    {c['text']}")
+        lines.append("")
+
+    click.echo("\n".join(lines))
+
+
+@issue_group.command("history")
+@click.argument("issue_ref")
+@click.option("--json", "json_output", is_flag=True, help="Print structured JSON.")
+@click.pass_context
+def issue_history(ctx: click.Context, issue_ref: str, json_output: bool) -> None:
+    """View issue details and metadata."""
+    from trailmind.resolver import resolve_entity
+    from trailmind.log import read_entity_user_facing
+
+    root = find_repo_root(_cwd_from_context(ctx))
+    path = resolve_entity(root, raw=issue_ref, entity="I")
+    fm, _body = read_entity_user_facing(path, label="issue")
+
+    info = {
+        "id": fm.get("id", ""),
+        "title": fm.get("title", ""),
+        "status": fm.get("status", ""),
+        "severity": fm.get("severity", ""),
+        "owner": fm.get("owner", ""),
+        "created": fm.get("created", ""),
+        "filer": fm.get("filer", ""),
+        "epic": fm.get("epic", ""),
+        "linked_tasks": list(fm.get("linked_tasks") or []),
+        "description": fm.get("description", ""),
+    }
+
+    if json_output:
+        click.echo(json.dumps(info, ensure_ascii=False, indent=2, default=str))
+        return
+
+    lines = []
+    lines.append(f"📜 Issue History: {info['id']}")
+    lines.append(f"   {info['title']}")
+    lines.append("")
+    lines.append(f"  Status: {info['status']}")
+    lines.append(f"  Severity: {info['severity']}")
+    lines.append(f"  Owner: @{info['owner']}")
+    lines.append(f"  Created: {info['created']}")
+    lines.append(f"  Filer: @{info['filer']}")
+    if info.get("epic"):
+        lines.append(f"  Epic: {info['epic']}")
+    if info.get("linked_tasks"):
+        lines.append(f"  Linked tasks: {', '.join(info['linked_tasks'])}")
+    if info.get("description"):
+        lines.append(f"  Description: {info['description']}")
+
+    click.echo("\n".join(lines))
+
+
+@issue_group.command("unassign")
+@click.argument("issue_ref")
+@click.option("--actor", required=True)
+@click.option("--note", default=None)
+@click.pass_context
+def issue_unassign(ctx: click.Context, issue_ref: str, actor: str, note: str | None) -> None:
+    """Unassign an issue (clear owner)."""
+    root = find_repo_root(_cwd_from_context(ctx))
+    touched = edit_issue(root, issue_ref=issue_ref, actor=actor, owner="", note=note or "Unassigned")
+    _echo_touched(root, [touched])
+
+
+@issue_group.command("set-owner")
+@click.argument("issue_ref")
+@click.argument("owner")
+@click.option("--actor", required=True)
+@click.option("--note", default=None)
+@click.pass_context
+def issue_set_owner(ctx: click.Context, issue_ref: str, owner: str, actor: str, note: str | None) -> None:
+    """Set issue owner (alias for issue assign)."""
+    root = find_repo_root(_cwd_from_context(ctx))
+    touched = assign_issue(root, issue_ref=issue_ref, owner=owner, actor=actor, note=note)
+    _echo_touched(root, [touched])
+
+
+@issue_group.command("set-severity")
+@click.argument("issue_ref")
+@click.argument("severity", type=click.Choice(ISSUE_SEVERITIES, case_sensitive=False))
+@click.option("--actor", required=True)
+@click.option("--note", default=None)
+@click.pass_context
+def issue_set_severity_cmd(ctx: click.Context, issue_ref: str, severity: str, actor: str,
+                            note: str | None) -> None:
+    """Set issue severity."""
+    root = find_repo_root(_cwd_from_context(ctx))
+    touched = set_issue_severity(root, issue_ref=issue_ref, severity=severity, actor=actor, note=note)
+    _echo_touched(root, [touched])
 
 
 @issue_group.command("export")
