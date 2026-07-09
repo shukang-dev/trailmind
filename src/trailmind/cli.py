@@ -6362,6 +6362,620 @@ def task_timeline(ctx: click.Context, epic_ref: str | None, project_ref: str | N
     click.echo("\n".join(lines))
 
 
+@task_group.command("risk-report")
+@click.option("--epic", "epic_ref", default=None, help="Analyze risks for a specific epic.")
+@click.option("--project", "project_ref", default=None, help="Analyze risks for a specific project.")
+@click.option("--owner", default=None, help="Filter by owner.")
+@click.option("--json", "json_output", is_flag=True, help="Print structured JSON.")
+@click.pass_context
+def task_risk_report(ctx: click.Context, epic_ref: str | None, project_ref: str | None,
+                     owner: str | None, json_output: bool) -> None:
+    """Generate a risk report: identify high-risk tasks and potential issues."""
+    from datetime import date, timedelta
+    from collections import defaultdict
+
+    root = find_repo_root(_cwd_from_context(ctx))
+    today = date.today()
+    today_str = today.isoformat()
+    week_away = (today + timedelta(days=7)).isoformat()
+
+    all_tasks = list_tasks(root, epic_ref=epic_ref, project_ref=project_ref, owner=owner)
+    active_tasks = [t for t in all_tasks if t.get("status") not in ("done", "wontfix")]
+    all_issues = list_issues(root, epic_ref=epic_ref, project_ref=project_ref)
+    open_issues = [i for i in all_issues if i.get("status") not in ("done", "wontfix")]
+
+    risks = []
+
+    # Risk 1: Overdue tasks
+    overdue = [t for t in active_tasks if t.get("due") and t["due"] < today_str]
+    if overdue:
+        critical_overdue = [t for t in overdue if t.get("priority") == "critical"]
+        high_overdue = [t for t in overdue if t.get("priority") == "high"]
+        severity = "critical" if critical_overdue else ("high" if high_overdue else "medium")
+        risks.append({
+            "type": "overdue",
+            "severity": severity,
+            "count": len(overdue),
+            "description": f"{len(overdue)} overdue task(s)",
+            "details": f"{len(critical_overdue)} critical, {len(high_overdue)} high priority",
+            "ids": [t["id"] for t in overdue],
+        })
+
+    # Risk 2: Tasks due this week (potential risk if not started)
+    due_this_week = [t for t in active_tasks
+                     if t.get("due") and today_str <= t["due"] <= week_away
+                     and t.get("status") in ("created", "ready")]
+    if due_this_week:
+        risks.append({
+            "type": "upcoming_deadline",
+            "severity": "high" if len(due_this_week) > 3 else "medium",
+            "count": len(due_this_week),
+            "description": f"{len(due_this_week)} task(s) due this week and not started",
+            "details": "May need to start soon to meet deadlines",
+            "ids": [t["id"] for t in due_this_week],
+        })
+
+    # Risk 3: Blocked tasks
+    blocked = [t for t in active_tasks if t.get("status") == "blocked"]
+    if blocked:
+        # Check if blocked tasks have known issues
+        blocked_with_issues = [t for t in blocked if t.get("known_issues")]
+        blocked_without_issues = [t for t in blocked if not t.get("known_issues")]
+        risks.append({
+            "type": "blocked",
+            "severity": "high" if len(blocked) > 2 else "medium",
+            "count": len(blocked),
+            "description": f"{len(blocked)} blocked task(s)",
+            "details": f"{len(blocked_with_issues)} with known issues, {len(blocked_without_issues)} without documented blockers",
+            "ids": [t["id"] for t in blocked],
+        })
+
+    # Risk 4: Unassigned tasks
+    unassigned = [t for t in active_tasks if not t.get("owner")]
+    if unassigned:
+        critical_unassigned = [t for t in unassigned if t.get("priority") in ("critical", "high")]
+        risks.append({
+            "type": "unassigned",
+            "severity": "high" if critical_unassigned else "low",
+            "count": len(unassigned),
+            "description": f"{len(unassigned)} active task(s) without owner",
+            "details": f"{len(critical_unassigned)} critical/high priority unassigned",
+            "ids": [t["id"] for t in unassigned],
+        })
+
+    # Risk 5: Tasks without deliverables
+    no_deliverables = [t for t in active_tasks
+                       if not t.get("deliverables") and t.get("status") != "done"]
+    if no_deliverables and len(no_deliverables) > len(active_tasks) * 0.5:
+        risks.append({
+            "type": "no_deliverables",
+            "severity": "low",
+            "count": len(no_deliverables),
+            "description": f"{len(no_deliverables)} task(s) without defined deliverables",
+            "details": f"{round(len(no_deliverables)/len(active_tasks)*100)}% of active tasks",
+            "ids": [t["id"] for t in no_deliverables[:10]],
+        })
+
+    # Risk 6: Tasks without due dates
+    no_due = [t for t in active_tasks if not t.get("due")]
+    if no_due and len(no_due) > len(active_tasks) * 0.3:
+        risks.append({
+            "type": "no_due_date",
+            "severity": "low",
+            "count": len(no_due),
+            "description": f"{len(no_due)} active task(s) without due date",
+            "details": f"{round(len(no_due)/len(active_tasks)*100)}% of active tasks",
+            "ids": [t["id"] for t in no_due[:10]],
+        })
+
+    # Risk 7: Critical/high priority open issues
+    critical_issues = [i for i in open_issues if i.get("severity") == "critical"]
+    high_issues = [i for i in open_issues if i.get("severity") == "high"]
+    if critical_issues or high_issues:
+        risks.append({
+            "type": "open_issues",
+            "severity": "critical" if critical_issues else "high",
+            "count": len(critical_issues) + len(high_issues),
+            "description": f"{len(critical_issues)} critical, {len(high_issues)} high priority open issues",
+            "details": "May block task completion",
+            "ids": [i.get("id", "") for i in critical_issues + high_issues],
+        })
+
+    # Risk 8: Single point of failure (one owner has too many critical tasks)
+    by_owner_critical: dict[str, int] = defaultdict(int)
+    for t in active_tasks:
+        if t.get("priority") in ("critical", "high"):
+            owner = t.get("owner") or "unassigned"
+            by_owner_critical[owner] += 1
+    spof_owners = [(o, c) for o, c in by_owner_critical.items() if c >= 3]
+    if spof_owners:
+        risks.append({
+            "type": "single_point_of_failure",
+            "severity": "medium",
+            "count": len(spof_owners),
+            "description": f"{len(spof_owners)} owner(s) with 3+ critical/high tasks",
+            "details": ", ".join(f"@{o}: {c} tasks" for o, c in spof_owners),
+            "ids": [],
+        })
+
+    # Risk 9: Stale tasks (created > 30 days ago, not done)
+    month_ago = (today - timedelta(days=30)).isoformat()
+    stale = [t for t in active_tasks
+             if t.get("created") and t["created"] < month_ago
+             and t.get("status") in ("created", "ready")]
+    if stale:
+        risks.append({
+            "type": "stale",
+            "severity": "medium",
+            "count": len(stale),
+            "description": f"{len(stale)} stale task(s) (created >30 days ago, not started)",
+            "details": "May need to be reprioritized or closed",
+            "ids": [t["id"] for t in stale[:10]],
+        })
+
+    # Risk 10: Dependency chain too long
+    task_map = {t.get("id", ""): t for t in active_tasks}
+    def get_dep_chain_length(tid: str, visited: set | None = None) -> int:
+        if visited is None:
+            visited = set()
+        if tid in visited:
+            return 0
+        visited.add(tid)
+        task = task_map.get(tid)
+        if not task:
+            return 0
+        deps = task.get("depends_on") or []
+        if not deps:
+            return 1
+        max_chain = 0
+        for dep in deps:
+            resolved = dep
+            for t in task_map:
+                if t.endswith(dep) or dep in t:
+                    resolved = t
+                    break
+            chain = get_dep_chain_length(resolved, visited.copy())
+            max_chain = max(max_chain, chain)
+        return max_chain + 1
+
+    long_chains = []
+    for tid in task_map:
+        chain_len = get_dep_chain_length(tid)
+        if chain_len >= 4:
+            long_chains.append((tid, chain_len))
+    if long_chains:
+        long_chains.sort(key=lambda x: -x[1])
+        risks.append({
+            "type": "long_dependency_chain",
+            "severity": "medium",
+            "count": len(long_chains),
+            "description": f"{len(long_chains)} task(s) with dependency chains of 4+ levels",
+            "details": f"Longest: {long_chains[0][0]} ({long_chains[0][1]} levels)",
+            "ids": [tid for tid, _ in long_chains[:5]],
+        })
+
+    # Calculate overall risk score
+    severity_weights = {"critical": 10, "high": 5, "medium": 2, "low": 1}
+    risk_score = sum(severity_weights.get(r["severity"], 1) for r in risks)
+
+    if risk_score >= 30:
+        overall_level = "🔴 CRITICAL"
+    elif risk_score >= 15:
+        overall_level = "🟠 HIGH"
+    elif risk_score >= 5:
+        overall_level = "🟡 MEDIUM"
+    else:
+        overall_level = "🟢 LOW"
+
+    if json_output:
+        data = {
+            "generated": today_str,
+            "overall_risk": overall_level,
+            "risk_score": risk_score,
+            "total_active_tasks": len(active_tasks),
+            "total_open_issues": len(open_issues),
+            "risks": risks,
+        }
+        click.echo(json.dumps(data, ensure_ascii=False, indent=2, default=str))
+        return
+
+    # Text output
+    lines = []
+    lines.append(f"⚠️  Risk Report")
+    lines.append(f"   Overall risk: {overall_level}")
+    lines.append(f"   Risk score: {risk_score}")
+    lines.append(f"   Active tasks: {len(active_tasks)}")
+    lines.append(f"   Open issues: {len(open_issues)}")
+    lines.append("")
+
+    if not risks:
+        lines.append("✅ No significant risks identified.")
+        click.echo("\n".join(lines))
+        return
+
+    severity_icons = {"critical": "🔴", "high": "🟠", "medium": "🟡", "low": "🟢"}
+    for risk in sorted(risks, key=lambda r: {"critical": 0, "high": 1, "medium": 2, "low": 3}.get(r["severity"], 99)):
+        icon = severity_icons.get(risk["severity"], "❓")
+        lines.append(f"{icon} [{risk['severity'].upper()}] {risk['description']}")
+        if risk.get("details"):
+            lines.append(f"   {risk['details']}")
+        if risk.get("ids") and len(risk["ids"]) <= 5:
+            lines.append(f"   IDs: {', '.join(risk['ids'])}")
+        elif risk.get("ids"):
+            ids_str = ", ".join(risk["ids"][:5])
+            lines.append(f"   IDs: {ids_str} +{len(risk['ids']) - 5}")
+        lines.append("")
+
+    # Recommendations
+    lines.append("💡 Recommendations:")
+    recs = []
+    for risk in risks:
+        if risk["type"] == "overdue":
+            recs.append("Review overdue tasks and update due dates or mark as done")
+        elif risk["type"] == "upcoming_deadline":
+            recs.append("Start tasks due this week to meet deadlines")
+        elif risk["type"] == "blocked":
+            recs.append("Unblock tasks or escalate blockers")
+        elif risk["type"] == "unassigned":
+            recs.append("Assign owners to unassigned tasks")
+        elif risk["type"] == "open_issues":
+            recs.append("Triage critical/high priority issues")
+        elif risk["type"] == "single_point_of_failure":
+            recs.append("Distribute critical tasks across more owners")
+        elif risk["type"] == "stale":
+            recs.append("Review stale tasks — reprioritize or close")
+        elif risk["type"] == "long_dependency_chain":
+            recs.append("Consider breaking long dependency chains")
+    for r in recs[:5]:
+        lines.append(f"  - {r}")
+
+    click.echo("\n".join(lines))
+
+
+@task_group.command("capacity-report")
+@click.option("--epic", "epic_ref", default=None, help="Analyze capacity for a specific epic.")
+@click.option("--project", "project_ref", default=None, help="Analyze capacity for a specific project.")
+@click.option("--hours-per-task", default=4, show_default=True, type=click.IntRange(min=1, max=40),
+              help="Estimated hours per task.")
+@click.option("--hours-per-day", default=6, show_default=True, type=click.IntRange(min=1, max=12),
+              help="Available working hours per day per person.")
+@click.option("--json", "json_output", is_flag=True, help="Print structured JSON.")
+@click.pass_context
+def task_capacity_report(ctx: click.Context, epic_ref: str | None, project_ref: str | None,
+                          hours_per_task: int, hours_per_day: int, json_output: bool) -> None:
+    """Analyze team capacity: workload distribution and estimated completion."""
+    from datetime import date, timedelta
+    from collections import defaultdict
+
+    root = find_repo_root(_cwd_from_context(ctx))
+    today = date.today()
+
+    all_tasks = list_tasks(root, epic_ref=epic_ref, project_ref=project_ref)
+    active_tasks = [t for t in all_tasks if t.get("status") not in ("done", "wontfix")]
+
+    # Group by owner
+    by_owner: dict[str, list[dict]] = defaultdict(list)
+    unassigned_tasks = []
+    for t in active_tasks:
+        owner = t.get("owner")
+        if owner:
+            by_owner[owner].append(t)
+        else:
+            unassigned_tasks.append(t)
+
+    # Calculate capacity per owner
+    owner_capacity = {}
+    for owner, tasks in by_owner.items():
+        total_tasks = len(tasks)
+        in_progress = len([t for t in tasks if t.get("status") == "in_progress"])
+        ready = len([t for t in tasks if t.get("status") == "ready"])
+        created = len([t for t in tasks if t.get("status") == "created"])
+        blocked = len([t for t in tasks if t.get("status") == "blocked"])
+        overdue = len([t for t in tasks if t.get("due") and t["due"] < today.isoformat()])
+
+        # Priority breakdown
+        critical = len([t for t in tasks if t.get("priority") == "critical"])
+        high = len([t for t in tasks if t.get("priority") == "high"])
+        medium = len([t for t in tasks if t.get("priority") == "medium"])
+        low = len([t for t in tasks if t.get("priority") == "low"])
+
+        # Estimated hours
+        est_hours = total_tasks * hours_per_task
+        est_days = round(est_hours / hours_per_day, 1)
+
+        # Due date analysis
+        dated_tasks = [t for t in tasks if t.get("due")]
+        if dated_tasks:
+            earliest_due = min(t["due"] for t in dated_tasks)
+            latest_due = max(t["due"] for t in dated_tasks)
+        else:
+            earliest_due = None
+            latest_due = None
+
+        # Workload level
+        if total_tasks <= 3:
+            workload = "🟢 Light"
+        elif total_tasks <= 7:
+            workload = "🟡 Moderate"
+        elif total_tasks <= 12:
+            workload = "🟠 Heavy"
+        else:
+            workload = "🔴 Overloaded"
+
+        owner_capacity[owner] = {
+            "total": total_tasks,
+            "in_progress": in_progress,
+            "ready": ready,
+            "created": created,
+            "blocked": blocked,
+            "overdue": overdue,
+            "critical": critical,
+            "high": high,
+            "medium": medium,
+            "low": low,
+            "est_hours": est_hours,
+            "est_days": est_days,
+            "earliest_due": earliest_due,
+            "latest_due": latest_due,
+            "workload": workload,
+            "tasks": tasks,
+        }
+
+    # Overall stats
+    total_active = len(active_tasks)
+    total_assigned = sum(c["total"] for c in owner_capacity.values())
+    total_unassigned = len(unassigned_tasks)
+    total_est_hours = (total_assigned + total_unassigned) * hours_per_task
+    num_owners = len(owner_capacity)
+    avg_tasks_per_owner = round(total_assigned / max(num_owners, 1), 1)
+
+    # Workload balance
+    if num_owners > 0:
+        task_counts = [c["total"] for c in owner_capacity.values()]
+        max_tasks = max(task_counts)
+        min_tasks = min(task_counts)
+        balance_ratio = round(max_tasks / max(min_tasks, 1), 1)
+        if balance_ratio <= 1.5:
+            balance = "🟢 Balanced"
+        elif balance_ratio <= 2.5:
+            balance = "🟡 Moderately unbalanced"
+        else:
+            balance = "🔴 Highly unbalanced"
+    else:
+        balance = "❓ No owners"
+
+    if json_output:
+        data = {
+            "generated": today.isoformat(),
+            "total_active_tasks": total_active,
+            "total_assigned": total_assigned,
+            "total_unassigned": total_unassigned,
+            "num_owners": num_owners,
+            "avg_tasks_per_owner": avg_tasks_per_owner,
+            "total_est_hours": total_est_hours,
+            "workload_balance": balance,
+            "balance_ratio": balance_ratio if num_owners > 0 else 0,
+            "by_owner": {
+                owner: {k: v for k, v in cap.items() if k != "tasks"}
+                for owner, cap in owner_capacity.items()
+            },
+            "unassigned": [{"id": t["id"], "title": t["title"], "priority": t.get("priority", "")}
+                          for t in unassigned_tasks],
+        }
+        click.echo(json.dumps(data, ensure_ascii=False, indent=2, default=str))
+        return
+
+    # Text output
+    lines = []
+    lines.append(f"👥 Team Capacity Report")
+    lines.append(f"   Active tasks: {total_active}")
+    lines.append(f"   Assigned: {total_assigned}")
+    lines.append(f"   Unassigned: {total_unassigned}")
+    lines.append(f"   Owners: {num_owners}")
+    lines.append(f"   Avg tasks/owner: {avg_tasks_per_owner}")
+    lines.append(f"   Est total hours: {total_est_hours}h")
+    lines.append(f"   Workload balance: {balance}")
+    lines.append("")
+
+    # Per owner breakdown
+    lines.append("📊 By Owner:")
+    lines.append("")
+
+    # Sort by total tasks descending
+    sorted_owners = sorted(owner_capacity.items(), key=lambda x: -x[1]["total"])
+    for owner, cap in sorted_owners:
+        lines.append(f"  @{owner} ({cap['workload']})")
+        lines.append(f"    Total: {cap['total']}  |  In progress: {cap['in_progress']}  |  "
+                     f"Ready: {cap['ready']}  |  Created: {cap['created']}  |  Blocked: {cap['blocked']}")
+        lines.append(f"    Priority: 🔴{cap['critical']} 🟠{cap['high']} 🟡{cap['medium']} 🟢{cap['low']}")
+        if cap["overdue"]:
+            lines.append(f"    ⚠️  Overdue: {cap['overdue']}")
+        lines.append(f"    Est: {cap['est_hours']}h ({cap['est_days']} days)")
+        if cap["earliest_due"]:
+            lines.append(f"    Due range: {cap['earliest_due']} → {cap['latest_due']}")
+
+        # Show top tasks
+        top_tasks = sorted(cap["tasks"],
+                          key=lambda t: ({"critical": 0, "high": 1, "medium": 2, "low": 3, "unspecified": 4}.get(t.get("priority", "unspecified"), 4),
+                                       t.get("due", "9999-99-99")))[:3]
+        if top_tasks:
+            lines.append(f"    Top tasks:")
+            for t in top_tasks:
+                due = f" due:{t.get('due', '')}" if t.get("due") else ""
+                lines.append(f"      - {t['id']}{due}  {t['title']}")
+        lines.append("")
+
+    # Unassigned tasks
+    if unassigned_tasks:
+        lines.append(f"❓ Unassigned ({len(unassigned_tasks)}):")
+        for t in unassigned_tasks[:5]:
+            pri = f"[{t.get('priority', '').upper()}]" if t.get("priority") else ""
+            lines.append(f"    {t['id']} {pri}  {t['title']}")
+        if len(unassigned_tasks) > 5:
+            lines.append(f"    ... and {len(unassigned_tasks) - 5} more")
+        lines.append("")
+
+    # Recommendations
+    lines.append("💡 Recommendations:")
+    recs = []
+    if total_unassigned > 0:
+        recs.append(f"Assign {total_unassigned} unassigned task(s) to owners")
+    if num_owners > 0 and balance_ratio > 2:
+        most_loaded = sorted_owners[0]
+        least_loaded = sorted_owners[-1]
+        recs.append(f"Rebalance workload: @{most_loaded[0]} has {most_loaded[1]['total']} tasks, "
+                     f"@{least_loaded[0]} has {least_loaded[1]['total']}")
+    overloaded = [(o, c) for o, c in owner_capacity.items() if "Overloaded" in c["workload"]]
+    if overloaded:
+        for owner, cap in overloaded:
+            recs.append(f"@{owner} is overloaded ({cap['total']} tasks) — consider redistributing")
+    for owner, cap in owner_capacity.items():
+        if cap["overdue"] > 0:
+            recs.append(f"@{owner} has {cap['overdue']} overdue task(s)")
+            break
+    for r in recs[:5]:
+        lines.append(f"  - {r}")
+
+    click.echo("\n".join(lines))
+
+
+@task_group.command("burnup")
+@click.option("--epic", "epic_ref", default=None, help="Show burnup for a specific epic.")
+@click.option("--project", "project_ref", default=None, help="Show burnup for a specific project.")
+@click.option("--owner", default=None, help="Filter by owner.")
+@click.option("--width", default=40, show_default=True, type=click.IntRange(min=10, max=100),
+              help="Chart width in characters.")
+@click.option("--json", "json_output", is_flag=True, help="Print structured JSON.")
+@click.pass_context
+def task_burnup(ctx: click.Context, epic_ref: str | None, project_ref: str | None,
+                owner: str | None, width: int, json_output: bool) -> None:
+    """Show a burn-up chart: tasks completed over time vs total scope."""
+    from datetime import date, timedelta
+    from collections import defaultdict
+
+    root = find_repo_root(_cwd_from_context(ctx))
+    today = date.today()
+
+    all_tasks = list_tasks(root, epic_ref=epic_ref, project_ref=project_ref, owner=owner)
+    total_tasks = len(all_tasks)
+
+    if total_tasks == 0:
+        click.echo("No tasks found.")
+        return
+
+    # Group done tasks by completion date (approximated by "done" status)
+    done_tasks = [t for t in all_tasks if t.get("status") == "done"]
+    active_tasks = [t for t in all_tasks if t.get("status") not in ("done", "wontfix")]
+
+    # For done tasks, we don't have a completion date stored in the frontmatter
+    # (only "created"). We'll approximate by using created date as a proxy
+    # and show current state rather than historical.
+
+    # Build a simple burn-up: scope (total) vs completed (done)
+    scope = total_tasks
+    completed = len(done_tasks)
+    remaining = len(active_tasks)
+
+    # Calculate completion percentage
+    pct = round(completed / max(scope, 1) * 100, 1)
+
+    if json_output:
+        data = {
+            "generated": today.isoformat(),
+            "total_scope": scope,
+            "completed": completed,
+            "remaining": remaining,
+            "completion_pct": pct,
+            "by_status": {
+                status: len([t for t in all_tasks if t.get("status") == status])
+                for status in set(t.get("status", "unknown") for t in all_tasks)
+            },
+        }
+        click.echo(json.dumps(data, ensure_ascii=False, indent=2, default=str))
+        return
+
+    # Text output with ASCII chart
+    lines = []
+    lines.append(f"🔥 Burn-Up Chart")
+    lines.append(f"   Scope: {scope} tasks  |  Done: {completed}  |  Remaining: {remaining}")
+    lines.append(f"   Completion: {pct}%")
+    lines.append("")
+
+    # Build the burn-up bar
+    bar_width = width
+    completed_chars = int(pct / 100 * bar_width)
+    remaining_chars = bar_width - completed_chars
+
+    completed_bar = "█" * completed_chars
+    remaining_bar = "░" * remaining_chars
+
+    lines.append(f"  Completed: [{completed_bar}{remaining_bar}] {pct}%")
+    lines.append(f"             0{' ' * (bar_width - 5)}{scope}")
+    lines.append("")
+
+    # Scope line (total)
+    lines.append(f"  📏 Scope:     {'─' * bar_width} {scope}")
+
+    # Completed line
+    completed_bar_full = "█" * min(completed_chars, bar_width)
+    lines.append(f"  ✅ Completed: {completed_bar_full}{' ' * (bar_width - len(completed_bar_full))} {completed}")
+
+    # Remaining
+    lines.append(f"  ⏳ Remaining: {'░' * remaining_chars}{' ' * completed_chars} {remaining}")
+    lines.append("")
+
+    # Status breakdown
+    status_counts: dict[str, int] = defaultdict(int)
+    for t in all_tasks:
+        status_counts[t.get("status", "unknown")] += 1
+
+    lines.append("📊 By Status:")
+    status_order = ["done", "in_progress", "ready", "created", "blocked", "wontfix"]
+    for status in status_order:
+        count = status_counts.get(status, 0)
+        if count == 0:
+            continue
+        bar_len = int(count / max(scope, 1) * bar_width)
+        bar = "█" * bar_len
+        icon = {"done": "✅", "in_progress": "🔧", "ready": "⏳",
+                "created": "📝", "blocked": "🚧", "wontfix": "❌"}.get(status, "❓")
+        lines.append(f"  {icon} {status:12s} {bar} {count}")
+
+    # If we have milestones, show projected completion
+    milestones = list_milestones(root, epic_ref=epic_ref, project_ref=project_ref)
+    if milestones:
+        upcoming = [m for m in milestones if m.get("date") and m.get("status") != "done"]
+        if upcoming:
+            lines.append("")
+            lines.append("🏁 Upcoming Milestones:")
+            for m in sorted(upcoming, key=lambda m: m.get("date", ""))[:3]:
+                ms_date = m.get("date", "")
+                ms_title = m.get("title", "")
+                days_away = (date.fromisoformat(ms_date) - today).days if ms_date else 0
+                days_str = f" ({days_away} days)" if days_away > 0 else " (today!)" if days_away == 0 else f" ({-days_away} days ago)"
+                lines.append(f"  {ms_date}  {ms_title}{days_str}")
+
+    lines.append("")
+
+    # Velocity estimate
+    if completed > 0:
+        # Estimate days remaining based on current completion rate
+        # Assume tasks were created over time, use created dates to estimate rate
+        created_dates = [t.get("created") for t in done_tasks if t.get("created")]
+        if len(created_dates) >= 2:
+            first = date.fromisoformat(min(created_dates))
+            days_elapsed = max((today - first).days, 1)
+            velocity = completed / days_elapsed  # tasks/day
+            if velocity > 0:
+                est_days_remaining = round(remaining / velocity, 1)
+                est_completion = today + timedelta(days=est_days_remaining)
+                lines.append(f"📈 Velocity: {round(velocity, 2)} tasks/day")
+                lines.append(f"🎯 Estimated completion: {est_completion.isoformat()} "
+                             f"(~{est_days_remaining} days)")
+
+    click.echo("\n".join(lines))
+
+
 @task_group.command("edit")
 @click.argument("task_ref")
 @click.option("--title", default=None, help="New task title.")
