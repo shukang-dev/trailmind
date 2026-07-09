@@ -7158,6 +7158,594 @@ def task_workload(ctx: click.Context, epic_ref: str | None, project_ref: str | N
         click.echo(result.output, nl=False)
 
 
+@task_group.command("owner-report")
+@click.option("--epic", "epic_ref", default=None, help="Filter by epic.")
+@click.option("--project", "project_ref", default=None, help="Filter by project.")
+@click.option("--include-done", is_flag=True, help="Include done tasks.")
+@click.option("--json", "json_output", is_flag=True, help="Print structured JSON.")
+@click.pass_context
+def task_owner_report(ctx: click.Context, epic_ref: str | None, project_ref: str | None,
+                       include_done: bool, json_output: bool) -> None:
+    """Detailed report of tasks grouped by owner."""
+    from datetime import date, timedelta
+    from collections import defaultdict
+
+    root = find_repo_root(_cwd_from_context(ctx))
+    today = date.today()
+    today_str = today.isoformat()
+    week_end = (today + timedelta(days=7)).isoformat()
+
+    all_tasks = list_tasks(root, epic_ref=epic_ref, project_ref=project_ref)
+    if not include_done:
+        all_tasks = [t for t in all_tasks if t.get("status") not in ("done", "wontfix")]
+
+    # Group by owner
+    by_owner: dict[str, list[dict]] = defaultdict(list)
+    for t in all_tasks:
+        owner = t.get("owner") or "unassigned"
+        by_owner[owner].append(t)
+
+    # Calculate stats per owner
+    owner_stats = {}
+    for owner, tasks in by_owner.items():
+        active = [t for t in tasks if t.get("status") not in ("done", "wontfix")]
+        done = [t for t in tasks if t.get("status") == "done"]
+        in_progress = [t for t in tasks if t.get("status") == "in_progress"]
+        blocked = [t for t in tasks if t.get("status") == "blocked"]
+        overdue = [t for t in active if t.get("due") and t["due"] < today_str]
+        due_this_week = [t for t in active if t.get("due") and today_str <= t["due"] <= week_end]
+        no_due = [t for t in active if not t.get("due")]
+
+        # Priority breakdown
+        by_priority: dict[str, int] = defaultdict(int)
+        for t in active:
+            by_priority[t.get("priority", "unspecified")] += 1
+
+        # Estimated hours (rough)
+        est_hours = len(active) * 4
+
+        # Completion rate
+        total = len(tasks)
+        completion_rate = round(len(done) / max(total, 1) * 100, 1)
+
+        owner_stats[owner] = {
+            "total": total,
+            "active": len(active),
+            "done": len(done),
+            "in_progress": len(in_progress),
+            "blocked": len(blocked),
+            "overdue": len(overdue),
+            "due_this_week": len(due_this_week),
+            "no_due": len(no_due),
+            "by_priority": dict(by_priority),
+            "est_hours": est_hours,
+            "completion_rate": completion_rate,
+            "tasks": tasks,
+        }
+
+    if json_output:
+        clean = {}
+        for owner, stats in owner_stats.items():
+            clean[owner] = {k: v for k, v in stats.items() if k != "tasks"}
+            clean[owner]["tasks"] = [{"id": t["id"], "title": t["title"], "status": t.get("status", ""),
+                                       "priority": t.get("priority", ""), "due": t.get("due", "")}
+                                      for t in stats["tasks"]]
+        click.echo(json.dumps(clean, ensure_ascii=False, indent=2, default=str))
+        return
+
+    # Text output
+    lines = []
+    lines.append(f"👤 Owner Report ({len(by_owner)} owners, {len(all_tasks)} tasks)")
+    lines.append("")
+
+    # Sort by active task count
+    sorted_owners = sorted(owner_stats.items(), key=lambda x: -x[1]["active"])
+
+    for owner, stats in sorted_owners:
+        # Workload indicator
+        if stats["active"] <= 3:
+            workload = "🟢"
+        elif stats["active"] <= 7:
+            workload = "🟡"
+        elif stats["active"] <= 12:
+            workload = "🟠"
+        else:
+            workload = "🔴"
+
+        lines.append(f"{workload} @{owner} ({stats['active']} active, {stats['done']} done — {stats['completion_rate']}%)")
+
+        # Status summary
+        status_parts = []
+        if stats["in_progress"]:
+            status_parts.append(f"🔧 {stats['in_progress']}")
+        if stats["blocked"]:
+            status_parts.append(f"🚧 {stats['blocked']}")
+        if stats["overdue"]:
+            status_parts.append(f"⚠️ {stats['overdue']} overdue")
+        if stats["due_this_week"]:
+            status_parts.append(f"📅 {stats['due_this_week']} this week")
+        if status_parts:
+            lines.append(f"   {'  '.join(status_parts)}")
+
+        # Priority breakdown
+        pri_parts = []
+        for pri in ("critical", "high", "medium", "low"):
+            count = stats["by_priority"].get(pri, 0)
+            if count:
+                pri_parts.append(f"{pri}: {count}")
+        if pri_parts:
+            lines.append(f"   [{', '.join(pri_parts)}]")
+
+        # Estimated hours
+        lines.append(f"   Est: {stats['est_hours']}h remaining")
+
+        # Show top tasks (by priority then due date)
+        top_tasks = sorted(stats["tasks"],
+                          key=lambda t: ({"critical": 0, "high": 1, "medium": 2, "low": 3, "unspecified": 4}.get(t.get("priority", "unspecified"), 4),
+                                       t.get("due", "9999-99-99")))[:5]
+        if top_tasks:
+            lines.append(f"   Top tasks:")
+            for t in top_tasks:
+                status_icon = {"done": "✅", "in_progress": "🔧", "blocked": "🚧",
+                              "ready": "⏳", "created": "📝"}.get(t.get("status", ""), "❓")
+                pri = f"[{t.get('priority', '').upper()}]" if t.get("priority") else ""
+                due = f" due:{t.get('due', '')}" if t.get("due") else ""
+                overdue_mark = " ⚠️" if (t.get("due") and t["due"] < today_str
+                                         and t.get("status") not in ("done", "wontfix")) else ""
+                lines.append(f"     {status_icon} {t['id']} {pri}{due}{overdue_mark}  {t['title']}")
+
+        lines.append("")
+
+    # Summary
+    total_active = sum(s["active"] for s in owner_stats.values())
+    total_overdue = sum(s["overdue"] for s in owner_stats.values())
+    total_blocked = sum(s["blocked"] for s in owner_stats.values())
+    lines.append(f"📊 Totals: {total_active} active, {total_overdue} overdue, {total_blocked} blocked")
+
+    click.echo("\n".join(lines))
+
+
+@task_group.command("tag-report")
+@click.option("--epic", "epic_ref", default=None, help="Filter by epic.")
+@click.option("--project", "project_ref", default=None, help="Filter by project.")
+@click.option("--include-done", is_flag=True, help="Include done tasks.")
+@click.option("--json", "json_output", is_flag=True, help="Print structured JSON.")
+@click.pass_context
+def task_tag_report(ctx: click.Context, epic_ref: str | None, project_ref: str | None,
+                     include_done: bool, json_output: bool) -> None:
+    """Report tasks grouped by tags."""
+    from datetime import date
+    from collections import defaultdict
+
+    root = find_repo_root(_cwd_from_context(ctx))
+    today = date.today()
+    today_str = today.isoformat()
+
+    all_tasks = list_tasks(root, epic_ref=epic_ref, project_ref=project_ref)
+    if not include_done:
+        all_tasks = [t for t in all_tasks if t.get("status") not in ("done", "wontfix")]
+
+    # Group by tag
+    by_tag: dict[str, list[dict]] = defaultdict(list)
+    untagged = []
+    for t in all_tasks:
+        tags = t.get("tags") or []
+        if tags:
+            for tag in tags:
+                by_tag[str(tag)].append(t)
+        else:
+            untagged.append(t)
+
+    if json_output:
+        data = {
+            "total_tasks": len(all_tasks),
+            "total_tags": len(by_tag),
+            "untagged": len(untagged),
+            "by_tag": {
+                tag: {
+                    "count": len(tasks),
+                    "tasks": [{"id": t["id"], "title": t["title"], "status": t.get("status", ""),
+                               "owner": t.get("owner", ""), "priority": t.get("priority", ""),
+                               "due": t.get("due", "")} for t in tasks],
+                }
+                for tag, tasks in sorted(by_tag.items())
+            },
+        }
+        click.echo(json.dumps(data, ensure_ascii=False, indent=2, default=str))
+        return
+
+    # Text output
+    lines = []
+    lines.append(f"🏷️  Tag Report ({len(by_tag)} tags, {len(all_tasks)} tasks)")
+    lines.append(f"   Untagged: {len(untagged)}")
+    lines.append("")
+
+    # Sort by task count
+    sorted_tags = sorted(by_tag.items(), key=lambda x: -len(x[1]))
+
+    for tag, tasks in sorted_tags:
+        active = [t for t in tasks if t.get("status") not in ("done", "wontfix")]
+        done = [t for t in tasks if t.get("status") == "done"]
+        overdue = [t for t in active if t.get("due") and t["due"] < today_str]
+
+        # Priority breakdown
+        by_priority: dict[str, int] = defaultdict(int)
+        for t in active:
+            by_priority[t.get("priority", "unspecified")] += 1
+
+        # Owner breakdown
+        by_owner: dict[str, int] = defaultdict(int)
+        for t in tasks:
+            owner = t.get("owner") or "unassigned"
+            by_owner[owner] += 1
+
+        lines.append(f"  🏷️  {tag} ({len(tasks)} tasks)")
+        lines.append(f"     Active: {len(active)}  |  Done: {len(done)}"
+                     + (f"  |  ⚠️ {len(overdue)} overdue" if overdue else ""))
+
+        # Priority summary
+        pri_parts = []
+        for pri in ("critical", "high", "medium", "low"):
+            count = by_priority.get(pri, 0)
+            if count:
+                pri_parts.append(f"{pri}: {count}")
+        if pri_parts:
+            lines.append(f"     [{', '.join(pri_parts)}]")
+
+        # Owner summary
+        if len(by_owner) <= 5:
+            owner_str = ", ".join(f"@{o}: {c}" for o, c in sorted(by_owner.items(), key=lambda x: -x[1]))
+            lines.append(f"     Owners: {owner_str}")
+
+        # Show tasks
+        for t in sorted(tasks, key=lambda t: (t.get("due", "9999-99-99"), t.get("priority", "")))[:5]:
+            status_icon = {"done": "✅", "in_progress": "🔧", "blocked": "🚧",
+                          "ready": "⏳", "created": "📝"}.get(t.get("status", ""), "❓")
+            owner = f" @{t.get('owner', '')}" if t.get("owner") else ""
+            due = f" due:{t.get('due', '')}" if t.get("due") else ""
+            lines.append(f"     {status_icon} {t['id']}{owner}{due}  {t['title']}")
+        if len(tasks) > 5:
+            lines.append(f"     ... and {len(tasks) - 5} more")
+
+        lines.append("")
+
+    # Untagged section
+    if untagged:
+        lines.append(f"❓ Untagged ({len(untagged)}):")
+        for t in untagged[:5]:
+            owner = f" @{t.get('owner', '')}" if t.get("owner") else ""
+            lines.append(f"     {t['id']}{owner}  {t['title']}")
+        if len(untagged) > 5:
+            lines.append(f"     ... and {len(untagged) - 5} more")
+        lines.append("")
+
+    click.echo("\n".join(lines))
+
+
+@task_group.command("milestone-report")
+@click.option("--epic", "epic_ref", default=None, help="Filter by epic.")
+@click.option("--project", "project_ref", default=None, help="Filter by project.")
+@click.option("--json", "json_output", is_flag=True, help="Print structured JSON.")
+@click.pass_context
+def task_milestone_report(ctx: click.Context, epic_ref: str | None, project_ref: str | None,
+                           json_output: bool) -> None:
+    """Report tasks grouped by milestone proximity."""
+    from datetime import date, timedelta
+    from collections import defaultdict
+
+    root = find_repo_root(_cwd_from_context(ctx))
+    today = date.today()
+    today_str = today.isoformat()
+
+    all_tasks = list_tasks(root, epic_ref=epic_ref, project_ref=project_ref)
+    milestones = list_milestones(root, epic_ref=epic_ref, project_ref=project_ref)
+
+    # Group tasks by proximity to milestones
+    by_milestone: dict[str, list[dict]] = defaultdict(list)
+    no_milestone = []
+
+    # For each task, find the nearest milestone after its due date
+    for t in all_tasks:
+        due = t.get("due", "")
+        if not due:
+            no_milestone.append(t)
+            continue
+
+        # Find the nearest milestone that is >= due date
+        nearest_ms = None
+        min_diff = None
+        for m in milestones:
+            ms_date = m.get("date", "")
+            if ms_date and ms_date >= due:
+                diff = (date.fromisoformat(ms_date) - date.fromisoformat(due)).days
+                if min_diff is None or diff < min_diff:
+                    min_diff = diff
+                    nearest_ms = m
+
+        if nearest_ms:
+            ms_title = nearest_ms.get("title", "Unknown")
+            by_milestone[ms_title].append(t)
+        else:
+            no_milestone.append(t)
+
+    if json_output:
+        data = {
+            "total_tasks": len(all_tasks),
+            "total_milestones": len(milestones),
+            "by_milestone": {
+                title: {
+                    "count": len(tasks),
+                    "tasks": [{"id": t["id"], "title": t["title"], "due": t.get("due", ""),
+                               "status": t.get("status", ""), "owner": t.get("owner", "")}
+                              for t in tasks],
+                }
+                for title, tasks in by_milestone.items()
+            },
+            "no_milestone": len(no_milestone),
+        }
+        click.echo(json.dumps(data, ensure_ascii=False, indent=2, default=str))
+        return
+
+    lines = []
+    lines.append(f"🏁 Milestone Report ({len(milestones)} milestones, {len(all_tasks)} tasks)")
+    lines.append(f"   Tasks mapped to milestones: {sum(len(t) for t in by_milestone.values())}")
+    lines.append(f"   Tasks without milestone: {len(no_milestone)}")
+    lines.append("")
+
+    # Sort milestones by date
+    sorted_ms = sorted(milestones, key=lambda m: m.get("date", ""))
+    for ms in sorted_ms:
+        ms_title = ms.get("title", "Unknown")
+        ms_date = ms.get("date", "")
+        ms_status = ms.get("status", "")
+
+        tasks = by_milestone.get(ms_title, [])
+        if not tasks:
+            continue
+
+        active = [t for t in tasks if t.get("status") not in ("done", "wontfix")]
+        done = [t for t in tasks if t.get("status") == "done"]
+        overdue = [t for t in active if t.get("due") and t["due"] < today_str]
+
+        # Completion
+        pct = round(len(done) / max(len(tasks), 1) * 100, 1)
+
+        # Days until milestone
+        days_until = (date.fromisoformat(ms_date) - today).days if ms_date else 0
+
+        lines.append(f"  🏁 {ms_title} ({ms_date}, {ms_status})")
+        lines.append(f"     {len(tasks)} tasks — {len(done)} done ({pct}%) — {len(active)} remaining")
+        if days_until > 0:
+            lines.append(f"     {days_until} days away")
+        elif days_until == 0:
+            lines.append(f"     🎯 Today!")
+        else:
+            lines.append(f"     ⚠️ {-days_until} days overdue!")
+        if overdue:
+            lines.append(f"     ⚠️ {len(overdue)} overdue task(s)")
+
+        # Progress bar
+        bar_width = 20
+        done_chars = int(pct / 100 * bar_width)
+        bar = "█" * done_chars + "░" * (bar_width - done_chars)
+        lines.append(f"     [{bar}] {pct}%")
+
+        # Show tasks
+        for t in sorted(tasks, key=lambda t: (t.get("due", "9999-99-99"), t.get("priority", "")))[:5]:
+            status_icon = {"done": "✅", "in_progress": "🔧", "blocked": "🚧",
+                          "ready": "⏳", "created": "📝"}.get(t.get("status", ""), "❓")
+            owner = f" @{t.get('owner', '')}" if t.get("owner") else ""
+            due = f" due:{t.get('due', '')}" if t.get("due") else ""
+            lines.append(f"     {status_icon} {t['id']}{owner}{due}  {t['title']}")
+        if len(tasks) > 5:
+            lines.append(f"     ... and {len(tasks) - 5} more")
+
+        lines.append("")
+
+    # Tasks without milestone mapping
+    if no_milestone:
+        lines.append(f"❓ No milestone ({len(no_milestone)}):")
+        for t in no_milestone[:5]:
+            owner = f" @{t.get('owner', '')}" if t.get("owner") else ""
+            due = f" due:{t.get('due', '')}" if t.get("due") else ""
+            lines.append(f"     {t['id']}{owner}{due}  {t['title']}")
+        if len(no_milestone) > 5:
+            lines.append(f"     ... and {len(no_milestone) - 5} more")
+
+    click.echo("\n".join(lines))
+
+
+@task_group.command("progress-report")
+@click.option("--epic", "epic_ref", default=None, help="Filter by epic.")
+@click.option("--project", "project_ref", default=None, help="Filter by project.")
+@click.option("--owner", default=None, help="Filter by owner.")
+@click.option("--json", "json_output", is_flag=True, help="Print structured JSON.")
+@click.pass_context
+def task_progress_report(ctx: click.Context, epic_ref: str | None, project_ref: str | None,
+                          owner: str | None, json_output: bool) -> None:
+    """Comprehensive progress report with completion rates and trends."""
+    from datetime import date, timedelta
+    from collections import defaultdict
+
+    root = find_repo_root(_cwd_from_context(ctx))
+    today = date.today()
+    today_str = today.isoformat()
+    week_ago = (today - timedelta(days=7)).isoformat()
+    month_ago = (today - timedelta(days=30)).isoformat()
+
+    all_tasks = list_tasks(root, epic_ref=epic_ref, project_ref=project_ref, owner=owner)
+    total = len(all_tasks)
+
+    if total == 0:
+        click.echo("No tasks found.")
+        return
+
+    # Status counts
+    by_status: dict[str, int] = defaultdict(int)
+    for t in all_tasks:
+        by_status[t.get("status", "unknown")] += 1
+
+    done = by_status.get("done", 0)
+    in_progress = by_status.get("in_progress", 0)
+    ready = by_status.get("ready", 0)
+    created = by_status.get("created", 0)
+    blocked = by_status.get("blocked", 0)
+    wontfix = by_status.get("wontfix", 0)
+    active = total - done - wontfix
+
+    # Completion rate
+    completion_rate = round(done / max(total, 1) * 100, 1)
+
+    # Priority completion
+    pri_completion = {}
+    for pri in ("critical", "high", "medium", "low"):
+        pri_tasks = [t for t in all_tasks if t.get("priority") == pri]
+        pri_done = [t for t in pri_tasks if t.get("status") == "done"]
+        pri_completion[pri] = {
+            "total": len(pri_tasks),
+            "done": len(pri_done),
+            "rate": round(len(pri_done) / max(len(pri_tasks), 1) * 100, 1),
+        }
+
+    # Due date analysis
+    dated_tasks = [t for t in all_tasks if t.get("due")]
+    overdue = [t for t in dated_tasks if t.get("due") < today_str and t.get("status") not in ("done", "wontfix")]
+    on_time = [t for t in dated_tasks if t.get("due") >= today_str or t.get("status") == "done"]
+    on_time_rate = round(len(on_time) / max(len(dated_tasks), 1) * 100, 1)
+
+    # Created this week vs done this week (approximated)
+    created_this_week = [t for t in all_tasks if t.get("created") and t["created"] >= week_ago]
+    done_this_week_approx = [t for t in all_tasks if t.get("status") == "done" and t.get("created") and t["created"] >= month_ago]
+
+    # Velocity estimate (rough)
+    if done > 0:
+        created_dates = [t.get("created") for t in all_tasks if t.get("created")]
+        if created_dates:
+            first_created = min(created_dates)
+            days_elapsed = max((today - date.fromisoformat(first_created)).days, 1)
+            velocity = round(done / days_elapsed, 2)
+            est_days_remaining = round(active / max(velocity, 0.01), 1)
+            est_completion = today + timedelta(days=est_days_remaining)
+        else:
+            velocity = 0
+            est_days_remaining = 0
+            est_completion = today
+    else:
+        velocity = 0
+        est_days_remaining = 0
+        est_completion = today
+
+    if json_output:
+        data = {
+            "generated": today_str,
+            "total": total,
+            "active": active,
+            "done": done,
+            "completion_rate": completion_rate,
+            "by_status": dict(by_status),
+            "priority_completion": pri_completion,
+            "on_time_rate": on_time_rate,
+            "overdue": len(overdue),
+            "created_this_week": len(created_this_week),
+            "velocity": velocity,
+            "est_days_remaining": est_days_remaining,
+            "est_completion": est_completion.isoformat(),
+        }
+        click.echo(json.dumps(data, ensure_ascii=False, indent=2, default=str))
+        return
+
+    # Text output
+    lines = []
+    lines.append(f"📈 Progress Report")
+    lines.append(f"   {today_str}")
+    lines.append("")
+
+    # Overall progress bar
+    bar_width = 30
+    done_chars = int(completion_rate / 100 * bar_width)
+    progress_bar = "█" * done_chars + "░" * (bar_width - done_chars)
+    lines.append(f"  Overall: [{progress_bar}] {completion_rate}%")
+    lines.append(f"  {done}/{total} tasks done")
+    lines.append("")
+
+    # Status breakdown
+    lines.append("  Status Breakdown:")
+    status_items = [
+        ("done", "✅", done),
+        ("in_progress", "🔧", in_progress),
+        ("ready", "⏳", ready),
+        ("created", "📝", created),
+        ("blocked", "🚧", blocked),
+        ("wontfix", "❌", wontfix),
+    ]
+    for status, icon, count in status_items:
+        if count > 0:
+            bar = "█" * min(count, 15)
+            lines.append(f"    {icon} {status:12s} {bar} {count}")
+    lines.append("")
+
+    # Priority completion
+    lines.append("  Priority Completion:")
+    for pri in ("critical", "high", "medium", "low"):
+        pc = pri_completion[pri]
+        if pc["total"] > 0:
+            pri_bar = "█" * int(pc["rate"] / 100 * 15) + "░" * (15 - int(pc["rate"] / 100 * 15))
+            lines.append(f"    {pri:10s} [{pri_bar}] {pc['done']}/{pc['total']} ({pc['rate']}%)")
+    lines.append("")
+
+    # Schedule adherence
+    lines.append("  Schedule Adherence:")
+    lines.append(f"    On time: {on_time_rate}%")
+    if overdue:
+        lines.append(f"    ⚠️  Overdue: {len(overdue)} task(s)")
+    lines.append("")
+
+    # Velocity
+    lines.append("  Velocity:")
+    if velocity > 0:
+        lines.append(f"    Rate: {velocity} tasks/day")
+        lines.append(f"    Est. completion: {est_completion.isoformat()} (~{est_days_remaining} days)")
+    else:
+        lines.append(f"    No completed tasks yet to calculate velocity.")
+    lines.append("")
+
+    # This week
+    if created_this_week:
+        lines.append(f"  This week:")
+        lines.append(f"    Created: {len(created_this_week)}")
+        lines.append("")
+
+    # Health indicators
+    lines.append("  Health Indicators:")
+    if completion_rate >= 70:
+        lines.append("    🟢 Completion rate is healthy (≥70%)")
+    elif completion_rate >= 40:
+        lines.append("    🟡 Completion rate is moderate (40-70%)")
+    else:
+        lines.append("    🔴 Completion rate is low (<40%)")
+
+    if len(overdue) == 0:
+        lines.append("    🟢 No overdue tasks")
+    elif len(overdue) <= 2:
+        lines.append(f"    🟡 {len(overdue)} overdue task(s)")
+    else:
+        lines.append(f"    🔴 {len(overdue)} overdue task(s)")
+
+    if blocked == 0:
+        lines.append("    🟢 No blocked tasks")
+    else:
+        lines.append(f"    🔴 {blocked} blocked task(s)")
+
+    if on_time_rate >= 80:
+        lines.append("    🟢 Good schedule adherence (≥80%)")
+    elif on_time_rate >= 50:
+        lines.append(f"    🟡 Moderate schedule adherence ({on_time_rate}%)")
+    else:
+        lines.append(f"    🔴 Poor schedule adherence ({on_time_rate}%)")
+
+    click.echo("\n".join(lines))
+
+
 @task_group.command("edit")
 @click.argument("task_ref")
 @click.option("--title", default=None, help="New task title.")
@@ -9312,6 +9900,83 @@ def issue_bulk_clear_linked_tasks(
             click.echo(f"  ⚠ {issue_ref}: {exc}", err=True)
     if touched:
         _echo_touched(root, touched)
+
+
+@issue_group.command("owner-report")
+@click.option("--epic", "epic_ref", default=None, help="Filter by epic.")
+@click.option("--project", "project_ref", default=None, help="Filter by project.")
+@click.option("--include-done", is_flag=True, help="Include done/wontfix issues.")
+@click.option("--json", "json_output", is_flag=True, help="Print structured JSON.")
+@click.pass_context
+def issue_owner_report(ctx: click.Context, epic_ref: str | None, project_ref: str | None,
+                        include_done: bool, json_output: bool) -> None:
+    """Detailed report of issues grouped by owner."""
+    from collections import defaultdict
+
+    root = find_repo_root(_cwd_from_context(ctx))
+    all_issues = list_issues(root, epic_ref=epic_ref, project_ref=project_ref)
+    if not include_done:
+        all_issues = [i for i in all_issues if i.get("status") not in ("done", "wontfix")]
+
+    # Group by owner
+    by_owner: dict[str, list[dict]] = defaultdict(list)
+    for i in all_issues:
+        owner = i.get("owner") or "unassigned"
+        by_owner[owner].append(i)
+
+    owner_stats = {}
+    for owner, issues in by_owner.items():
+        open_issues = [i for i in issues if i.get("status") not in ("done", "wontfix")]
+        done = [i for i in issues if i.get("status") == "done"]
+        by_severity: dict[str, int] = defaultdict(int)
+        for i in open_issues:
+            by_severity[i.get("severity", "unspecified")] += 1
+
+        owner_stats[owner] = {
+            "total": len(issues),
+            "open": len(open_issues),
+            "done": len(done),
+            "by_severity": dict(by_severity),
+            "issues": issues,
+        }
+
+    if json_output:
+        clean = {}
+        for owner, stats in owner_stats.items():
+            clean[owner] = {k: v for k, v in stats.items() if k != "issues"}
+            clean[owner]["issues"] = [{"id": i.get("id", ""), "title": i.get("title", ""),
+                                        "status": i.get("status", ""), "severity": i.get("severity", "")}
+                                       for i in stats["issues"]]
+        click.echo(json.dumps(clean, ensure_ascii=False, indent=2, default=str))
+        return
+
+    lines = []
+    lines.append(f"👤 Issue Owner Report ({len(by_owner)} owners, {len(all_issues)} issues)")
+    lines.append("")
+
+    for owner, stats in sorted(owner_stats.items(), key=lambda x: -x[1]["open"]):
+        sev_parts = []
+        for sev in ("critical", "high", "medium", "low"):
+            count = stats["by_severity"].get(sev, 0)
+            if count:
+                sev_parts.append(f"{sev}: {count}")
+
+        lines.append(f"  @{owner} ({stats['open']} open, {stats['done']} done)")
+        if sev_parts:
+            lines.append(f"     [{', '.join(sev_parts)}]")
+
+        for i in sorted(stats["issues"],
+                       key=lambda x: ({"critical": 0, "high": 1, "medium": 2, "low": 3, "unspecified": 4}.get(x.get("severity", "unspecified"), 4),
+                                      x.get("title", "")))[:5]:
+            sev_icon = {"critical": "🔴", "high": "🟠", "medium": "🟡", "low": "🟢"}.get(i.get("severity", ""), "❓")
+            status = f" [{i.get('status', '')}]" if i.get("status") not in ("open", "") else ""
+            lines.append(f"     {sev_icon} {i.get('id', '')}{status}  {i.get('title', '')}")
+
+        if len(stats["issues"]) > 5:
+            lines.append(f"     ... and {len(stats['issues']) - 5} more")
+        lines.append("")
+
+    click.echo("\n".join(lines))
 
 
 @issue_group.command("carry")
