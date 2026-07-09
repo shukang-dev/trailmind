@@ -8615,6 +8615,286 @@ def task_archive(ctx: click.Context, task_ref: str, actor: str, note: str | None
         click.echo(warning)
 
 
+@task_group.command("next-up")
+@click.option("--owner", default=None, help="Filter by owner.")
+@click.option("--epic", "epic_ref", default=None, help="Filter by epic.")
+@click.option("--project", "project_ref", default=None, help="Filter by project.")
+@click.option("--limit", default=5, show_default=True, type=click.IntRange(min=1, max=20),
+              help="Number of tasks to show.")
+@click.option("--compact", is_flag=True, help="Compact output.")
+@click.option("--json", "json_output", is_flag=True, help="Print structured JSON.")
+@click.pass_context
+def task_next_up(ctx: click.Context, owner: str | None, epic_ref: str | None, project_ref: str | None,
+                 limit: int, compact: bool, json_output: bool) -> None:
+    """Show the next tasks to work on (considering dependencies, priority, and due dates)."""
+    from datetime import date
+
+    root = find_repo_root(_cwd_from_context(ctx))
+    today = date.today()
+    today_str = today.isoformat()
+
+    all_tasks = list_tasks(root, epic_ref=epic_ref, project_ref=project_ref, owner=owner)
+    active_tasks = [t for t in all_tasks if t.get("status") in ("ready", "created", "in_progress")]
+
+    # Build task map for dependency checking
+    task_map = {t.get("id", ""): t for t in all_tasks}
+
+    # Score each task
+    PRIORITY_SCORE = {"critical": 100, "high": 75, "medium": 50, "low": 25, "unspecified": 40}
+    scored = []
+    for t in active_tasks:
+        tid = t.get("id", "")
+        # Check if all dependencies are done
+        deps = t.get("depends_on") or []
+        all_deps_done = True
+        for dep_id in deps:
+            resolved = dep_id
+            for dep_tid in task_map:
+                if dep_tid.endswith(dep_id) or dep_id in dep_tid:
+                    resolved = dep_tid
+                    break
+            dep_task = task_map.get(resolved)
+            if dep_task and dep_task.get("status") not in ("done", "wontfix"):
+                all_deps_done = False
+                break
+
+        if not all_deps_done:
+            continue  # Skip tasks with unmet dependencies
+
+        # Calculate score
+        priority_score = PRIORITY_SCORE.get(t.get("priority", "unspecified"), 40)
+        in_progress_bonus = 50 if t.get("status") == "in_progress" else 0
+
+        # Due date score
+        due = t.get("due", "")
+        due_score = 0
+        if due:
+            try:
+                due_d = date.fromisoformat(due)
+                days_until = (due_d - today).days
+                if days_until < 0:
+                    due_score = 200  # Overdue
+                elif days_until == 0:
+                    due_score = 150  # Due today
+                elif days_until <= 3:
+                    due_score = 120  # Due soon
+                elif days_until <= 7:
+                    due_score = 80  # Due this week
+                else:
+                    due_score = max(0, 50 - days_until)
+            except ValueError:
+                pass
+
+        total_score = priority_score + due_score + in_progress_bonus
+        scored.append((total_score, t))
+
+    # Sort by score descending
+    scored.sort(key=lambda x: -x[0])
+    scored = scored[:limit]
+
+    if json_output:
+        data = [{
+            "id": t.get("id", ""),
+            "title": t.get("title", ""),
+            "status": t.get("status", ""),
+            "priority": t.get("priority", ""),
+            "owner": t.get("owner", ""),
+            "due": t.get("due", ""),
+            "score": score,
+        } for score, t in scored]
+        click.echo(json.dumps({"total": len(data), "results": data},
+                              ensure_ascii=False, indent=2, default=str))
+        return
+
+    if not scored:
+        click.echo("✅ No tasks ready to work on! All tasks are blocked or done.")
+        return
+
+    lines = []
+    lines.append(f"🎯 Next Up ({len(scored)} task(s) ready)")
+    lines.append("")
+
+    for i, (score, t) in enumerate(scored, 1):
+        status_icon = {"done": "✅", "in_progress": "🔧", "blocked": "🚧",
+                      "ready": "⏳", "created": "📝"}.get(t.get("status", ""), "❓")
+        task_id = t.get("id", "")
+        title = t.get("title", "")
+        owner = f" @{t.get('owner', '')}" if t.get("owner") else ""
+        due = f" due:{t.get('due', '')}" if t.get("due") else ""
+        pri = f" [{t.get('priority', '').upper()}]" if t.get("priority") else ""
+
+        # Overdue indicator
+        overdue_mark = ""
+        if t.get("due") and t["due"] < today_str:
+            overdue_mark = " ⚠️ OVERDUE"
+        elif t.get("due") and t["due"] == today_str:
+            overdue_mark = " 📍 DUE TODAY"
+
+        if compact:
+            lines.append(f"  {i}. {status_icon} {task_id}{pri}{owner}{due}{overdue_mark}  {title}")
+        else:
+            score_bar = "█" * min(score // 10, 10) + "░" * max(0, 10 - score // 10)
+            lines.append(f"  {i}. {status_icon} {task_id}{pri}{owner}{due}{overdue_mark}")
+            lines.append(f"     {title}")
+            lines.append(f"     Priority score: [{score_bar}] {score}")
+            lines.append("")
+
+    click.echo("\n".join(lines))
+
+
+@task_group.command("daily-review")
+@click.option("--owner", required=True, help="Review for this owner.")
+@click.option("--epic", "epic_ref", default=None, help="Filter by epic.")
+@click.option("--project", "project_ref", default=None, help="Filter by project.")
+@click.option("--json", "json_output", is_flag=True, help="Print structured JSON.")
+@click.pass_context
+def task_daily_review(ctx: click.Context, owner: str, epic_ref: str | None, project_ref: str | None,
+                       json_output: bool) -> None:
+    """Daily review: completed today + tasks to do next."""
+    from datetime import date, timedelta
+
+    root = find_repo_root(_cwd_from_context(ctx))
+    today = date.today()
+    today_str = today.isoformat()
+    yesterday = (today - timedelta(days=1)).isoformat()
+
+    all_tasks = list_tasks(root, epic_ref=epic_ref, project_ref=project_ref, owner=owner)
+
+    # Done tasks (approximated by status=done)
+    done_tasks = [t for t in all_tasks if t.get("status") == "done"]
+
+    # Active tasks
+    active_tasks = [t for t in all_tasks if t.get("status") not in ("done", "wontfix")]
+
+    # Overdue
+    overdue = [t for t in active_tasks if t.get("due") and t["due"] < today_str]
+
+    # Due today
+    due_today = [t for t in active_tasks if t.get("due") and t["due"] == today_str]
+
+    # Due this week (next 7 days)
+    week_end = (today + timedelta(days=7)).isoformat()
+    due_this_week = [t for t in active_tasks
+                     if t.get("due") and today_str < t["due"] <= week_end]
+
+    # In progress
+    in_progress = [t for t in active_tasks if t.get("status") == "in_progress"]
+
+    # Ready to start
+    task_map = {t.get("id", ""): t for t in all_tasks}
+    ready = []
+    for t in active_tasks:
+        if t.get("status") in ("ready", "created"):
+            deps = t.get("depends_on") or []
+            all_deps_done = True
+            for dep_id in deps:
+                resolved = dep_id
+                for dep_tid in task_map:
+                    if dep_tid.endswith(dep_id) or dep_id in dep_tid:
+                        resolved = dep_tid
+                        break
+                dep_task = task_map.get(resolved)
+                if dep_task and dep_task.get("status") not in ("done", "wontfix"):
+                    all_deps_done = False
+                    break
+            if all_deps_done:
+                ready.append(t)
+
+    if json_output:
+        data = {
+            "date": today_str,
+            "owner": owner,
+            "done": len(done_tasks),
+            "in_progress": len(in_progress),
+            "overdue": len(overdue),
+            "due_today": len(due_today),
+            "due_this_week": len(due_this_week),
+            "ready": len(ready),
+            "active": len(active_tasks),
+        }
+        click.echo(json.dumps(data, ensure_ascii=False, indent=2, default=str))
+        return
+
+    lines = []
+    lines.append(f"📋 Daily Review — @{owner}")
+    lines.append(f"   {today_str}")
+    lines.append("")
+
+    # Summary
+    lines.append(f"  Active: {len(active_tasks)}  |  Done: {len(done_tasks)}  |  "
+                 f"In progress: {len(in_progress)}  |  Ready: {len(ready)}")
+    lines.append("")
+
+    # Overdue
+    if overdue:
+        lines.append(f"  ⚠️  OVERDUE ({len(overdue)}):")
+        for t in overdue:
+            lines.append(f"     {t['id']} due:{t.get('due', '')}  {t['title']}")
+        lines.append("")
+
+    # Due today
+    if due_today:
+        lines.append(f"  📍 DUE TODAY ({len(due_today)}):")
+        for t in due_today:
+            lines.append(f"     {t['id']}  {t['title']}")
+        lines.append("")
+
+    # In progress
+    if in_progress:
+        lines.append(f"  🔧 IN PROGRESS ({len(in_progress)}):")
+        for t in in_progress:
+            due = f" due:{t.get('due', '')}" if t.get("due") else ""
+            lines.append(f"     {t['id']}{due}  {t['title']}")
+        lines.append("")
+
+    # Ready to start
+    if ready:
+        lines.append(f"  ⏳ READY TO START ({len(ready)}):")
+        for t in ready[:5]:
+            due = f" due:{t.get('due', '')}" if t.get("due") else ""
+            pri = f" [{t.get('priority', '').upper()}]" if t.get("priority") else ""
+            lines.append(f"     {t['id']}{pri}{due}  {t['title']}")
+        if len(ready) > 5:
+            lines.append(f"     ... and {len(ready) - 5} more")
+        lines.append("")
+
+    # Due this week
+    if due_this_week:
+        lines.append(f"  📅 THIS WEEK ({len(due_this_week)}):")
+        for t in due_this_week:
+            lines.append(f"     {t['id']} due:{t.get('due', '')}  {t['title']}")
+        lines.append("")
+
+    # Done
+    if done_tasks:
+        lines.append(f"  ✅ COMPLETED ({len(done_tasks)}):")
+        for t in done_tasks[:5]:
+            lines.append(f"     {t['id']}  {t['title']}")
+        if len(done_tasks) > 5:
+            lines.append(f"     ... and {len(done_tasks) - 5} more")
+        lines.append("")
+
+    # Daily score
+    total = len(active_tasks) + len(done_tasks)
+    completion_rate = round(len(done_tasks) / max(total, 1) * 100, 1)
+    if completion_rate >= 70:
+        score_icon = "🟢"
+    elif completion_rate >= 40:
+        score_icon = "🟡"
+    else:
+        score_icon = "🔴"
+    lines.append(f"  {score_icon} Completion rate: {completion_rate}%")
+
+    if overdue:
+        lines.append(f"  🔴 {len(overdue)} overdue task(s) need attention!")
+    elif due_today:
+        lines.append(f"  🟡 {len(due_today)} task(s) due today — focus on these!")
+    elif ready:
+        lines.append(f"  🟢 {len(ready)} task(s) ready to start!")
+
+    click.echo("\n".join(lines))
+
+
 @task_group.command("edit")
 @click.argument("task_ref")
 @click.option("--title", default=None, help="New task title.")
