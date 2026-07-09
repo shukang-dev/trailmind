@@ -3440,6 +3440,78 @@ def inbox_bulk_resolve(
         _echo_touched(root, touched)
 
 
+@inbox_group.command("export")
+@click.option("--project", "project_slug", default=None)
+@click.option("--epic", "epic_ref", default=None)
+@click.option("--status", default=None, type=click.Choice(("open", "resolved"), case_sensitive=False),
+              help="Filter by status.")
+@click.option("--format", "fmt", default="csv", type=click.Choice(("csv", "json"), case_sensitive=False),
+              help="Export format (default: csv).")
+@click.option("--output", "-o", default=None, help="Output file path (default: stdout).")
+@click.pass_context
+def inbox_export(ctx: click.Context, project_slug: str | None, epic_ref: str | None,
+                  status: str | None, fmt: str, output: str | None) -> None:
+    """Export inbox items to CSV or JSON format."""
+    import csv
+    import json as _json
+    import io
+
+    root = find_repo_root(_cwd_from_context(ctx))
+    items = list_inbox_items(root, project=project_slug, epic=epic_ref, status=status)
+
+    if not items:
+        click.echo("No inbox items to export.")
+        return
+
+    clean_fields = ["item_id", "title", "note", "status", "created", "epic", "project"]
+    clean_items = []
+    for item in items:
+        # Determine epic/project from path
+        path = Path(item.path) if hasattr(item, 'path') else None
+        epic = ""
+        project = ""
+        if path:
+            parts = path.parts
+            if "epics" in parts:
+                idx = parts.index("epics")
+                if idx + 1 < len(parts):
+                    epic = parts[idx + 1]
+            if "projects" in parts:
+                idx = parts.index("projects")
+                if idx + 1 < len(parts):
+                    project = parts[idx + 1]
+
+        clean_items.append({
+            "item_id": item.item_id,
+            "title": item.title,
+            "note": item.note,
+            "status": item.status,
+            "created": item.created or "",
+            "epic": epic,
+            "project": project,
+        })
+
+    if fmt == "json":
+        content = _json.dumps(clean_items, ensure_ascii=False, indent=2, default=str)
+    else:
+        output_io = io.StringIO()
+        writer = csv.DictWriter(output_io, fieldnames=clean_fields)
+        writer.writeheader()
+        for row in clean_items:
+            writer.writerow(row)
+        content = output_io.getvalue()
+
+    if output:
+        path = Path(output)
+        if not path.is_absolute():
+            path = Path.cwd() / path
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_text(content, encoding="utf-8")
+        click.echo(f"📤 Exported {len(clean_items)} inbox item(s) to {path}")
+    else:
+        click.echo(content)
+
+
 @inbox_group.command("show")
 @click.argument("item_ref")
 @click.option("--json", "json_output", is_flag=True, help="Print structured JSON.")
@@ -9590,6 +9662,156 @@ def task_overdue(ctx: click.Context, owner: str | None, epic_ref: str | None, pr
     click.echo("\n".join(lines))
 
 
+@task_group.command("export")
+@click.option("--epic", "epic_ref", default=None, help="Export tasks from a specific epic.")
+@click.option("--project", "project_ref", default=None, help="Export tasks from a specific project.")
+@click.option("--owner", default=None, help="Filter by owner.")
+@click.option("--status", default=None, type=click.Choice(TASK_STATUSES, case_sensitive=False),
+              help="Filter by status.")
+@click.option("--format", "fmt", default="csv", type=click.Choice(("csv", "json"), case_sensitive=False),
+              help="Export format (default: csv).")
+@click.option("--output", "-o", default=None, help="Output file path (default: stdout).")
+@click.option("--include-done", is_flag=True, help="Include done/wontfix tasks.")
+@click.pass_context
+def task_export(ctx: click.Context, epic_ref: str | None, project_ref: str | None,
+                owner: str | None, status: str | None, fmt: str, output: str | None,
+                include_done: bool) -> None:
+    """Export tasks to CSV or JSON format."""
+    import csv
+    import json as _json
+    import io
+
+    root = find_repo_root(_cwd_from_context(ctx))
+    all_tasks = list_tasks(root, epic_ref=epic_ref, project_ref=project_ref, owner=owner)
+
+    if not include_done:
+        all_tasks = [t for t in all_tasks if t.get("status") not in ("done", "wontfix")]
+    if status:
+        all_tasks = [t for t in all_tasks if t.get("status", "").lower() == status.lower()]
+
+    if not all_tasks:
+        click.echo("No tasks to export.")
+        return
+
+    # Clean data for export
+    clean_fields = ["id", "title", "status", "priority", "owner", "due", "created",
+                    "epic", "project", "tags", "deliverables", "code_paths",
+                    "depends_on", "soft_depends_on", "known_issues", "design_doc"]
+
+    clean_tasks = []
+    for t in all_tasks:
+        row = {}
+        for field in clean_fields:
+            val = t.get(field, "")
+            if isinstance(val, list):
+                val = ", ".join(str(v) for v in val)
+            row[field] = val
+        clean_tasks.append(row)
+
+    if fmt == "json":
+        content = _json.dumps(clean_tasks, ensure_ascii=False, indent=2, default=str)
+    else:
+        output_io = io.StringIO()
+        writer = csv.DictWriter(output_io, fieldnames=clean_fields)
+        writer.writeheader()
+        for row in clean_tasks:
+            writer.writerow(row)
+        content = output_io.getvalue()
+
+    if output:
+        path = Path(output)
+        if not path.is_absolute():
+            path = Path.cwd() / path
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_text(content, encoding="utf-8")
+        click.echo(f"📤 Exported {len(clean_tasks)} task(s) to {path}")
+    else:
+        click.echo(content)
+
+
+@task_group.command("import")
+@click.argument("input_file")
+@click.option("--format", "fmt", default="csv", type=click.Choice(("csv", "json"), case_sensitive=False),
+              help="Input file format (default: csv).")
+@click.option("--epic", required=True, help="Target epic for imported tasks.")
+@click.option("--actor", required=True, help="Actor name for the import.")
+@click.option("--dry-run", is_flag=True, help="Preview without importing.")
+@click.pass_context
+def task_import(ctx: click.Context, input_file: str, fmt: str, epic: str, actor: str,
+                 dry_run: bool) -> None:
+    """Import tasks from a CSV or JSON file."""
+    import csv
+    import json as _json
+
+    root = find_repo_root(_cwd_from_context(ctx))
+    path = Path(input_file)
+    if not path.is_absolute():
+        path = Path.cwd() / path
+    if not path.exists():
+        raise TrailmindError(f"input file not found: {input_file}")
+
+    content = path.read_text(encoding="utf-8")
+
+    specs: list[dict] = []
+    if fmt == "json":
+        data = _json.loads(content)
+        if isinstance(data, list):
+            specs = data
+        elif isinstance(data, dict) and "tasks" in data:
+            specs = data["tasks"]
+        else:
+            raise TrailmindError("JSON must be a list or object with 'tasks' key.")
+    else:
+        reader = csv.DictReader(content.splitlines())
+        for row in reader:
+            specs.append(dict(row))
+
+    if not specs:
+        raise TrailmindError("no tasks found in input file")
+
+    if dry_run:
+        click.echo(f"[DRY RUN] Would import {len(specs)} task(s) to {epic}:")
+        for i, spec in enumerate(specs[:5]):
+            title = spec.get("title", "(untitled)")
+            owner = spec.get("owner", actor)
+            click.echo(f"  {i+1}. {title} (owner: {owner})")
+        if len(specs) > 5:
+            click.echo(f"  ... and {len(specs) - 5} more")
+        return
+
+    touched = []
+    for i, spec in enumerate(specs):
+        title = spec.get("title", "").strip()
+        if not title:
+            click.echo(f"  ⚠ task {i+1}: missing title, skipping", err=True)
+            continue
+        try:
+            task_path = add_task(
+                root,
+                epic=epic,
+                filer=actor,
+                owner=spec.get("owner") or actor,
+                title=title,
+                priority=spec.get("priority", "medium"),
+                due=spec.get("due") or None,
+                tags=split_csv(spec.get("tags", "")) if spec.get("tags") else [],
+                code_paths=split_csv(spec.get("code_paths", "")) if spec.get("code_paths") else [],
+                deliverables=split_csv(spec.get("deliverables", "")) if spec.get("deliverables") else [],
+                depends_on=split_csv(spec.get("depends_on", "")) if spec.get("depends_on") else [],
+                soft_depends_on=split_csv(spec.get("soft_depends_on", "")) if spec.get("soft_depends_on") else [],
+                known_issues=split_csv(spec.get("known_issues", "")) if spec.get("known_issues") else [],
+                design_doc=spec.get("design_doc") or None,
+                note=f"Imported from {input_file}",
+            )
+            touched.append(task_path)
+        except Exception as exc:
+            click.echo(f"  ⚠ {title}: {exc}", err=True)
+
+    if touched:
+        _echo_touched(root, touched)
+        click.echo(f"\nImported {len(touched)}/{len(specs)} tasks.")
+
+
 @task_group.command("edit")
 @click.argument("task_ref")
 @click.option("--title", default=None, help="New task title.")
@@ -12795,6 +13017,149 @@ def issue_critical(ctx: click.Context, owner: str | None, epic_ref: str | None,
     click.echo("\n".join(lines))
 
 
+@issue_group.command("export")
+@click.option("--epic", "epic_ref", default=None, help="Export issues from a specific epic.")
+@click.option("--project", "project_ref", default=None, help="Export issues from a specific project.")
+@click.option("--owner", default=None, help="Filter by owner.")
+@click.option("--status", default=None, type=click.Choice(("open", "done", "wontfix"), case_sensitive=False),
+              help="Filter by status.")
+@click.option("--format", "fmt", default="csv", type=click.Choice(("csv", "json"), case_sensitive=False),
+              help="Export format (default: csv).")
+@click.option("--output", "-o", default=None, help="Output file path (default: stdout).")
+@click.option("--include-done", is_flag=True, help="Include done/wontfix issues.")
+@click.pass_context
+def issue_export(ctx: click.Context, epic_ref: str | None, project_ref: str | None,
+                 owner: str | None, status: str | None, fmt: str, output: str | None,
+                 include_done: bool) -> None:
+    """Export issues to CSV or JSON format."""
+    import csv
+    import json as _json
+    import io
+
+    root = find_repo_root(_cwd_from_context(ctx))
+    all_issues = list_issues(root, epic_ref=epic_ref, project_ref=project_ref, owner=owner)
+
+    if not include_done:
+        all_issues = [i for i in all_issues if i.get("status") not in ("done", "wontfix")]
+    if status:
+        all_issues = [i for i in all_issues if i.get("status", "").lower() == status.lower()]
+
+    if not all_issues:
+        click.echo("No issues to export.")
+        return
+
+    clean_fields = ["id", "title", "status", "severity", "owner", "created",
+                    "epic", "project", "linked_tasks", "description"]
+
+    clean_issues = []
+    for i in all_issues:
+        row = {}
+        for field in clean_fields:
+            val = i.get(field, "")
+            if isinstance(val, list):
+                val = ", ".join(str(v) for v in val)
+            row[field] = val
+        clean_issues.append(row)
+
+    if fmt == "json":
+        content = _json.dumps(clean_issues, ensure_ascii=False, indent=2, default=str)
+    else:
+        output_io = io.StringIO()
+        writer = csv.DictWriter(output_io, fieldnames=clean_fields)
+        writer.writeheader()
+        for row in clean_issues:
+            writer.writerow(row)
+        content = output_io.getvalue()
+
+    if output:
+        path = Path(output)
+        if not path.is_absolute():
+            path = Path.cwd() / path
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_text(content, encoding="utf-8")
+        click.echo(f"📤 Exported {len(clean_issues)} issue(s) to {path}")
+    else:
+        click.echo(content)
+
+
+@issue_group.command("import")
+@click.argument("input_file")
+@click.option("--format", "fmt", default="csv", type=click.Choice(("csv", "json"), case_sensitive=False),
+              help="Input file format (default: csv).")
+@click.option("--epic", required=True, help="Target epic for imported issues.")
+@click.option("--actor", required=True, help="Actor name for the import.")
+@click.option("--dry-run", is_flag=True, help="Preview without importing.")
+@click.pass_context
+def issue_import(ctx: click.Context, input_file: str, fmt: str, epic: str, actor: str,
+                  dry_run: bool) -> None:
+    """Import issues from a CSV or JSON file."""
+    import csv
+    import json as _json
+
+    root = find_repo_root(_cwd_from_context(ctx))
+    path = Path(input_file)
+    if not path.is_absolute():
+        path = Path.cwd() / path
+    if not path.exists():
+        raise TrailmindError(f"input file not found: {input_file}")
+
+    content = path.read_text(encoding="utf-8")
+
+    specs: list[dict] = []
+    if fmt == "json":
+        data = _json.loads(content)
+        if isinstance(data, list):
+            specs = data
+        elif isinstance(data, dict) and "issues" in data:
+            specs = data["issues"]
+        else:
+            raise TrailmindError("JSON must be a list or object with 'issues' key.")
+    else:
+        reader = csv.DictReader(content.splitlines())
+        for row in reader:
+            specs.append(dict(row))
+
+    if not specs:
+        raise TrailmindError("no issues found in input file")
+
+    if dry_run:
+        click.echo(f"[DRY RUN] Would import {len(specs)} issue(s) to {epic}:")
+        for i, spec in enumerate(specs[:5]):
+            title = spec.get("title", "(untitled)")
+            severity = spec.get("severity", "medium")
+            owner = spec.get("owner", actor)
+            click.echo(f"  {i+1}. [{severity}] {title} (owner: {owner})")
+        if len(specs) > 5:
+            click.echo(f"  ... and {len(specs) - 5} more")
+        return
+
+    touched = []
+    for i, spec in enumerate(specs):
+        title = spec.get("title", "").strip()
+        if not title:
+            click.echo(f"  ⚠ issue {i+1}: missing title, skipping", err=True)
+            continue
+        try:
+            issue_path = add_issue(
+                root,
+                epic=epic,
+                filer=actor,
+                owner=spec.get("owner") or actor,
+                title=title,
+                description=spec.get("description", "TBD"),
+                severity=spec.get("severity", "medium"),
+                linked_tasks=split_csv(spec.get("linked_tasks", "")) if spec.get("linked_tasks") else [],
+                note=f"Imported from {input_file}",
+            )
+            touched.append(issue_path)
+        except Exception as exc:
+            click.echo(f"  ⚠ {title}: {exc}", err=True)
+
+    if touched:
+        _echo_touched(root, touched)
+        click.echo(f"\nImported {len(touched)}/{len(specs)} issues.")
+
+
 @issue_group.command("edit")
 @click.argument("issue_ref")
 @click.option("--title", default=None, help="New issue title.")
@@ -13319,6 +13684,60 @@ def milestone_start(ctx: click.Context, milestone_ref: str, actor: str, note: st
     touched = set_milestone_status(root, milestone_ref=milestone_ref, status="in_progress",
                                      actor=actor, note=note)
     _echo_touched(root, [touched])
+
+
+@milestone_group.command("export")
+@click.option("--epic", "epic_ref", default=None, help="Export milestones from a specific epic.")
+@click.option("--project", "project_ref", default=None, help="Export milestones from a specific project.")
+@click.option("--format", "fmt", default="csv", type=click.Choice(("csv", "json"), case_sensitive=False),
+              help="Export format (default: csv).")
+@click.option("--output", "-o", default=None, help="Output file path (default: stdout).")
+@click.pass_context
+def milestone_export(ctx: click.Context, epic_ref: str | None, project_ref: str | None,
+                      fmt: str, output: str | None) -> None:
+    """Export milestones to CSV or JSON format."""
+    import csv
+    import json as _json
+    import io
+
+    root = find_repo_root(_cwd_from_context(ctx))
+    milestones = list_milestones(root, epic_ref=epic_ref, project_ref=project_ref)
+
+    if not milestones:
+        click.echo("No milestones to export.")
+        return
+
+    clean_fields = ["id", "title", "date", "status", "epic", "project"]
+    clean_ms = []
+    for m in milestones:
+        clean_ms.append({
+            "id": m.get("id", ""),
+            "title": m.get("title", ""),
+            "date": m.get("date", ""),
+            "status": m.get("status", ""),
+            "epic": m.get("epic", ""),
+            "project": m.get("project", ""),
+        })
+
+    if fmt == "json":
+        content = _json.dumps(clean_ms, ensure_ascii=False, indent=2, default=str)
+    else:
+        output_io = io.StringIO()
+        writer = csv.DictWriter(output_io, fieldnames=clean_fields)
+        writer.writeheader()
+        for row in clean_ms:
+            writer.writerow(row)
+        content = output_io.getvalue()
+
+    if output:
+        path = Path(output)
+        if not path.is_absolute():
+            path = Path.cwd() / path
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_text(content, encoding="utf-8")
+        click.echo(f"📤 Exported {len(clean_ms)} milestone(s) to {path}")
+    else:
+        click.echo(content)
 
 
 @milestone_group.command("show")
