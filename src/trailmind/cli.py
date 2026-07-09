@@ -3234,6 +3234,34 @@ def inbox_done_today(ctx: click.Context, item_ref: str, resolver: str, note: str
     _echo_touched(root, [touched])
 
 
+@inbox_group.command("quick-add")
+@click.argument("title")
+@click.option("--author", required=True)
+@click.option("--note", required=True)
+@click.option("--project", "project_slug", default=None)
+@click.option("--epic", "epic_ref", default=None)
+@click.pass_context
+def inbox_quick_add(ctx: click.Context, title: str, author: str, note: str,
+                     project_slug: str | None, epic_ref: str | None) -> None:
+    """Quickly add an inbox item with minimal required options."""
+    root = find_repo_root(_cwd_from_context(ctx))
+    touched = add_inbox_item(root, project=project_slug, epic=epic_ref,
+                              author=author, title=title, note=note)
+    _echo_touched(root, [touched])
+
+
+@inbox_group.command("resolve")
+@click.argument("item_ref")
+@click.option("--resolver", required=True)
+@click.option("--note", required=True)
+@click.pass_context
+def inbox_resolve_cmd(ctx: click.Context, item_ref: str, resolver: str, note: str) -> None:
+    """Resolve an inbox item (alias for inbox done-today)."""
+    root = find_repo_root(_cwd_from_context(ctx))
+    touched = resolve_inbox_item(root, item_ref=item_ref, resolver=resolver, note=note)
+    _echo_touched(root, [touched])
+
+
 @inbox_group.command("list")
 @click.option("--project", "project_slug", default=None)
 @click.option("--epic", "epic_ref", default=None)
@@ -8460,6 +8488,133 @@ def task_set_priority_cmd(ctx: click.Context, task_ref: str, priority: str, acto
     _echo_touched(root, [touched])
 
 
+@task_group.command("ready")
+@click.argument("task_ref")
+@click.option("--actor", required=True)
+@click.option("--note", default=None)
+@click.pass_context
+def task_ready(ctx: click.Context, task_ref: str, actor: str, note: str | None) -> None:
+    """Mark a task as ready."""
+    root = find_repo_root(_cwd_from_context(ctx))
+    touched, warning = set_task_status(root, task_ref=task_ref, status="ready", actor=actor,
+                                         note=note or "Marked as ready")
+    _echo_touched(root, [touched])
+    if warning:
+        click.echo(warning)
+
+
+@task_group.command("in-progress")
+@click.argument("task_ref")
+@click.option("--actor", required=True)
+@click.option("--note", default=None)
+@click.pass_context
+def task_in_progress(ctx: click.Context, task_ref: str, actor: str, note: str | None) -> None:
+    """Mark a task as in progress (alias for task start)."""
+    root = find_repo_root(_cwd_from_context(ctx))
+    touched, warning = start_task(root, task_ref=task_ref, actor=actor, note=note)
+    _echo_touched(root, [touched])
+    if warning:
+        click.echo(warning)
+
+
+@task_group.command("block")
+@click.argument("task_ref")
+@click.option("--actor", required=True)
+@click.option("--note", default=None)
+@click.pass_context
+def task_block(ctx: click.Context, task_ref: str, actor: str, note: str | None) -> None:
+    """Mark a task as blocked."""
+    root = find_repo_root(_cwd_from_context(ctx))
+    touched, warning = set_task_status(root, task_ref=task_ref, status="blocked", actor=actor,
+                                         note=note or "Marked as blocked")
+    _echo_touched(root, [touched])
+    if warning:
+        click.echo(warning)
+
+
+@task_group.command("unblock")
+@click.argument("task_ref")
+@click.option("--actor", required=True)
+@click.option("--note", default=None)
+@click.pass_context
+def task_unblock(ctx: click.Context, task_ref: str, actor: str, note: str | None) -> None:
+    """Unblock a task (set to ready)."""
+    root = find_repo_root(_cwd_from_context(ctx))
+    touched, warning = set_task_status(root, task_ref=task_ref, status="ready", actor=actor,
+                                         note=note or "Unblocked")
+    _echo_touched(root, [touched])
+    if warning:
+        click.echo(warning)
+
+
+@task_group.command("wontfix")
+@click.argument("task_ref")
+@click.option("--actor", required=True)
+@click.option("--note", default=None)
+@click.pass_context
+def task_wontfix(ctx: click.Context, task_ref: str, actor: str, note: str | None) -> None:
+    """Mark a task as wontfix."""
+    root = find_repo_root(_cwd_from_context(ctx))
+    touched, warning = set_task_status(root, task_ref=task_ref, status="wontfix", actor=actor,
+                                         note=note or "Marked as wontfix")
+    _echo_touched(root, [touched])
+    if warning:
+        click.echo(warning)
+
+
+@task_group.command("duplicate")
+@click.argument("task_ref")
+@click.option("--actor", required=True)
+@click.option("--title", default=None, help="New title (defaults to 'Copy of <original>').")
+@click.option("--owner", default=None, help="New owner (defaults to actor).")
+@click.option("--to-epic", "target_epic", default=None, help="Target epic (defaults to source epic).")
+@click.option("--note", default=None)
+@click.pass_context
+def task_duplicate(ctx: click.Context, task_ref: str, actor: str, title: str | None,
+                   owner: str | None, target_epic: str | None, note: str | None) -> None:
+    """Duplicate a task (alias for clone, with simpler defaults)."""
+    root = find_repo_root(_cwd_from_context(ctx))
+    touched = clone_task(root, task_ref=task_ref, actor=actor, title=title,
+                          owner=owner, target_epic=target_epic, note=note)
+    _echo_touched(root, [touched])
+
+
+@task_group.command("delete")
+@click.argument("task_ref")
+@click.option("--actor", required=True)
+@click.option("--force", is_flag=True, help="Skip confirmation prompt.")
+@click.pass_context
+def task_delete(ctx: click.Context, task_ref: str, actor: str, force: bool) -> None:
+    """Delete a task (marks as wontfix with 'deleted' note)."""
+    if not force:
+        click.echo(f"⚠️  This will mark {task_ref} as wontfix (deleted). Use --force to skip this prompt.")
+        if not click.confirm("Continue?"):
+            click.echo("Cancelled.")
+            return
+    root = find_repo_root(_cwd_from_context(ctx))
+    touched, warning = set_task_status(root, task_ref=task_ref, status="wontfix", actor=actor,
+                                         note="Deleted")
+    _echo_touched(root, [touched])
+    if warning:
+        click.echo(warning)
+    click.echo(f"🗑️  {task_ref} marked as deleted (wontfix).")
+
+
+@task_group.command("archive")
+@click.argument("task_ref")
+@click.option("--actor", required=True)
+@click.option("--note", default=None)
+@click.pass_context
+def task_archive(ctx: click.Context, task_ref: str, actor: str, note: str | None) -> None:
+    """Archive a completed task (alias for done, with 'archived' note)."""
+    root = find_repo_root(_cwd_from_context(ctx))
+    touched, warning = complete_task(root, task_ref=task_ref, actor=actor,
+                                      note=note or "Archived")
+    _echo_touched(root, [touched])
+    if warning:
+        click.echo(warning)
+
+
 @task_group.command("edit")
 @click.argument("task_ref")
 @click.option("--title", default=None, help="New task title.")
@@ -11429,17 +11584,87 @@ def issue_note(ctx: click.Context, issue_ref: str, note_text: str, actor: str) -
     _echo_touched(root, [touched])
 
 
-@issue_group.command("set-severity")
+@issue_group.command("open")
 @click.argument("issue_ref")
-@click.argument("severity", type=click.Choice(ISSUE_SEVERITIES, case_sensitive=False))
 @click.option("--actor", required=True)
 @click.option("--note", default=None)
 @click.pass_context
-def issue_set_severity_cmd(ctx: click.Context, issue_ref: str, severity: str, actor: str,
-                            note: str | None) -> None:
-    """Set severity for an issue (alias for issue set-severity)."""
+def issue_open(ctx: click.Context, issue_ref: str, actor: str, note: str | None) -> None:
+    """Mark an issue as open (alias for issue reopen)."""
     root = find_repo_root(_cwd_from_context(ctx))
-    touched = set_issue_severity(root, issue_ref=issue_ref, severity=severity, actor=actor, note=note)
+    touched = reopen_issue(root, issue_ref=issue_ref, actor=actor, note=note)
+    _echo_touched(root, [touched])
+
+
+@issue_group.command("done")
+@click.argument("issue_ref")
+@click.option("--closer", required=True)
+@click.option("--note", required=True)
+@click.pass_context
+def issue_done(ctx: click.Context, issue_ref: str, closer: str, note: str) -> None:
+    """Mark an issue as done (alias for issue close --status done)."""
+    root = find_repo_root(_cwd_from_context(ctx))
+    touched = close_issue(root, raw_id=issue_ref, closer=closer, status="done", note=note)
+    _echo_touched(root, [touched])
+
+
+@issue_group.command("wontfix")
+@click.argument("issue_ref")
+@click.option("--closer", required=True)
+@click.option("--note", required=True)
+@click.pass_context
+def issue_wontfix(ctx: click.Context, issue_ref: str, closer: str, note: str) -> None:
+    """Mark an issue as wontfix (alias for issue close --status wontfix)."""
+    root = find_repo_root(_cwd_from_context(ctx))
+    touched = close_issue(root, raw_id=issue_ref, closer=closer, status="wontfix", note=note)
+    _echo_touched(root, [touched])
+
+
+@issue_group.command("duplicate")
+@click.argument("issue_ref")
+@click.option("--actor", required=True)
+@click.option("--title", default=None, help="New title (defaults to 'Copy of <original>').")
+@click.option("--owner", default=None, help="New owner (defaults to actor).")
+@click.option("--to-epic", "target_epic", default=None, help="Target epic (defaults to source epic).")
+@click.option("--note", default=None)
+@click.pass_context
+def issue_duplicate(ctx: click.Context, issue_ref: str, actor: str, title: str | None,
+                     owner: str | None, target_epic: str | None, note: str | None) -> None:
+    """Duplicate an issue (alias for clone, with simpler defaults)."""
+    root = find_repo_root(_cwd_from_context(ctx))
+    touched = clone_issue(root, issue_ref=issue_ref, actor=actor, title=title,
+                           owner=owner, target_epic=target_epic, note=note)
+    _echo_touched(root, [touched])
+
+
+@issue_group.command("delete")
+@click.argument("issue_ref")
+@click.option("--closer", required=True)
+@click.option("--force", is_flag=True, help="Skip confirmation prompt.")
+@click.pass_context
+def issue_delete(ctx: click.Context, issue_ref: str, closer: str, force: bool) -> None:
+    """Delete an issue (marks as wontfix with 'deleted' note)."""
+    if not force:
+        click.echo(f"⚠️  This will mark {issue_ref} as wontfix (deleted). Use --force to skip this prompt.")
+        if not click.confirm("Continue?"):
+            click.echo("Cancelled.")
+            return
+    root = find_repo_root(_cwd_from_context(ctx))
+    touched = close_issue(root, raw_id=issue_ref, closer=closer, status="wontfix", note="Deleted")
+    _echo_touched(root, [touched])
+    click.echo(f"🗑️  {issue_ref} marked as deleted (wontfix).")
+
+
+@issue_group.command("assign")
+@click.argument("issue_ref")
+@click.argument("owner")
+@click.option("--actor", required=True)
+@click.option("--note", default=None)
+@click.pass_context
+def issue_assign_cmd(ctx: click.Context, issue_ref: str, owner: str, actor: str, note: str | None) -> None:
+    """Assign an issue to an owner (simpler alias for issue bulk-assign with one issue)."""
+    root = find_repo_root(_cwd_from_context(ctx))
+    touched = assign_issue(root, issue_ref=issue_ref, owner=owner, actor=actor, note=note)
     _echo_touched(root, [touched])
 
 
@@ -11929,6 +12154,44 @@ def milestone_bulk_add(
     if touched:
         _echo_touched(root, touched)
         click.echo(f"\nCreated {len(touched)}/{len(specs)} milestones.")
+
+
+@milestone_group.command("quick-add")
+@click.option("--epic", required=True)
+@click.option("--title", required=True)
+@click.option("--date", "milestone_date", required=True)
+@click.pass_context
+def milestone_quick_add(ctx: click.Context, epic: str, title: str, milestone_date: str) -> None:
+    """Quickly add a milestone with minimal required options."""
+    root = find_repo_root(_cwd_from_context(ctx))
+    touched = add_milestone(root, epic=epic, title=title, milestone_date=milestone_date)
+    _echo_touched(root, [touched])
+
+
+@milestone_group.command("done")
+@click.argument("milestone_ref")
+@click.option("--actor", required=True)
+@click.option("--note", default=None)
+@click.pass_context
+def milestone_done(ctx: click.Context, milestone_ref: str, actor: str, note: str | None) -> None:
+    """Mark a milestone as done."""
+    root = find_repo_root(_cwd_from_context(ctx))
+    touched = set_milestone_status(root, milestone_ref=milestone_ref, status="done",
+                                     actor=actor, note=note)
+    _echo_touched(root, [touched])
+
+
+@milestone_group.command("start")
+@click.argument("milestone_ref")
+@click.option("--actor", required=True)
+@click.option("--note", default=None)
+@click.pass_context
+def milestone_start(ctx: click.Context, milestone_ref: str, actor: str, note: str | None) -> None:
+    """Mark a milestone as in progress."""
+    root = find_repo_root(_cwd_from_context(ctx))
+    touched = set_milestone_status(root, milestone_ref=milestone_ref, status="in_progress",
+                                     actor=actor, note=note)
+    _echo_touched(root, [touched])
 
 
 @milestone_group.command("show")
