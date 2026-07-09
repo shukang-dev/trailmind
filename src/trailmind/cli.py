@@ -11049,6 +11049,393 @@ def task_bulk_status(ctx: click.Context, task_refs: tuple[str, ...], status: str
         click.echo(f"\nSet {len(touched)} task(s) to {status!r}")
 
 
+@task_group.command("bulk-priority")
+@click.argument("task_refs", nargs=-1)
+@click.option("--priority", required=True, type=click.Choice(TASK_PRIORITIES, case_sensitive=False),
+              help="New priority.")
+@click.option("--actor", required=True)
+@click.option("--from-file", "from_file", default=None,
+              help="Read task IDs from file (one per line), or '-' for stdin.")
+@click.option("--dry-run", is_flag=True, help="Preview without applying.")
+@click.pass_context
+def task_bulk_priority(ctx: click.Context, task_refs: tuple[str, ...], priority: str,
+                        actor: str, from_file: str | None, dry_run: bool) -> None:
+    """Bulk-set priority on multiple tasks."""
+    root = find_repo_root(_cwd_from_context(ctx))
+    refs = list(task_refs)
+    if from_file:
+        refs.extend(_read_ids_from_file(from_file))
+    if not refs:
+        raise TrailmindError("no task IDs provided")
+
+    if dry_run:
+        click.echo(f"[DRY RUN] Would set {len(refs)} task(s) to {priority!r} priority:")
+        for r in refs:
+            click.echo(f"  - {r}")
+        return
+
+    touched = []
+    for task_ref in refs:
+        try:
+            path = set_task_priority(root, task_ref=task_ref, priority=priority,
+                                      actor=actor, note=f"Bulk set to {priority}")
+            touched.append(path)
+        except Exception as exc:
+            click.echo(f"  ⚠ {task_ref}: {exc}", err=True)
+    if touched:
+        _echo_touched(root, touched)
+        click.echo(f"\nSet {len(touched)} task(s) to {priority!r} priority")
+
+
+@task_group.command("bulk-due")
+@click.argument("task_refs", nargs=-1)
+@click.option("--due", required=True, help="Due date YYYY-MM-DD, or empty string to clear.")
+@click.option("--actor", required=True)
+@click.option("--from-file", "from_file", default=None,
+              help="Read task IDs from file (one per line), or '-' for stdin.")
+@click.option("--dry-run", is_flag=True, help="Preview without applying.")
+@click.pass_context
+def task_bulk_due(ctx: click.Context, task_refs: tuple[str, ...], due: str,
+                   actor: str, from_file: str | None, dry_run: bool) -> None:
+    """Bulk-set due date on multiple tasks."""
+    root = find_repo_root(_cwd_from_context(ctx))
+    refs = list(task_refs)
+    if from_file:
+        refs.extend(_read_ids_from_file(from_file))
+    if not refs:
+        raise TrailmindError("no task IDs provided")
+
+    due_date = None if due == "" else due
+
+    if dry_run:
+        click.echo(f"[DRY RUN] Would set due date to {due!r} for {len(refs)} task(s):")
+        for r in refs:
+            click.echo(f"  - {r}")
+        return
+
+    touched = []
+    for task_ref in refs:
+        try:
+            path = set_task_due(root, task_ref=task_ref, due_date=due_date, actor=actor,
+                                 note=f"Bulk set due to {due}")
+            touched.append(path)
+        except Exception as exc:
+            click.echo(f"  ⚠ {task_ref}: {exc}", err=True)
+    if touched:
+        _echo_touched(root, touched)
+        click.echo(f"\nSet due date on {len(touched)} task(s)")
+
+
+@task_group.command("bulk-owner")
+@click.argument("task_refs", nargs=-1)
+@click.option("--owner", required=True, help="New owner.")
+@click.option("--actor", required=True)
+@click.option("--from-file", "from_file", default=None,
+              help="Read task IDs from file (one per line), or '-' for stdin.")
+@click.option("--dry-run", is_flag=True, help="Preview without applying.")
+@click.pass_context
+def task_bulk_owner(ctx: click.Context, task_refs: tuple[str, ...], owner: str,
+                     actor: str, from_file: str | None, dry_run: bool) -> None:
+    """Bulk-assign multiple tasks to an owner."""
+    root = find_repo_root(_cwd_from_context(ctx))
+    refs = list(task_refs)
+    if from_file:
+        refs.extend(_read_ids_from_file(from_file))
+    if not refs:
+        raise TrailmindError("no task IDs provided")
+
+    if dry_run:
+        click.echo(f"[DRY RUN] Would assign {len(refs)} task(s) to @{owner}:")
+        for r in refs:
+            click.echo(f"  - {r}")
+        return
+
+    touched = []
+    for task_ref in refs:
+        try:
+            path = assign_task(root, task_ref=task_ref, owner=owner, actor=actor,
+                                note=f"Bulk assigned to @{owner}")
+            touched.append(path)
+        except Exception as exc:
+            click.echo(f"  ⚠ {task_ref}: {exc}", err=True)
+    if touched:
+        _echo_touched(root, touched)
+        click.echo(f"\nAssigned {len(touched)} task(s) to @{owner}")
+
+
+@task_group.command("bulk-tag")
+@click.argument("task_refs", nargs=-1)
+@click.option("--tag", required=True, help="Tag to add.")
+@click.option("--actor", required=True)
+@click.option("--from-file", "from_file", default=None,
+              help="Read task IDs from file (one per line), or '-' for stdin.")
+@click.option("--dry-run", is_flag=True, help="Preview without applying.")
+@click.pass_context
+def task_bulk_tag(ctx: click.Context, task_refs: tuple[str, ...], tag: str,
+                   actor: str, from_file: str | None, dry_run: bool) -> None:
+    """Bulk-add a tag to multiple tasks."""
+    root = find_repo_root(_cwd_from_context(ctx))
+    refs = list(task_refs)
+    if from_file:
+        refs.extend(_read_ids_from_file(from_file))
+    if not refs:
+        raise TrailmindError("no task IDs provided")
+
+    if dry_run:
+        click.echo(f"[DRY RUN] Would add tag {tag!r} to {len(refs)} task(s):")
+        for r in refs:
+            click.echo(f"  - {r}")
+        return
+
+    touched = []
+    for task_ref in refs:
+        try:
+            path = add_task_tag(root, task_ref=task_ref, tag=tag, actor=actor)
+            touched.append(path)
+        except Exception as exc:
+            click.echo(f"  ⚠ {task_ref}: {exc}", err=True)
+    if touched:
+        _echo_touched(root, touched)
+        click.echo(f"\nAdded tag {tag!r} to {len(touched)} task(s)")
+
+
+@task_group.command("compare")
+@click.argument("task_ref_a")
+@click.argument("task_ref_b")
+@click.option("--json", "json_output", is_flag=True, help="Print structured JSON.")
+@click.pass_context
+def task_compare(ctx: click.Context, task_ref_a: str, task_ref_b: str, json_output: bool) -> None:
+    """Compare two tasks side by side."""
+    from trailmind.resolver import resolve_entity
+    from trailmind.log import read_entity_user_facing
+
+    root = find_repo_root(_cwd_from_context(ctx))
+    path_a = resolve_entity(root, raw=task_ref_a, entity="T")
+    path_b = resolve_entity(root, raw=task_ref_b, entity="T")
+    fm_a, _body_a = read_entity_user_facing(path_a, label="task")
+    fm_b, _body_b = read_entity_user_facing(path_b, label="task")
+
+    fields = ["id", "title", "status", "priority", "owner", "due", "created", "epic"]
+    compare_fields = []
+    for field in fields:
+        val_a = fm_a.get(field, "")
+        val_b = fm_b.get(field, "")
+        same = val_a == val_b
+        compare_fields.append({"field": field, "a": str(val_a), "b": str(val_b), "same": same})
+
+    # Compare list fields
+    list_fields = ["tags", "deliverables", "depends_on", "code_paths", "known_issues"]
+    for field in list_fields:
+        val_a = list(fm_a.get(field) or [])
+        val_b = list(fm_b.get(field) or [])
+        same = val_a == val_b
+        compare_fields.append({"field": field, "a": ", ".join(str(v) for v in val_a),
+                               "b": ", ".join(str(v) for v in val_b), "same": same})
+
+    if json_output:
+        click.echo(json.dumps(compare_fields, ensure_ascii=False, indent=2, default=str))
+        return
+
+    lines = []
+    lines.append(f"📊 Compare: {fm_a.get('id', '')} vs {fm_b.get('id', '')}")
+    lines.append("")
+
+    max_a = max(len(cf["a"]) for cf in compare_fields) if compare_fields else 0
+    for cf in compare_fields:
+        marker = "✅" if cf["same"] else "❌"
+        a_display = cf["a"][:50]
+        b_display = cf["b"][:50]
+        lines.append(f"  {marker} {cf['field']:15s} {a_display:50s} | {b_display}")
+
+    # Summary
+    same_count = sum(1 for cf in compare_fields if cf["same"])
+    diff_count = len(compare_fields) - same_count
+    lines.append("")
+    lines.append(f"  Summary: {same_count} same, {diff_count} different")
+
+    click.echo("\n".join(lines))
+
+
+@task_group.command("matrix")
+@click.option("--epic", "epic_ref", default=None, help="Filter by epic.")
+@click.option("--project", "project_ref", default=None, help="Filter by project.")
+@click.option("--json", "json_output", is_flag=True, help="Print structured JSON.")
+@click.pass_context
+def task_matrix(ctx: click.Context, epic_ref: str | None, project_ref: str | None,
+                 json_output: bool) -> None:
+    """Show a workload matrix: owners × priorities."""
+    from collections import defaultdict
+
+    root = find_repo_root(_cwd_from_context(ctx))
+    all_tasks = list_tasks(root, epic_ref=epic_ref, project_ref=project_ref)
+    active = [t for t in all_tasks if t.get("status") not in ("done", "wontfix")]
+
+    # Build matrix: owner × priority
+    matrix: dict[str, dict[str, int]] = defaultdict(lambda: defaultdict(int))
+    owners = set()
+    priorities = ["critical", "high", "medium", "low"]
+
+    for t in active:
+        owner = t.get("owner") or "unassigned"
+        pri = t.get("priority", "unspecified")
+        matrix[owner][pri] += 1
+        owners.add(owner)
+
+    sorted_owners = sorted(owners)
+
+    if json_output:
+        data = {
+            owner: {pri: matrix[owner].get(pri, 0) for pri in priorities + ["unspecified"]}
+            for owner in sorted_owners
+        }
+        data["_totals"] = {owner: sum(matrix[owner].values()) for owner in sorted_owners}
+        click.echo(json.dumps(data, ensure_ascii=False, indent=2, default=str))
+        return
+
+    lines = []
+    lines.append(f"📊 Workload Matrix ({len(active)} active tasks, {len(sorted_owners)} owners)")
+    lines.append("")
+
+    # Header
+    header = f"  {'Owner':15s}"
+    for pri in priorities:
+        header += f" {pri:>10s}"
+    header += f" {'unassigned':>10s}"
+    header += f" {'Total':>7s}"
+    lines.append(header)
+    lines.append(f"  {'─' * 15}" + "".join(f" {'─' * 10}" for _ in range(len(priorities) + 2)) + f" {'─' * 7}")
+
+    # Rows
+    for owner in sorted_owners:
+        row = f"  @{owner:14s}"
+        total = 0
+        for pri in priorities:
+            count = matrix[owner].get(pri, 0)
+            total += count
+            row += f" {count:10d}"
+        unassigned = matrix[owner].get("unspecified", 0)
+        total += unassigned
+        row += f" {unassigned:10d}"
+        row += f" {total:7d}"
+        lines.append(row)
+
+    # Totals row
+    lines.append(f"  {'─' * 15}" + "".join(f" {'─' * 10}" for _ in range(len(priorities) + 2)) + f" {'─' * 7}")
+    total_row = f"  {'Total':15s}"
+    grand_total = 0
+    for pri in priorities:
+        col_total = sum(matrix[o].get(pri, 0) for o in sorted_owners)
+        grand_total += col_total
+        total_row += f" {col_total:10d}"
+    unassigned_total = sum(matrix[o].get("unspecified", 0) for o in sorted_owners)
+    grand_total += unassigned_total
+    total_row += f" {unassigned_total:10d}"
+    total_row += f" {grand_total:7d}"
+    lines.append(total_row)
+
+    click.echo("\n".join(lines))
+
+
+@task_group.command("graph")
+@click.option("--epic", "epic_ref", default=None, help="Filter by epic.")
+@click.option("--project", "project_ref", default=None, help="Filter by project.")
+@click.option("--owner", default=None, help="Filter by owner.")
+@click.option("--direction", default="down",
+              type=click.Choice(("up", "down"), case_sensitive=False),
+              help="Dependency direction: 'down' (what depends on what) or 'up' (what blocks what).")
+@click.option("--json", "json_output", is_flag=True, help="Print structured JSON.")
+@click.pass_context
+def task_graph(ctx: click.Context, epic_ref: str | None, project_ref: str | None,
+                owner: str | None, direction: str, json_output: bool) -> None:
+    """Show an ASCII dependency graph of tasks."""
+    root = find_repo_root(_cwd_from_context(ctx))
+    all_tasks = list_tasks(root, epic_ref=epic_ref, project_ref=project_ref, owner=owner)
+    active = [t for t in all_tasks if t.get("status") not in ("done", "wontfix")]
+    task_map = {t.get("id", ""): t for t in all_tasks}
+
+    # Build adjacency list
+    # For "down": task → its dependencies (what it needs)
+    # For "up": task → tasks that depend on it (what it blocks)
+    edges: dict[str, list[str]] = {}
+    for t in active:
+        tid = t.get("id", "")
+        deps = t.get("depends_on") or []
+        resolved_deps = []
+        for dep in deps:
+            for dep_tid in task_map:
+                if dep_tid.endswith(dep) or dep in dep_tid:
+                    resolved_deps.append(dep_tid)
+                    break
+
+        if direction == "down":
+            edges[tid] = resolved_deps
+        else:  # up
+            for dep_tid in resolved_deps:
+                if dep_tid not in edges:
+                    edges[dep_tid] = []
+                edges[dep_tid].append(tid)
+            if tid not in edges:
+                edges[tid] = []
+
+    if json_output:
+        data = {
+            "nodes": [{"id": t.get("id", ""), "title": t.get("title", ""),
+                       "status": t.get("status", ""), "priority": t.get("priority", "")}
+                      for t in active],
+            "edges": {k: v for k, v in edges.items()},
+        }
+        click.echo(json.dumps(data, ensure_ascii=False, indent=2, default=str))
+        return
+
+    # Find root nodes (no incoming edges for "down" = no deps; for "up" = nothing depends on them)
+    all_dep_ids = set()
+    for deps in edges.values():
+        all_dep_ids.update(deps)
+    root_nodes = [tid for tid in edges if tid not in all_dep_ids]
+
+    if not root_nodes:
+        root_nodes = list(edges.keys())[:5]
+
+    lines = []
+    lines.append(f"🌐 Dependency Graph ({direction} direction, {len(active)} nodes, {sum(len(v) for v in edges.values())} edges)")
+    lines.append("")
+
+    # Simple tree rendering
+    def render_node(tid: str, prefix: str = "", is_last: bool = True, depth: int = 0, visited: set | None = None) -> None:
+        if visited is None:
+            visited = set()
+        if tid in visited or depth > 5:
+            return
+        visited.add(tid)
+
+        task = task_map.get(tid, {})
+        status_icon = {"done": "✅", "in_progress": "🔧", "blocked": "🚧",
+                      "ready": "⏳", "created": "📝"}.get(task.get("status", ""), "❓")
+        title = task.get("title", tid)
+        pri = f" [{task.get('priority', '').upper()}]" if task.get("priority") else ""
+
+        if depth == 0:
+            lines.append(f"  {status_icon} {tid}{pri}  {title}")
+        else:
+            connector = "└── " if is_last else "├── "
+            lines.append(f"  {prefix}{connector}{status_icon} {tid}{pri}  {title}")
+
+        children = edges.get(tid, [])
+        for i, child in enumerate(children):
+            is_last_child = i == len(children) - 1
+            if depth == 0:
+                child_prefix = "  "
+            else:
+                child_prefix = prefix + ("    " if is_last else "│   ")
+            render_node(child, child_prefix, is_last_child, depth + 1, visited.copy())
+
+    for tid in sorted(root_nodes)[:10]:
+        render_node(tid)
+        lines.append("")
+
+    click.echo("\n".join(lines))
+
+
 @task_group.command("export")
 @click.option("--epic", "epic_ref", default=None, help="Export tasks from a specific epic.")
 @click.option("--project", "project_ref", default=None, help="Export tasks from a specific project.")
@@ -14889,6 +15276,178 @@ def issue_template(ctx: click.Context, template_name: str, epic: str, filer: str
     )
     _echo_touched(root, [touched])
     click.echo(f"📋 Created issue from template '{template_name}': {title}")
+
+
+@issue_group.command("bulk-status")
+@click.argument("issue_refs", nargs=-1)
+@click.option("--status", required=True, type=click.Choice(("open", "done", "wontfix"), case_sensitive=False),
+              help="New status.")
+@click.option("--actor", required=True)
+@click.option("--from-file", "from_file", default=None,
+              help="Read issue IDs from file (one per line), or '-' for stdin.")
+@click.option("--dry-run", is_flag=True, help="Preview without applying.")
+@click.pass_context
+def issue_bulk_status(ctx: click.Context, issue_refs: tuple[str, ...], status: str,
+                       actor: str, from_file: str | None, dry_run: bool) -> None:
+    """Bulk-set status on multiple issues."""
+    root = find_repo_root(_cwd_from_context(ctx))
+    refs = list(issue_refs)
+    if from_file:
+        refs.extend(_read_ids_from_file(from_file))
+    if not refs:
+        raise TrailmindError("no issue IDs provided")
+
+    if dry_run:
+        click.echo(f"[DRY RUN] Would set {len(refs)} issue(s) to {status!r}:")
+        for r in refs:
+            click.echo(f"  - {r}")
+        return
+
+    touched = []
+    for issue_ref in refs:
+        try:
+            if status == "open":
+                path = reopen_issue(root, issue_ref=issue_ref, actor=actor,
+                                     note=f"Bulk set to {status}")
+            else:
+                path = close_issue(root, raw_id=issue_ref, closer=actor,
+                                    status=status, note=f"Bulk set to {status}")
+            touched.append(path)
+        except Exception as exc:
+            click.echo(f"  ⚠ {issue_ref}: {exc}", err=True)
+    if touched:
+        _echo_touched(root, touched)
+        click.echo(f"\nSet {len(touched)} issue(s) to {status!r}")
+
+
+@issue_group.command("bulk-severity")
+@click.argument("issue_refs", nargs=-1)
+@click.option("--severity", required=True, type=click.Choice(ISSUE_SEVERITIES, case_sensitive=False),
+              help="New severity.")
+@click.option("--actor", required=True)
+@click.option("--from-file", "from_file", default=None,
+              help="Read issue IDs from file (one per line), or '-' for stdin.")
+@click.option("--dry-run", is_flag=True, help="Preview without applying.")
+@click.pass_context
+def issue_bulk_severity(ctx: click.Context, issue_refs: tuple[str, ...], severity: str,
+                         actor: str, from_file: str | None, dry_run: bool) -> None:
+    """Bulk-set severity on multiple issues."""
+    root = find_repo_root(_cwd_from_context(ctx))
+    refs = list(issue_refs)
+    if from_file:
+        refs.extend(_read_ids_from_file(from_file))
+    if not refs:
+        raise TrailmindError("no issue IDs provided")
+
+    if dry_run:
+        click.echo(f"[DRY RUN] Would set {len(refs)} issue(s) to {severity!r} severity:")
+        for r in refs:
+            click.echo(f"  - {r}")
+        return
+
+    touched = []
+    for issue_ref in refs:
+        try:
+            path = set_issue_severity(root, issue_ref=issue_ref, severity=severity,
+                                       actor=actor, note=f"Bulk set to {severity}")
+            touched.append(path)
+        except Exception as exc:
+            click.echo(f"  ⚠ {issue_ref}: {exc}", err=True)
+    if touched:
+        _echo_touched(root, touched)
+        click.echo(f"\nSet {len(touched)} issue(s) to {severity!r} severity")
+
+
+@issue_group.command("bulk-owner")
+@click.argument("issue_refs", nargs=-1)
+@click.option("--owner", required=True, help="New owner.")
+@click.option("--actor", required=True)
+@click.option("--from-file", "from_file", default=None,
+              help="Read issue IDs from file (one per line), or '-' for stdin.")
+@click.option("--dry-run", is_flag=True, help="Preview without applying.")
+@click.pass_context
+def issue_bulk_owner(ctx: click.Context, issue_refs: tuple[str, ...], owner: str,
+                      actor: str, from_file: str | None, dry_run: bool) -> None:
+    """Bulk-assign multiple issues to an owner."""
+    root = find_repo_root(_cwd_from_context(ctx))
+    refs = list(issue_refs)
+    if from_file:
+        refs.extend(_read_ids_from_file(from_file))
+    if not refs:
+        raise TrailmindError("no issue IDs provided")
+
+    if dry_run:
+        click.echo(f"[DRY RUN] Would assign {len(refs)} issue(s) to @{owner}:")
+        for r in refs:
+            click.echo(f"  - {r}")
+        return
+
+    touched = []
+    for issue_ref in refs:
+        try:
+            path = assign_issue(root, issue_ref=issue_ref, owner=owner, actor=actor,
+                                 note=f"Bulk assigned to @{owner}")
+            touched.append(path)
+        except Exception as exc:
+            click.echo(f"  ⚠ {issue_ref}: {exc}", err=True)
+    if touched:
+        _echo_touched(root, touched)
+        click.echo(f"\nAssigned {len(touched)} issue(s) to @{owner}")
+
+
+@issue_group.command("compare")
+@click.argument("issue_ref_a")
+@click.argument("issue_ref_b")
+@click.option("--json", "json_output", is_flag=True, help="Print structured JSON.")
+@click.pass_context
+def issue_compare(ctx: click.Context, issue_ref_a: str, issue_ref_b: str, json_output: bool) -> None:
+    """Compare two issues side by side."""
+    from trailmind.resolver import resolve_entity
+    from trailmind.log import read_entity_user_facing
+
+    root = find_repo_root(_cwd_from_context(ctx))
+    path_a = resolve_entity(root, raw=issue_ref_a, entity="I")
+    path_b = resolve_entity(root, raw=issue_ref_b, entity="I")
+    fm_a, _body_a = read_entity_user_facing(path_a, label="issue")
+    fm_b, _body_b = read_entity_user_facing(path_b, label="issue")
+
+    fields = ["id", "title", "status", "severity", "owner", "created", "epic"]
+    compare_fields = []
+    for field in fields:
+        val_a = fm_a.get(field, "")
+        val_b = fm_b.get(field, "")
+        same = val_a == val_b
+        compare_fields.append({"field": field, "a": str(val_a), "b": str(val_b), "same": same})
+
+    # Compare list fields
+    list_fields = ["linked_tasks"]
+    for field in list_fields:
+        val_a = list(fm_a.get(field) or [])
+        val_b = list(fm_b.get(field) or [])
+        same = val_a == val_b
+        compare_fields.append({"field": field, "a": ", ".join(str(v) for v in val_a),
+                               "b": ", ".join(str(v) for v in val_b), "same": same})
+
+    if json_output:
+        click.echo(json.dumps(compare_fields, ensure_ascii=False, indent=2, default=str))
+        return
+
+    lines = []
+    lines.append(f"📊 Compare: {fm_a.get('id', '')} vs {fm_b.get('id', '')}")
+    lines.append("")
+
+    for cf in compare_fields:
+        marker = "✅" if cf["same"] else "❌"
+        a_display = cf["a"][:50]
+        b_display = cf["b"][:50]
+        lines.append(f"  {marker} {cf['field']:15s} {a_display:50s} | {b_display}")
+
+    same_count = sum(1 for cf in compare_fields if cf["same"])
+    diff_count = len(compare_fields) - same_count
+    lines.append("")
+    lines.append(f"  Summary: {same_count} same, {diff_count} different")
+
+    click.echo("\n".join(lines))
 
 
 @issue_group.command("export")
